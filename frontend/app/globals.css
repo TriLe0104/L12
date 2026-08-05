@@ -1,0 +1,2604 @@
+:root {
+  /* surfaces: cool shop-floor grey, never flat */
+  --ink: #0d1117;
+  --ink-soft: #1b232d;
+  --steel: #5a6a7a;
+  --steel-soft: #8797a6;
+  --paper: #e9edf0;
+  --panel: #ffffff;
+  --rule: rgba(13, 17, 23, 0.14);
+  --rule-soft: rgba(13, 17, 23, 0.07);
+
+  /* accents: TVM gold + brushed silver */
+  --signal: #f5a800;
+  --silver: #c9ced3;
+  --go: #0b8457;
+  --stop: #c81e2b;
+
+  /* status tones */
+  --tone-slate: #64748b;
+  --tone-cyan: #0e7490;
+  --tone-blue: #1d4ed8;
+  --tone-teal: #0f766e;
+  --tone-amber: #b45309;
+  --tone-red: #c81e2b;
+  --tone-green: #0b8457;
+  --tone-graphite: #3f4b57;
+  --tone-orange: #c2410c;
+
+  --rail-w: 14.5rem;
+  --card-min: 18rem;
+  --radius: 4px;
+  --shadow-card: 0 1px 0 rgba(13, 17, 23, 0.06), 0 6px 18px -12px rgba(13, 17, 23, 0.5);
+  --shadow-lift: 0 1px 0 rgba(13, 17, 23, 0.05), 0 16px 30px -18px rgba(13, 17, 23, 0.6);
+  --shadow-drag: 0 10px 20px -10px rgba(13, 17, 23, 0.4), 0 34px 60px -26px rgba(13, 17, 23, 0.7);
+
+  /* motion: one decelerating curve for everything that moves, so the app
+     feels like a single object rather than a pile of components */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 130ms;
+  --t-mid: 220ms;
+  --t-slow: 320ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Everything below is sized in rem, so the whole UI shrinks with the window
+   instead of overflowing it. */
+html {
+  font-size: clamp(13px, 0.42vw + 12.3px, 16px);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
+}
+
+/* Soft light with a few wide, low-contrast blooms — no pattern, nothing to
+   read as texture behind the cards. Fixed so it stays put while the page moves. */
+body {
+  font-family: var(--font-ui), "Segoe UI", sans-serif;
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(60rem 42rem at 88% -14%, rgba(245, 168, 0, 0.1), transparent 62%),
+    radial-gradient(52rem 40rem at 2% 6%, rgba(84, 124, 186, 0.09), transparent 64%),
+    radial-gradient(58rem 40rem at 55% 112%, rgba(90, 106, 122, 0.12), transparent 62%),
+    linear-gradient(178deg, #f8fafb 0%, #eff2f6 48%, #e8ecf1 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------------- app shell ---------------- */
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+  min-height: 100vh;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 22px 16px 16px;
+  color: #cdd6df;
+  background:
+    radial-gradient(420px 220px at 20% 0%, rgba(245, 168, 0, 0.14), transparent 70%),
+    linear-gradient(180deg, #0c0c0d 0%, #070708 62%, #000 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 8px 20px;
+}
+
+.brand-sub {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--steel-soft);
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  color: #b9c4ce;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  border-left: 2px solid transparent;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+}
+
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.055);
+  color: #fff;
+  transform: translateX(2px);
+}
+
+.nav-link[data-active="true"] {
+  background: rgba(255, 255, 255, 0.09);
+  border-left-color: var(--signal);
+  color: #fff;
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 8px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rail-user {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.rail-user b {
+  display: block;
+  font-size: 13px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-user small {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel-soft);
+}
+
+.icon-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #b9c4ce;
+  border-radius: var(--radius);
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.main {
+  min-width: 0;
+  overflow-x: clip;
+  padding: 1.6rem clamp(0.9rem, 1.8vw, 1.9rem) 3.75rem;
+}
+
+/* ---------------- page header ---------------- */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.page-title {
+  margin: 0;
+  font-size: clamp(1.35rem, 1.1rem + 0.8vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+.page-sub {
+  margin: 0.375rem 0 0;
+  color: var(--steel);
+  font-size: 0.84rem;
+  text-wrap: pretty;
+}
+
+.head-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* search boxes and selects give up width before they push the layout */
+.head-tools .field {
+  flex: 1 1 9rem;
+  min-width: 7rem;
+  max-width: 15rem;
+}
+
+/* ---------------- controls ---------------- */
+.field,
+.btn {
+  height: 2.15rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 0 0.625rem;
+  font-size: 0.82rem;
+  max-width: 100%;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.btn {
+  white-space: nowrap;
+}
+
+.field:focus,
+.btn:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.22);
+}
+
+.btn {
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: rgba(13, 17, 23, 0.32);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -14px rgba(13, 17, 23, 0.9);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+  transition-duration: 60ms;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+/* Must carry :not(:disabled) to outrank .btn:hover:not(:disabled) above —
+   without it that generic rule is the more specific one and repaints the dark
+   fill white, which swallows the white label. Hover is an outer highlight only:
+   a bright rim on the button's own edge plus a soft halo, distinct from the
+   gold focus ring. The fill never animates, so the label cannot wash out
+   part-way through the transition. */
+.btn-primary:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 0 0 3px rgba(13, 17, 23, 0.2),
+    0 10px 22px -14px rgba(0, 0, 0, 0.95);
+}
+
+.btn-danger {
+  color: var(--stop);
+  border-color: rgba(200, 30, 43, 0.35);
+  background: rgba(200, 30, 43, 0.05);
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.seg button {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--steel);
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.seg button[data-active="true"] {
+  background: var(--ink);
+  color: #fff;
+}
+
+/* stepped card-size control; a sibling of .seg, so it borrows its metrics */
+.zoom {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.86);
+  flex-shrink: 0;
+}
+
+.zoom button {
+  width: 2rem;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.zoom button:hover,
+.zoom button:focus-visible {
+  background: var(--ink);
+  color: #fff;
+}
+
+.zoom button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(245, 168, 0, 0.55);
+}
+
+/* after the hover/focus rules: a button at the end of the range stays focusable
+   and keeps its focus ring, but must not look pressable */
+.zoom button[aria-disabled="true"] {
+  background: transparent;
+  color: var(--steel-soft);
+  cursor: default;
+}
+
+.zoom-level {
+  display: grid;
+  place-items: center;
+  min-width: 2.5rem;
+  padding: 0 0.25rem;
+  border-inline: 1px solid var(--rule-soft);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--steel);
+}
+
+/* ---------------- job card (spreadsheet replica) ---------------- */
+.jobcard {
+  --tone: var(--tone-slate);
+  /* the card reacts to the width of its column, not the window, so a kanban
+     card and a full-width board card each pick sensible type and spacing */
+  container-type: inline-size;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.jobcard-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, #f4f7f9, #e9eef2);
+}
+
+.jobcard-job {
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.prio {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 2px;
+  color: #fff;
+  background: var(--prio, var(--tone-slate));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.prio[data-priority="hot"] {
+  animation: prio-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes prio-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 30, 43, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 0.22rem rgba(200, 30, 43, 0);
+  }
+}
+
+/* ---------------- per-order lock ---------------- */
+/* Same badge metrics as .prio, but outlined instead of filled: a locked card
+   should read at a glance without competing with the priority tag. */
+.lock-tag,
+.lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  background: rgba(13, 17, 23, 0.04);
+  color: var(--steel);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lock-tag {
+  border-color: color-mix(in srgb, var(--tone-graphite) 45%, transparent);
+  color: var(--tone-graphite);
+}
+
+.lock-glyph {
+  width: 0.62em;
+  height: 0.62em;
+  flex: none;
+}
+
+.lock-toggle {
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+
+.lock-toggle:hover:not(:disabled),
+.lock-toggle:focus-visible {
+  border-color: var(--tone-graphite);
+  color: var(--ink);
+}
+
+.lock-toggle[data-locked="true"] {
+  border-color: var(--tone-graphite);
+  background: var(--tone-graphite);
+  color: #fff;
+}
+
+.lock-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* the card itself: a hairline instead of a colour, so the board stays calm */
+.jobcard[data-locked="true"] {
+  border-color: color-mix(in srgb, var(--tone-graphite) 40%, var(--rule));
+  background-image: linear-gradient(180deg, rgba(63, 75, 87, 0.05), transparent 3.2rem);
+}
+
+.chip[data-locked="true"] {
+  opacity: 0.92;
+}
+
+.chip-lock {
+  display: inline-flex;
+  align-items: center;
+  color: var(--steel);
+  flex: none;
+}
+
+.chip-lock .lock-glyph {
+  width: 0.52rem;
+  height: 0.52rem;
+}
+
+.lock-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--tone-graphite);
+  border-radius: var(--radius);
+  background: rgba(63, 75, 87, 0.06);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.lock-note .lock-glyph {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--tone-graphite);
+}
+
+.chip-prio {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--prio, var(--tone-slate));
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.jobcard-due {
+  margin-left: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--go);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.jobcard-due[data-late="true"] {
+  color: var(--stop);
+}
+
+.jobcard-body {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem 0.75rem;
+  min-width: 0;
+}
+
+.jobcard-thumb {
+  width: 4.5rem;
+  flex: 0 0 4.5rem;
+  height: 4.5rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: 3px;
+  background:
+    linear-gradient(135deg, #dfe5ea 0%, #c9d2da 50%, #aeb9c4 100%);
+  display: grid;
+  place-items: center;
+  color: var(--steel);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  align-self: flex-start;
+  object-fit: cover;
+}
+
+/* with a photo the slot is a button, so it can be tabbed to and opened without
+   dragging the card or opening the drawer */
+button.jobcard-thumb {
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+button.jobcard-thumb > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+button.jobcard-thumb:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.55);
+}
+
+.spec {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  /* both tracks may shrink, so a long MATERIAL string wraps instead of
+     widening the card past its container */
+  grid-template-columns: minmax(3.4rem, 5.25rem) minmax(0, 1fr);
+  border-top: 1px solid var(--rule-soft);
+}
+
+.spec dt,
+.spec dd {
+  margin: 0;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.spec dt {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border-right: 1px solid var(--rule-soft);
+  background: rgba(13, 17, 23, 0.022);
+  /* break-word, not anywhere: split a word only when it genuinely can't fit */
+  overflow-wrap: break-word;
+}
+
+.spec dd {
+  font-weight: 600;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+/* narrow column (kanban, small screens): tighten type so values keep whole words */
+@container (max-width: 21rem) {
+  .spec {
+    grid-template-columns: minmax(2.6rem, 4.7rem) minmax(0, 1fr);
+  }
+  .spec dt,
+  .spec dd {
+    padding: 0.2rem 0.35rem;
+    font-size: 0.7rem;
+  }
+  .spec dt {
+    font-size: 0.61rem;
+    letter-spacing: 0.01em;
+  }
+  .jobcard-body {
+    gap: 0.45rem;
+    padding: 0.5rem 0.5rem 0.55rem;
+  }
+  .jobcard-head,
+  .jobcard-note,
+  .jobcard-status {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  .jobcard-thumb,
+  .thumb-drop {
+    width: 3.4rem;
+    flex-basis: 3.4rem;
+    height: 3.4rem;
+  }
+  .jobcard-job {
+    font-size: 1.05rem;
+  }
+  .jobcard-due {
+    font-size: 0.72rem;
+  }
+}
+
+/* the smallest zoom step of the all-cards view: below this the label track was
+   claiming more room than the values it labels, so give the values the width */
+@container (max-width: 15rem) {
+  .spec {
+    grid-template-columns: minmax(2.4rem, 3.9rem) minmax(0, 1fr);
+  }
+  .spec dt {
+    font-size: 0.55rem;
+  }
+  .spec dd {
+    font-size: 0.67rem;
+  }
+  .jobcard-thumb,
+  .thumb-drop {
+    width: 2.8rem;
+    flex-basis: 2.8rem;
+    height: 2.8rem;
+  }
+}
+
+/* roomy column: let the labels breathe */
+@container (min-width: 30rem) {
+  .spec {
+    grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
+  }
+}
+
+/* the drawer card is narrow enough to trip the compact rules above, but its
+   values are short — buy the labels a track wide enough for INSPECTION */
+.drawer .spec {
+  grid-template-columns: minmax(4.8rem, 6.4rem) minmax(0, 1fr);
+}
+
+.drawer .spec dt {
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+}
+
+.spec dd.mono {
+  font-family: var(--font-mono), monospace;
+  letter-spacing: -0.01em;
+}
+
+.spec dd.warn {
+  color: var(--tone-red);
+}
+
+.spec dd.go {
+  color: var(--go);
+}
+
+.jobcard-note {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--steel);
+  background: rgba(13, 17, 23, 0.03);
+  border-top: 1px solid var(--rule-soft);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.jobcard-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  /* one row, always: the label gives up size before the avatar gives up its
+     place, so the footer never becomes two lines */
+  flex-wrap: nowrap;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--tone) 10%, #fff);
+}
+
+.jobcard-status b {
+  /* sized off the card, not the window: UNDER INSPECTION is the longest label
+     the shop uses and it has to clear the avatar even at the smallest zoom */
+  font-size: clamp(0.5rem, 4.2cqi + 0.05rem, 0.72rem);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--tone);
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.jobcard-status span {
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel);
+  font-weight: 700;
+  white-space: nowrap;
+  flex: none;
+}
+
+.jobcard-status .avatar {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* narrow cards (kanban columns, the drawer, the smaller zoom steps): the
+   "Status:" prefix is the part that can give way, so the label keeps its size */
+@container (max-width: 21rem) {
+  .jobcard-status span {
+    font-size: 0.56rem;
+    letter-spacing: 0.08em;
+  }
+}
+
+/* tiny cards (smallest zoom step): the fixed chrome around the label — prefix,
+   gaps, avatar — is what runs it out of room, so shrink that too */
+@container (max-width: 15rem) {
+  .jobcard-status {
+    gap: 0.3rem;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+  .jobcard-status span {
+    font-size: 0.5rem;
+    letter-spacing: 0.05em;
+  }
+  .jobcard-status .avatar {
+    width: 1.4rem;
+    height: 1.4rem;
+    flex-basis: 1.4rem;
+    font-size: 0.52rem;
+  }
+  /* lighter chrome here buys the label back some size, so it climbs faster */
+  .jobcard-status b {
+    font-size: clamp(0.5rem, 9.1cqi - 0.52rem, 0.72rem);
+  }
+}
+
+/* ---------------- editable job card ---------------- */
+.jobcard-edit .jobcard-head {
+  gap: 8px;
+}
+
+.jobcard-edit .spec dd {
+  padding: 2px 4px;
+}
+
+.jobcard-edit .jobcard-note {
+  padding: 4px 8px;
+}
+
+.jobcard-edit .jobcard-status {
+  gap: 6px;
+}
+
+/* owner row: the badge sits in front of the picker, so the person reads at a
+   glance the way they do in the card footer */
+.owner-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.owner-pick .avatar {
+  flex: none;
+  margin-top: 0;
+}
+
+.owner-pick .cell-input {
+  flex: 1 1 auto;
+}
+
+.cell-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  padding: 0.125rem 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: inherit;
+  text-overflow: ellipsis;
+}
+
+.cell-input:hover:not(:disabled) {
+  border-color: var(--rule-soft);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.cell-input:focus {
+  outline: none;
+  border-color: var(--ink);
+  background: #fff;
+}
+
+.cell-input:disabled {
+  color: inherit;
+  opacity: 1;
+}
+
+.cell-input::placeholder {
+  color: var(--steel-soft);
+  font-weight: 500;
+}
+
+.cell-input.mono {
+  font-family: var(--font-mono), monospace;
+}
+
+.cell-input.warn {
+  color: var(--tone-red);
+}
+
+.cell-input.go {
+  color: var(--go);
+}
+
+.job-input {
+  flex: 1 1 5rem;
+  min-width: 3.5rem;
+  max-width: 8rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  padding: 0.06rem 0.25rem;
+}
+
+.due-edit {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--go);
+}
+
+.due-edit .cell-input {
+  width: 8.25rem;
+  min-width: 6.5rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  color: var(--go);
+}
+
+.status-input {
+  /* matches the read-only card's status so the drawer doesn't jump on Edit */
+  font-size: clamp(0.5rem, 4.2cqi + 0.05rem, 0.72rem);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--tone);
+  width: auto;
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.jobcard-note .cell-input {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--steel);
+}
+
+.jobcard-note.error .cell-input,
+.jobcard-note.error {
+  color: var(--stop);
+  font-weight: 600;
+}
+
+.thumb-drop {
+  position: relative;
+  width: 5.25rem;
+  flex: 0 0 5.25rem;
+  height: 5.25rem;
+  align-self: flex-start;
+  border: 1px dashed rgba(13, 17, 23, 0.28);
+  border-radius: 3px;
+  background: linear-gradient(135deg, #eef2f5, #dee5eb);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 130ms ease, background 130ms ease;
+}
+
+.thumb-drop:hover,
+.thumb-drop[data-dragover="true"] {
+  border-color: var(--ink);
+  background: linear-gradient(135deg, #fff, #e7edf2);
+}
+
+.thumb-drop span {
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--steel);
+}
+
+.thumb-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-clear,
+.thumb-expand {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(13, 17, 23, 0.72);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* view full size, in the corner opposite the remove button */
+.thumb-expand {
+  right: auto;
+  left: 2px;
+  font-size: 11px;
+  cursor: zoom-in;
+}
+
+.thumb-clear:hover,
+.thumb-expand:hover,
+.thumb-clear:focus-visible,
+.thumb-expand:focus-visible {
+  background: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 168, 0, 0.65);
+}
+
+/* ---------------- kanban ---------------- */
+.kanban {
+  display: grid;
+  /* four columns while they fit, then two, then one -- never a sideways scroll */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+  padding-bottom: 0.625rem;
+  min-width: 0;
+}
+
+.kcol {
+  --tone: var(--tone-slate);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--tone);
+  border-radius: var(--radius);
+  min-height: 13.75rem;
+  min-width: 0;
+  transition: background var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease),
+    opacity var(--t-mid) var(--ease);
+}
+
+/* columns recede a little while a card is in the air, so the target stands out */
+.kanban[data-dragging="true"] .kcol {
+  opacity: 0.72;
+}
+
+.kanban[data-dragging="true"] .kcol[data-dragover="true"] {
+  opacity: 1;
+  background: color-mix(in srgb, var(--tone) 9%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 55%, transparent),
+    0 10px 26px -18px var(--tone);
+}
+
+.kcol-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--rule-soft);
+  min-width: 0;
+}
+
+.kcol-head h2 {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  color: var(--tone);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kcount {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--steel);
+  background: rgba(13, 17, 23, 0.06);
+  border-radius: 999px;
+  padding: 0.06rem 0.44rem;
+  flex-shrink: 0;
+}
+
+.kadd {
+  margin-left: auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex-shrink: 0;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease), transform var(--t-mid) var(--ease);
+}
+
+.kadd:hover {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+  transform: scale(1.12) rotate(90deg);
+}
+
+.kcol-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.625rem;
+  min-width: 0;
+}
+
+.kcol-body > * {
+  min-width: 0;
+}
+
+.kcard[data-grab="true"] {
+  cursor: grab;
+  /* let a vertical swipe scroll the page; sideways movement starts a drag */
+  touch-action: pan-y;
+}
+
+.jobcard[role="button"] {
+  transition: transform var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease),
+    border-color var(--t-fast) var(--ease), opacity var(--t-mid) var(--ease);
+}
+
+.jobcard[role="button"]:hover,
+.jobcard[role="button"]:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  border-color: rgba(13, 17, 23, 0.24);
+}
+
+.jobcard[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-lift), 0 0 0 3px rgba(245, 168, 0, 0.3);
+}
+
+/* the original sits quietly in place while its clone is being carried */
+.kcard[data-dragging="true"] {
+  animation: none !important;
+}
+
+.kcard[data-dragging="true"] .jobcard {
+  opacity: 0.28;
+  transform: scale(0.985);
+  box-shadow: none;
+  filter: saturate(0.4);
+}
+
+/* the clone that actually follows the pointer */
+.card-ghost {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.card-ghost > * {
+  height: 100%;
+  transform-origin: 50% 45%;
+  transition: transform var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease);
+}
+
+.card-ghost[data-lifted="true"] > * {
+  transform: scale(1.035) rotate(1.1deg);
+  box-shadow: var(--shadow-drag);
+}
+
+.is-dragging-card,
+.is-dragging-card * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.kempty {
+  margin: 0;
+  padding: 1.125rem 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--steel-soft);
+}
+
+@media (max-width: 1240px) {
+  .kanban {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .kanban {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------- calendar ---------------- */
+.calendar-wrap {
+  position: relative;
+  isolation: isolate;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: clamp(0.5rem, 1vw, 0.875rem);
+  min-width: 0;
+  box-shadow: var(--shadow-card);
+}
+
+/* The frost lives on a pseudo-element, never on .calendar-wrap itself:
+   backdrop-filter would make the wrapper a containing block for fixed-position
+   descendants, and FullCalendar appends its drag mirror (position: fixed, in
+   viewport coordinates) inside .fc — so the mirror would be pushed off the
+   pointer by the wrapper's own viewport offset. Keep this layer non-ancestral. */
+.calendar-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.fc {
+  --fc-border-color: var(--rule-soft);
+  --fc-today-bg-color: rgba(245, 168, 0, 0.1);
+  --fc-page-bg-color: transparent;
+  font-size: 0.8rem;
+}
+
+.fc .fc-toolbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.fc .fc-toolbar-title {
+  font-size: clamp(0.95rem, 0.8rem + 0.4vw, 1.1rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* day cells must be allowed to shrink or the chips push the grid wider */
+.fc .fc-daygrid-day-frame,
+.fc .fc-daygrid-day-events,
+.fc .fc-daygrid-event-harness,
+.fc .fc-daygrid-day-bottom {
+  min-width: 0;
+}
+
+/* FullCalendar reserves 1em under the events stack; that is dead space here */
+.fc .fc-daygrid-day-events {
+  margin-bottom: 0.2rem;
+}
+
+.fc .fc-daygrid-more-link {
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.fc .fc-button {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+  box-shadow: none;
+  padding: 5px 10px;
+}
+
+.fc .fc-button:hover {
+  background: #fff;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.fc .fc-col-header-cell-cushion {
+  padding: 8px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.fc .fc-daygrid-day-number {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--steel);
+  text-decoration: none;
+  padding: 0.12rem 0.3rem;
+}
+
+.fc-theme-standard td,
+.fc-theme-standard th {
+  border-color: var(--rule-soft);
+}
+
+.fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.fc-event {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0 0 0.14rem;
+}
+
+.fc-event:focus-visible {
+  outline: 2px solid var(--ink);
+}
+
+/* compact card rendered inside a calendar cell */
+.chip {
+  --tone: var(--tone-slate);
+  position: relative;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.17rem 0.4rem 0.2rem 0.62rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #fff, #f7f9fb);
+  /* FullCalendar paints event text white; the chip is a light card */
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+.chip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--tone);
+}
+
+.chip:hover {
+  transform: translateY(-1px) scale(1.01);
+  border-color: rgba(13, 17, 23, 0.3);
+  box-shadow: 0 10px 18px -12px rgba(13, 17, 23, 0.7);
+}
+
+.chip-top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.chip-job {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+
+.chip-po {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  color: var(--steel);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-qty {
+  margin-left: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.chip-mat {
+  font-size: 0.66rem;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0;
+}
+
+.chip-status {
+  margin-top: 0.04rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--tone);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------- calendar: year view ---------------- */
+/* Twelve months of day cells leave no room for a .chip, so each job renders as
+   a tone dot and the day itself is tinted when it carries work. */
+/* no gap/margin here: FullCalendar sizes each month as a width percentage of
+   this flex row, so any gap would wrap the last column onto its own line */
+.fc .fc-multimonth {
+  border: 0;
+}
+
+.fc .fc-multimonth-month {
+  min-width: 0;
+}
+
+.fc .fc-multimonth-title {
+  padding: 0.5rem 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.fc .fc-multimonth-daygrid {
+  background: transparent;
+}
+
+.fc .fc-multimonth .fc-col-header-cell-cushion {
+  padding: 0.25rem 0.1rem;
+  font-size: 0.52rem;
+  letter-spacing: 0.06em;
+}
+
+.fc .fc-multimonth .fc-daygrid-day-top {
+  justify-content: center;
+}
+
+.fc .fc-multimonth .fc-daygrid-day-number {
+  padding: 0.15rem 0.2rem 0.05rem;
+  font-size: 0.6rem;
+}
+
+.fc .fc-multimonth .fc-daygrid-day-frame {
+  min-height: 1.9rem;
+  cursor: pointer;
+}
+
+/* days carrying jobs read at a glance, before you resolve any single dot */
+.fc .fc-multimonth .fc-day-has-jobs {
+  background: rgba(245, 168, 0, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(245, 168, 0, 0.34);
+}
+
+.fc .fc-multimonth .fc-day-has-jobs .fc-daygrid-day-number {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* dots wrap inside the cell instead of stacking one per row */
+.fc .fc-multimonth .fc-daygrid-day-events {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-start;
+  gap: 0.15rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0 0.1rem 0.2rem;
+}
+
+.fc .fc-multimonth .fc-daygrid-event-harness {
+  margin: 0;
+}
+
+.fc .fc-multimonth .fc-event {
+  margin: 0;
+  line-height: 0;
+}
+
+.year-dot {
+  --tone: var(--tone-slate);
+  display: block;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9), var(--shadow-card);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.fc .fc-multimonth .fc-event:hover .year-dot {
+  transform: scale(1.45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9), var(--shadow-lift);
+}
+
+/* ---------------- board view ---------------- */
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min)), 1fr));
+  gap: 1rem;
+  min-width: 0;
+}
+
+.board > * {
+  min-width: 0;
+}
+
+/* the task page's all-cards view: one flat .board whose --card-min is the zoom
+   level, so zooming changes the real card width instead of scaling pixels */
+.board-all {
+  --card-min: 18rem;
+  padding-bottom: 0.625rem;
+}
+
+.board-group {
+  margin-bottom: 26px;
+}
+
+.board-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.board-group-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.board-group-head span {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--steel);
+}
+
+.stagger > * {
+  animation: rise var(--t-slow) var(--ease) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------------- drawer ---------------- */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 12, 16, 0.42);
+  backdrop-filter: blur(3px);
+  animation: fade var(--t-mid) var(--ease) both;
+  z-index: 40;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(30rem, 100vw);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+  border-left: 1px solid var(--rule);
+  box-shadow: -24px 0 60px -30px rgba(9, 12, 16, 0.7);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  animation: slide-in var(--t-slow) var(--ease) both;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(34px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* ---------------- full-size photo viewer ---------------- */
+/* the drawer's scrim, lifted clear of the drawer (41) and the drag clone (60) */
+.scrim.image-viewer {
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  cursor: zoom-out;
+}
+
+.image-viewer-frame {
+  position: relative;
+  cursor: default;
+  animation: viewer-in var(--t-mid) var(--ease) both;
+}
+
+/* natural size, shrunk until the whole picture fits — never cropped, never blown
+   up past the pixels the file actually has */
+.image-viewer-frame img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: 0 30px 80px -28px rgba(9, 12, 16, 0.85);
+}
+
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(13, 17, 23, 0.72);
+  backdrop-filter: blur(2px);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.image-viewer-close:hover {
+  background: var(--ink);
+  transform: scale(1.06);
+}
+
+.image-viewer-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.7);
+}
+
+/* ---------------- 3D model: card slot ---------------- */
+/* Photo and model share one column beside the spec grid. The wells keep their
+   own metrics, so every container-query size step already applies to the photo
+   well unchanged. */
+.card-wells {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-self: flex-start;
+  min-width: 0;
+}
+
+/* A strip rather than a second square: the model is identified by name and
+   format, not by a picture of itself. */
+.model-drop {
+  position: relative;
+  width: 100%;
+  min-height: 1.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.9rem 0.2rem 0.25rem;
+  border: 1px dashed rgba(13, 17, 23, 0.28);
+  border-radius: 3px;
+  background: linear-gradient(135deg, #eef2f5, #dee5eb);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 130ms ease, background 130ms ease;
+}
+
+.model-drop:hover,
+.model-drop[data-dragover="true"] {
+  border-color: var(--ink);
+  background: linear-gradient(135deg, #fff, #e7edf2);
+}
+
+.model-drop[data-filled="true"] {
+  border-style: solid;
+  border-color: var(--rule);
+  padding-left: 1.35rem;
+}
+
+.model-drop-label,
+.model-drop-name,
+.model-drop-size {
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--steel);
+  white-space: nowrap;
+}
+
+.model-drop-label {
+  letter-spacing: 0.1em;
+  margin-inline: auto;
+}
+
+/* the filename is the part that gives, and it gives before the size does */
+.model-drop-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0;
+  color: var(--ink-soft);
+}
+
+.model-drop-size {
+  flex: none;
+  opacity: 0.8;
+}
+
+/* the format chip, shared by the card slot and the viewer's title bar */
+.model-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 0.1rem 0.28rem;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--tone-blue) 45%, transparent);
+  color: var(--tone-blue);
+  background: color-mix(in srgb, var(--tone-blue) 8%, transparent);
+  white-space: nowrap;
+}
+
+/* the same chip on the read-only card, where it is the control that opens the
+   viewer — matching .lock-tag's metrics so the header badges line up */
+.model-tag-button {
+  font-family: inherit;
+  font-size: 0.58rem;
+  padding: 0.12rem 0.35rem;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.model-tag-button:hover {
+  background: var(--tone-blue);
+  color: #fff;
+}
+
+.model-tag-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.55);
+}
+
+/* the corner controls sit inside a 1.9rem strip, so they shrink a little */
+.model-drop .model-expand,
+.model-drop .model-clear {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  font-size: 10px;
+}
+
+.model-drop .model-clear {
+  right: 2px;
+}
+
+.model-drop .model-expand {
+  left: 2px;
+}
+
+/* ---------------- 3D model: viewer ---------------- */
+/* Same scrim and stacking as the photo viewer, so the two read as one feature. */
+.scrim.model-viewer {
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+
+.model-viewer-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 76rem);
+  height: min(88vh, 52rem);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 30px 80px -28px rgba(9, 12, 16, 0.85);
+  animation: viewer-in var(--t-mid) var(--ease) both;
+}
+
+.model-viewer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 2.6rem 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+}
+
+.model-viewer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* the stage carries the backdrop; the canvas itself is drawn with alpha so the
+   part sits on this gradient rather than on flat grey */
+.model-viewer-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: radial-gradient(120% 100% at 50% 0%, #f7fafc 0%, #d5dde4 60%, #b9c4cd 100%);
+}
+
+.model-canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+.model-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+.model-viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: rgba(244, 247, 250, 0.82);
+  backdrop-filter: blur(2px);
+}
+
+.model-viewer-overlay small {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--steel);
+}
+
+.model-viewer-overlay.error strong {
+  color: var(--stop);
+  font-size: 0.85rem;
+}
+
+.model-spinner {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid rgba(13, 17, 23, 0.16);
+  border-top-color: var(--ink);
+  animation: model-spin 720ms linear infinite;
+}
+
+@keyframes model-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.model-viewer-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--rule);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+  font-size: 0.68rem;
+  color: var(--steel);
+}
+
+.model-viewer-hint {
+  margin-left: auto;
+  font-size: 0.66rem;
+  color: var(--steel);
+}
+
+.model-viewer-reset {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+}
+
+.model-warn {
+  color: var(--tone-amber);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .model-viewer-hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-spinner {
+    animation-duration: 2s;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.drawer-body {
+  padding: 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  min-width: 0;
+}
+
+/* the body scrolls, so nothing in it may be squashed to fit: a long activity
+   trail would otherwise flatten the card editor to its borders */
+.drawer-body > * {
+  flex-shrink: 0;
+}
+
+.drawer-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel);
+}
+
+.form-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.form-grid .field {
+  width: 100%;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.timeline li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.timeline b {
+  font-weight: 700;
+}
+
+.timeline-text {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.timeline-detail {
+  color: var(--steel);
+  overflow-wrap: anywhere;
+}
+
+.timeline-by {
+  margin-top: 0.06rem;
+  font-size: 0.69rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.avatar.sm {
+  width: 1.375rem;
+  height: 1.375rem;
+  flex-basis: 1.375rem;
+  font-size: 0.56rem;
+  margin-top: 0.06rem;
+}
+
+.timeline small {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--steel);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+}
+
+/* ---------------- users ---------------- */
+.users-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: 1.125rem;
+  align-items: start;
+}
+
+/* Below Manager there is no directory to list, so the record stands alone. */
+.users-layout[data-solo="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 44rem;
+}
+
+.list-panel,
+.detail-panel {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.list-panel {
+  overflow: hidden;
+}
+
+.list-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.625rem;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.list-head .field {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.list-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--steel);
+  background: rgba(13, 17, 23, 0.03);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease), padding-left var(--t-mid) var(--ease);
+}
+
+.user-row:hover {
+  background: rgba(13, 17, 23, 0.04);
+  padding-left: 16px;
+}
+
+.user-row[data-active="true"] {
+  background: rgba(13, 17, 23, 0.075);
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 1.875rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.69rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(150deg, #46566a, #222c38);
+  letter-spacing: 0.02em;
+}
+
+.avatar.lg {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-basis: 2.75rem;
+  font-size: 0.94rem;
+}
+
+/* profile photo fills the badge at every size; initials stay the fallback */
+.avatar:has(img) {
+  overflow: hidden;
+  background: var(--rule-soft);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* the click-or-drop photo well on the user detail panel */
+.photo-drop {
+  width: 4.5rem;
+  flex: 0 0 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  align-self: center;
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    box-shadow var(--t-mid) var(--ease);
+}
+
+.photo-drop:hover,
+.photo-drop[data-dragover="true"] {
+  box-shadow: var(--shadow-lift);
+}
+
+.photo-drop[tabindex="-1"] {
+  cursor: default;
+}
+
+.photo-drop .thumb-clear {
+  top: 0;
+  right: 0;
+}
+
+.user-meta {
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.user-meta b {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-meta small {
+  color: var(--steel);
+  font-size: 0.69rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.tag {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 0.19rem 0.44rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Descending authority: solid ink for admin, then softer, then outlined. */
+.tag[data-role="manager"] {
+  background: var(--ink-soft);
+}
+
+.tag[data-role="user"] {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+.tag[data-role="viewer"] {
+  background: transparent;
+  color: var(--steel);
+  border: 1px solid var(--rule);
+}
+
+.detail-panel {
+  padding: 1.125rem 1.25rem 1.25rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.section-label {
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel);
+  margin: 1.25rem 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule-soft);
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--steel);
+  font-size: 13px;
+}
+
+/* ---------------- login ---------------- */
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+
+.login-art {
+  position: relative;
+  overflow: hidden;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  color: #eef2f6;
+  background:
+    radial-gradient(700px 420px at 24% 22%, rgba(245, 168, 0, 0.2), transparent 66%),
+    radial-gradient(640px 520px at 84% 90%, rgba(201, 206, 211, 0.12), transparent 72%),
+    linear-gradient(155deg, #121213 0%, #0a0a0b 58%, #000 100%);
+}
+
+.login-art img {
+  position: relative;
+  z-index: 1;
+}
+
+/* slow drifting light instead of the old wireframe grid */
+.login-art::before {
+  content: "";
+  position: absolute;
+  inset: -25%;
+  background:
+    radial-gradient(30rem 24rem at 32% 30%, rgba(245, 168, 0, 0.18), transparent 64%),
+    radial-gradient(26rem 22rem at 72% 68%, rgba(96, 142, 220, 0.14), transparent 66%);
+  filter: blur(28px);
+  animation: drift 26s var(--ease) infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 2%, 0) scale(1.1);
+  }
+}
+
+.login-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 92% at 50% 0%, transparent 42%, rgba(0, 0, 0, 0.5) 100%);
+  pointer-events: none;
+}
+
+.login-art p {
+  position: relative;
+  z-index: 1;
+  margin: 14px 0 0;
+  max-width: 40ch;
+  color: #9fb0be;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px clamp(28px, 6vw, 76px);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-alt {
+  margin: 0;
+  font-size: 13px;
+  color: var(--steel);
+}
+
+.auth-alt a {
+  color: var(--ink);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.login-form h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--steel);
+}
+
+.login-form .field,
+.login-form .btn {
+  height: 40px;
+  width: 100%;
+  justify-content: center;
+}
+
+.hint {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--steel);
+  line-height: 1.6;
+}
+
+.error {
+  font-size: 12.5px;
+  color: var(--stop);
+  font-weight: 600;
+}
+
+/* ---------------- unsaved-changes prompt ---------------- */
+/* The third member of the overlay family, above both viewers so it is always the
+   topmost layer and its Escape is the one that answers. */
+.scrim.confirm-scrim {
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.confirm-frame {
+  width: min(26rem, 100%);
+  padding: 1.125rem 1.25rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+  box-shadow: 0 30px 80px -28px rgba(9, 12, 16, 0.85);
+  animation: viewer-in var(--t-mid) var(--ease) both;
+}
+
+.confirm-title {
+  display: block;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.confirm-body {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* Wraps to a column rather than squeezing three full-sentence labels onto one
+   narrow line — nothing here may be read at half its width. */
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* ---------------- responsive ---------------- */
+@media (max-width: 1020px) {
+  .users-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .login {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .login-art {
+    min-height: 30vh;
+    padding: 1.875rem;
+  }
+}
+
+@media (max-width: 860px) {
+  .head-tools {
+    margin-left: 0;
+    width: 100%;
+  }
+  .head-tools .field {
+    max-width: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rail {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.625rem 0.75rem;
+    overflow-x: auto;
+  }
+  .brand {
+    padding: 0 0.625rem 0 0;
+    flex-shrink: 0;
+  }
+  .brand-sub {
+    display: none;
+  }
+  .nav-link {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .rail-foot {
+    margin-top: 0;
+    margin-left: auto;
+    border-top: 0;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .rail-user {
+    display: none;
+  }
+  .main {
+    padding: 1rem 0.875rem 3rem;
+  }
+  .drawer {
+    width: 100vw;
+  }
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* phone-width rail: shrink the logo and links so the account block still fits */
+@media (max-width: 560px) {
+  .rail {
+    gap: 0.25rem;
+    padding: 0.5rem 0.55rem;
+  }
+  .brand {
+    padding-right: 0.4rem;
+  }
+  .brand img {
+    width: 4.25rem !important;
+  }
+  .nav-link {
+    padding: 0.4rem 0.45rem;
+    font-size: 0.8rem;
+  }
+  .rail-foot {
+    gap: 0.4rem;
+  }
+}
+
+/* very narrow: stack the card's image above the spec table */
+@media (max-width: 420px) {
+  .jobcard-body {
+    flex-direction: column;
+  }
+  .jobcard-thumb,
+  .thumb-drop {
+    width: 100%;
+    flex-basis: auto;
+    height: 6.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

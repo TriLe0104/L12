@@ -1,0 +1,21 @@
+# python
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+.env
+
+# uploaded part images
+backend/uploads/
+
+# node
+node_modules/
+.next/
+out/
+*.log
+next-env.d.ts
+frontend/screenshots/
+
+# os / editors
+.DS_Store
+Thumbs.db

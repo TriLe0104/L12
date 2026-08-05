@@ -1,0 +1,471 @@
+/* Dashboard table. Kept beside the page rather than in globals.css because
+   nothing outside this route uses it, and it reads as one piece with the
+   component. Tokens (--ink, --steel, --tone-*, --ease…) come from globals. */
+
+/* ---------------- filter row ---------------- */
+.dash-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.875rem;
+}
+
+.dash-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2.15rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--steel);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+.dash-pill:hover {
+  border-color: rgba(13, 17, 23, 0.32);
+  color: var(--ink);
+}
+
+.dash-pill:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.22);
+}
+
+.dash-pill[data-active="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+/* the live count rides inside the pill, gold once the pill is the active one */
+.dash-pill-count {
+  min-width: 1.25rem;
+  padding: 0.06rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(13, 17, 23, 0.07);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.dash-pill[data-active="true"] .dash-pill-count {
+  background: var(--signal);
+  color: var(--ink);
+}
+
+.dash-search {
+  margin-left: auto;
+  flex: 0 1 15rem;
+  min-width: 8rem;
+}
+
+/* ---------------- table shell ---------------- */
+.dash-panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+/* The table owns its overflow, so the page never scrolls sideways. It is also
+   the query container: how much room the table has depends on the rail, which
+   folds away below 780px, so viewport media queries would guess wrong. */
+.dash-scroll {
+  container-type: inline-size;
+  overflow-x: auto;
+}
+
+.dash-table {
+  width: 100%;
+  min-width: 62rem;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.dash-table th,
+.dash-table td {
+  padding: 0.5rem 0.55rem;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-table thead th {
+  padding: 0;
+  border-bottom: 1px solid var(--rule);
+  background: rgba(13, 17, 23, 0.025);
+}
+
+/* the whole header cell is the sort control */
+.dash-sort {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.55rem;
+  border: 0;
+  background: transparent;
+  color: var(--steel);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: inherit;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.dash-sort:hover {
+  background: rgba(13, 17, 23, 0.045);
+  color: var(--ink);
+}
+
+.dash-sort:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(245, 168, 0, 0.55);
+}
+
+.dash-sort > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-table th[data-numeric="true"] .dash-sort {
+  justify-content: flex-end;
+}
+
+.dash-table th[aria-sort="ascending"] .dash-sort,
+.dash-table th[aria-sort="descending"] .dash-sort {
+  color: var(--ink);
+}
+
+.dash-caret {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  opacity: 0.26;
+  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+}
+
+.dash-table th[aria-sort="ascending"] .dash-caret {
+  opacity: 1;
+}
+
+.dash-table th[aria-sort="descending"] .dash-caret {
+  opacity: 1;
+  transform: rotate(180deg);
+}
+
+/* ---------------- rows ---------------- */
+.dash-row {
+  border-top: 1px solid var(--rule-soft);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.dash-row:hover {
+  background: rgba(13, 17, 23, 0.035);
+}
+
+.dash-row:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: -2px;
+  background: rgba(13, 17, 23, 0.035);
+}
+
+/* two-line identifier: job number over part number */
+.dash-id {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.dash-id-job {
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-id-sub {
+  margin-top: 0.06rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  color: var(--steel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-lock {
+  display: inline-flex;
+  flex: none;
+  color: var(--tone-graphite);
+}
+
+.dash-mono {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.74rem;
+  letter-spacing: -0.01em;
+}
+
+.dash-table td[data-numeric="true"] {
+  text-align: right;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-stage {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.14rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 13%, transparent);
+  color: var(--tone);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.dash-status {
+  color: var(--tone);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.dash-person {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.dash-person > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* When the last change landed. Sits under the modifier's name rather than
+   beside it — the row is already two lines tall for the job cell, so the
+   timestamp costs height that is going spare instead of width that is not. */
+.dash-when {
+  margin-top: 0.06rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  color: var(--steel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Material and finish are the only genuinely long values. The row is already
+   two lines tall for the job cell, so they wrap into that height rather than
+   ellipsizing at a third of a word; anything past two lines is still a hover
+   away on the cell's title. */
+.dash-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.24;
+}
+
+.dash-empty-cell {
+  color: var(--steel-soft);
+}
+
+/* ---------------- column widths + graceful narrowing ----------------
+   Columns leave in bands as the container shrinks, and the table's min-width
+   drops to the floor of each band, so the widest the table ever wants to be
+   still fits the room it has — the scroll container is a safety net for
+   scaled-up type, not the everyday mechanism.
+
+   Widths are re-stated per band rather than left to the survivors to share,
+   and each band is sized at its own floor so the fixed-vocabulary cells —
+   the priority tag, the stage pill, the date, the quantity — are never
+   clipped. Free text (customer, material, finish, the longer status labels)
+   may ellipsize; those cells carry a title so the full value is a hover away.
+
+   The job column is deliberately mean: every job number in the data is four
+   characters and every part number seven, and the two-line treatment means the
+   cell only ever has to fit the wider of those, not both side by side.
+
+   Which columns get a measured width and which are left to grow is the whole
+   design here. A quantity is one or two digits — the largest in the data is 50 —
+   so a percentage of the table handed it 83px at 1920 to hold "24", and because
+   the column is right-aligned that surplus read as a gap rather than as padding.
+   The same goes for every column whose vocabulary is bounded: a date, a priority
+   tag, a stage pill, a job number, a PO number, a name. Those are sized in rem,
+   to whichever is wider of their longest value and the heading word above them,
+   and they hold that size however wide the window gets. The open-ended columns —
+   material, finish, and the longer status labels — are left `auto`, and a fixed
+   table layout hands them everything the measured columns do not take. So the
+   room a 1920 window has going spare lands on the values that were truncating
+   instead of spacing out the numbers, and it does so without a percentage that
+   has to be re-derived every time a column joins or leaves. Sizes are in rem
+   because the root size is fluid: the content shrinks with it, so the columns
+   holding that content have to shrink with it too. */
+.dash-table [data-col="job"] { width: 4.3rem; }
+.dash-table [data-col="po_number"] { width: 4.8rem; }
+.dash-table [data-col="customer"] { width: 5.9rem; }
+.dash-table [data-col="priority"] { width: 5.4rem; }
+.dash-table [data-col="stage"] { width: 6.7rem; }
+.dash-table [data-col="owner"] { width: 5rem; }
+.dash-table [data-col="due"] { width: 4.3rem; }
+.dash-table [data-col="modified"] { width: 5.5rem; }
+.dash-table [data-col="qty"] { width: 3.5rem; }
+
+/* the absorbers: 45.4rem of the table is measured above, these three share the rest */
+.dash-table [data-col="status"],
+.dash-table [data-col="material"],
+.dash-table [data-col="finish"] { width: auto; }
+
+/* Twelve columns still fit here, but the headings are the widest thing in the
+   narrow ones: "MATERIAL" set in letter-spaced caps wants more room than any
+   material value. So the headings give up their tracking first — the principle
+   the bands below follow too, applied while every column is still present. */
+@container (max-width: 70rem) {
+  .dash-table .dash-sort {
+    gap: 0.2rem;
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+  }
+  .dash-table .dash-caret { width: 0.42rem; height: 0.42rem; }
+}
+
+/* finish is the widest free-text column and the least scannable — first to go.
+   Every band below re-states the measured widths a little tighter, because the
+   headings lose their tracking as the container narrows and so need less room;
+   the absorbers are whichever open-ended columns are still standing. */
+@container (max-width: 62rem) {
+  .dash-table { min-width: 54rem; }
+  .dash-table [data-col="finish"] { display: none; }
+  .dash-table [data-col="job"] { width: 4rem; }
+  .dash-table [data-col="po_number"] { width: 4.7rem; }
+  .dash-table [data-col="customer"] { width: 5.8rem; }
+  .dash-table [data-col="priority"] { width: 5.1rem; }
+  .dash-table [data-col="stage"] { width: 6.7rem; }
+  .dash-table [data-col="owner"] { width: 4.85rem; }
+  .dash-table [data-col="due"] { width: 4.3rem; }
+  .dash-table [data-col="modified"] { width: 5.05rem; }
+  .dash-table [data-col="qty"] { width: 3.2rem; }
+}
+
+/* Then the spec detail (PO # and material, both on the card and in the drawer)
+   and last-modified. Two person columns is one too many once the table is down
+   to eight: owner is who to chase, last-modified is provenance, and provenance
+   is a question you answer by opening the row — which is one tap away here. */
+@container (max-width: 54rem) {
+  .dash-table { min-width: 40rem; }
+  .dash-table [data-col="po_number"],
+  .dash-table [data-col="material"],
+  .dash-table [data-col="modified"] { display: none; }
+  /* material has gone, so customer joins status as an absorber: it is the only
+     other column here whose values are not a fixed vocabulary. */
+  .dash-table [data-col="customer"] { width: auto; }
+  .dash-table [data-col="job"] { width: 4.05rem; }
+  .dash-table [data-col="priority"] { width: 5.1rem; }
+  .dash-table [data-col="stage"] { width: 6.75rem; }
+  .dash-table [data-col="owner"] { width: 4.9rem; }
+  .dash-table [data-col="due"] { width: 4.35rem; }
+  .dash-table [data-col="qty"] { width: 3.2rem; }
+}
+
+/* stage is implied by the active filter pill; owner is one name in this shop */
+@container (max-width: 40rem) {
+  .dash-table { min-width: 32rem; }
+  .dash-table th,
+  .dash-table td { padding: 0.45rem 0.4rem; }
+  .dash-table .dash-sort { padding: 0.5rem 0.4rem; }
+  .dash-table [data-col="stage"],
+  .dash-table [data-col="owner"] { display: none; }
+  .dash-table [data-col="job"] { width: 3.8rem; }
+  .dash-table [data-col="priority"] { width: 4.9rem; }
+  .dash-table [data-col="due"] { width: 4rem; }
+  .dash-table [data-col="qty"] { width: 3rem; }
+}
+
+/* customer repeats down the column; status is the scarcer information */
+@container (max-width: 32rem) {
+  .dash-table { min-width: 26rem; }
+  .dash-table [data-col="customer"] { display: none; }
+  /* status is the last open-ended column, so it takes the whole surplus — which
+     is how "Under inspection" finally fits at 420px instead of ellipsizing. */
+}
+
+/* last stop: what, how urgent, when, how many. Nothing here is open-ended, so
+   the job cell absorbs: it is left-aligned two-line text, and space to the right
+   of it reads as a wide first column rather than as a gap in front of a number. */
+@container (max-width: 26rem) {
+  .dash-table { min-width: 0; }
+  .dash-table [data-col="status"] { display: none; }
+  .dash-table [data-col="job"] { width: auto; }
+}
+
+@media (max-width: 860px) {
+  .dash-search {
+    margin-left: 0;
+    flex: 1 1 8rem;
+  }
+}
+
+/* ---------------- sticky header ----------------
+   The wrapper is the horizontal scroll container, and CSS will not let a box
+   scroll one axis and leave the other to the viewport: the moment overflow-x is
+   `auto`, overflow-y computes to `auto` too. So the wrapper is the scrollport a
+   sticky header sticks to — and because the wrapper's content is exactly as
+   tall as the wrapper, it never has anything to stick during.
+
+   Rather than give up the horizontal safety net, give the wrapper the vertical
+   scroll on purpose: bound its height and the header pins to the top of a pane
+   that is always on screen, twelve columns and all. Nothing about the column
+   bands changes, because the bands are driven by the container's inline size,
+   which this does not touch.
+
+   Only where there is room for a pane. Below the rail's fold, or in a short
+   window, the table is four or five columns and the page should scroll as one
+   piece; a 300px-tall inner scroller would be worse than a header that leaves. */
+@media (min-width: 781px) and (min-height: 560px) {
+  .dash-scroll {
+    /* page chrome above the panel: main's padding, the head, the filter row.
+       Erring tall is harmless — the page picks up whatever the pane leaves. */
+    max-height: calc(100vh - 13.25rem);
+  }
+
+  .dash-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    /* Opaque, or the rows read through it as they pass underneath: the flat
+       equivalent of the 2.5% ink wash this row wears over --panel. */
+    background: #f9f9f9;
+    /* With border-collapse the cell border belongs to the table and scrolls
+       away from a sticky cell, so the hairline is drawn inside the cell. */
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 var(--rule);
+  }
+}

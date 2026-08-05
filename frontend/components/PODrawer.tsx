@@ -1,0 +1,269 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { api } from "@/lib/api";
+import { canEdit, canModifyPO, LOCKED_REASON, useAuth } from "@/lib/auth";
+import { changedFields } from "@/lib/dirty";
+import type { ActivityItem, PODraft, PurchaseOrder, StatusMeta } from "@/lib/types";
+import { ActivityList } from "./ActivityList";
+import { CardEditor } from "./CardEditor";
+import { LockGlyph } from "./JobCard";
+import { UnsavedChangesPrompt } from "./UnsavedChangesPrompt";
+
+/** Today in the shop's own timezone. `toISOString()` would report the UTC day,
+ *  which is off by one for most of the working day. */
+const todayLocal = (): string => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+};
+
+const blank = (defaults: PODraft = {}): PODraft => ({
+  job_no: "",
+  po_number: "",
+  part_number: "",
+  qty: 1,
+  due_date: todayLocal(),
+  dims: "",
+  mat_dim: "",
+  material: "",
+  finish: "",
+  inspection: "standard",
+  hardware: false,
+  status: "new",
+  priority: "normal",
+  customer: "",
+  note: "",
+  thumbnail_url: null,
+  model_url: null,
+  model_filename: null,
+  model_size: null,
+  ...defaults,
+});
+
+export function PODrawer({
+  po,
+  mode,
+  statuses,
+  defaults,
+  onClose,
+  onSaved,
+  onDeleted,
+}: {
+  po: PurchaseOrder | null;
+  mode: "view" | "create";
+  statuses: StatusMeta[];
+  defaults?: Partial<PurchaseOrder>;
+  onClose: () => void;
+  onSaved: (po: PurchaseOrder) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const { user } = useAuth();
+  const editable = canEdit(user);
+  // the record the drawer is currently attached to; a create turns into this one's edit view
+  const [record, setRecord] = useState<PurchaseOrder | null>(po);
+  // A new order starts out owned by whoever is filling it in — the same default
+  // the server applies — so the picker states it instead of implying nothing.
+  const newDraft = (): PODraft => blank({ owner_id: user?.id ?? null, ...defaults });
+  const [draft, setDraft] = useState<PODraft>(po ?? newDraft());
+  /** What the draft is measured against: the record as last stored, or — for a
+   *  create — the empty form as it was first handed over. Reset on every
+   *  successful save, because the drawer stays open on the saved record and the
+   *  changes are no longer unsaved. */
+  const [baseline, setBaseline] = useState<PODraft>(draft);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const creating = mode === "create" && !record;
+  // the lock applies to the record as stored, not to the unsaved draft
+  const modifiable = editable && (creating || canModifyPO(user, record));
+
+  const changed = useMemo(() => changedFields(baseline, draft), [baseline, draft]);
+  /* Someone who may not change this order meets a form of disabled fields, so it
+     can never reach a dirty state — but the guard says so itself rather than
+     leaning on that, or a stray programmatic edit would trap them behind a
+     prompt whose Save can only 403. */
+  const dirty = modifiable && changed.length > 0;
+
+  const loadActivity = (id: string) =>
+    api.poActivity(id).then(setActivity).catch(() => setActivity([]));
+
+  useEffect(() => {
+    const opened = po ?? newDraft();
+    setRecord(po);
+    setDraft(opened);
+    // one object for both, so a freshly opened form is never dirty against a
+    // second blank built a millisecond later
+    setBaseline(opened);
+    setError(null);
+    setSavedNote(null);
+    setConfirming(false);
+    if (po) void loadActivity(po.id);
+    else setActivity([]);
+    // defaults is a fresh object per render; keying off the id is enough
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [po, mode]);
+
+  /** Every way out of the drawer comes through here, so the guard cannot be
+   *  bypassed by whichever dismissal the user happens to reach for. */
+  const requestClose = useCallback(() => {
+    if (dirty) setConfirming(true);
+    else onClose();
+  }, [dirty, onClose]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && requestClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestClose]);
+
+  async function save(): Promise<boolean> {
+    if (!draft.job_no?.trim() || !draft.po_number?.trim() || !draft.part_number?.trim()) {
+      setError("Job #, PO # and Part # are required");
+      return false;
+    }
+    // `min` on the date input only blocks the picker, so a typed-in past date
+    // still has to be caught here. Creates only: overdue POs stay saveable.
+    if (creating) {
+      const today = todayLocal();
+      if (!draft.due_date) {
+        setError("A due date is required");
+        return false;
+      }
+      if (draft.due_date < today) {
+        setError(`Due date can't be in the past — pick ${today} or later`);
+        return false;
+      }
+    }
+    setBusy(true);
+    setError(null);
+    setSavedNote(null);
+    try {
+      const payload = { ...draft, qty: Number(draft.qty) || 1 };
+      const saved = creating
+        ? await api.createPO(payload)
+        : await api.updatePO(record!.id, payload);
+      // stay open on the saved record: server-derived fields (stage, labels) come back here
+      setRecord(saved);
+      setDraft(saved);
+      // the drawer staying open is exactly why this has to move: without it the
+      // next click on the scrim would ask about changes already written
+      setBaseline(saved);
+      setSavedNote(creating ? "Created." : "Saved.");
+      onSaved(saved);
+      await loadActivity(saved.id);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Save from inside the prompt. A refused save — a 403 on a locked order, a
+   *  validation message, a dead network — must not close anything: the prompt
+   *  steps aside and leaves the drawer holding the edits and the reason. */
+  async function saveAndClose() {
+    if (await save()) onClose();
+    else setConfirming(false);
+  }
+
+  async function remove() {
+    if (!record || !window.confirm(`Delete ${record.job_no} · ${record.po_number}?`)) return;
+    await api.deletePO(record.id);
+    onDeleted(record.id);
+  }
+
+  return (
+    <>
+      <div className="scrim" onClick={requestClose} />
+      <aside
+        className="drawer"
+        role="dialog"
+        aria-label="Purchase order detail"
+        data-dirty={dirty}
+      >
+        <header className="drawer-head">
+          <strong style={{ letterSpacing: "-0.02em" }}>
+            {creating ? "New purchase order" : `${record?.job_no} · ${record?.po_number}`}
+          </strong>
+          <button className="btn" style={{ marginLeft: "auto" }} onClick={requestClose}>
+            Close
+          </button>
+        </header>
+
+        <div className="drawer-body">
+          <CardEditor
+            value={draft}
+            onChange={(patch) => {
+              setSavedNote(null);
+              setDraft((d) => ({ ...d, ...patch }));
+            }}
+            statuses={statuses}
+            disabled={!modifiable}
+            lockable={!creating}
+            minDue={creating ? todayLocal() : undefined}
+          />
+
+          {!modifiable && editable && record?.locked && (
+            <p className="lock-note" role="status">
+              <LockGlyph />
+              {LOCKED_REASON}
+            </p>
+          )}
+
+          {error && <p className="error">{error}</p>}
+
+          {editable && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => void save()}
+                disabled={busy || !modifiable}
+              >
+                {busy ? "Saving…" : creating ? "Create PO" : "Save changes"}
+              </button>
+              {!creating && record && (
+                <button
+                  className="btn btn-danger"
+                  onClick={remove}
+                  disabled={busy || !modifiable}
+                >
+                  Delete
+                </button>
+              )}
+              {savedNote && (
+                <span role="status" style={{ fontSize: "0.75rem", color: "var(--go)" }}>
+                  {savedNote}
+                </span>
+              )}
+            </div>
+          )}
+
+          {!creating && (
+            <>
+              <div className="section-label">Activity</div>
+              <ActivityList items={activity} emptyLabel="No changes recorded yet." />
+            </>
+          )}
+        </div>
+      </aside>
+
+      {confirming && (
+        <UnsavedChangesPrompt
+          creating={creating}
+          busy={busy}
+          onSave={() => void saveAndClose()}
+          onDiscard={onClose}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </>
+  );
+}

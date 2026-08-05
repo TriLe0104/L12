@@ -1,0 +1,411 @@
+from __future__ import annotations
+
+import enum
+from collections.abc import Sequence
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from sqlalchemy import case, func
+
+from ..db import get_db
+from ..models import (
+    PRIORITY_RANK,
+    STAGE_BY_STATUS,
+    STAGE_DEFAULT_STATUS,
+    Activity,
+    POStatus,
+    Priority,
+    PurchaseOrder,
+    Stage,
+    User,
+    has_rank,
+    role_label,
+)
+from ..schemas import ActivityOut, LastModified, OwnerBrief, POCreate, POOut, POUpdate
+from ..security import LOCKED_PO_FLOOR, get_current_user, require_editor
+
+router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
+
+def _guard_locked(po: PurchaseOrder, actor: User) -> None:
+    """Every write to an existing PO goes through here, unlocking included.
+
+    Anyone who can edit may *set* a lock, but a locked order narrows to
+    LOCKED_PO_FLOOR and above. The state that matters is the one already in the
+    database, so clearing the lock counts as changing a locked order -- which is
+    exactly the intent.
+    """
+    if po.locked and not has_rank(actor.role, LOCKED_PO_FLOOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"{po.job_no} is locked. Only an {role_label(LOCKED_PO_FLOOR).lower()} "
+            f"can change or unlock it.",
+        )
+
+
+def _resolve_owner(db: Session, owner_id: str | None) -> User | None:
+    """Turn a submitted owner id into a real person, or refuse it.
+
+    SQLite does not enforce the foreign key by default, so without this an
+    unknown id would be written straight through and leave the board showing an
+    order nobody owns. The message is a plain string because the client only
+    surfaces `detail` when it is one.
+    """
+    if owner_id is None:
+        return None
+    owner = db.get(User, owner_id)
+    if owner is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That person is no longer in the directory — pick someone else, or leave it unassigned.",
+        )
+    return owner
+
+
+def _owner_name(owner: User | None) -> str:
+    return owner.name if owner else "Unassigned"
+
+
+def _attach_last_modified(db: Session, pos: Sequence[PurchaseOrder]) -> None:
+    """Hang "who touched this last, and when" on each order from the activity trail.
+
+    What counts as a modification is decided by the `entity_type` filter alone:
+    only rows written against the order itself. That is what keeps a sign-in, an
+    avatar change or a role edit -- all of which are `entity_type="user"` -- from
+    making somebody the last modifier of an order they never opened.
+
+    Creation counts. The first row in an order's trail is a write to that order,
+    and on a board where half the jobs have not been edited since they were
+    entered, "Tri Le, 4 Aug" is the true answer to who last touched it; an em
+    dash there would claim we have no provenance when we do. The timestamp in
+    the cell tells a manager whether that was data entry or a real edit.
+
+    Rows with no actor cannot name a modifier, so they are skipped rather than
+    winning and rendering blank -- the column answers "modified *by*". Deleting
+    a person cascades their activity away (User.activity is delete-orphan), so a
+    departed account cannot leave a dangling name here either.
+
+    One statement for the whole page: row_number() over the trail, partitioned by
+    order, newest first, with the activity id breaking ties so a re-seeded board
+    with identical timestamps still resolves to exactly one row.
+    """
+    ids = [po.id for po in pos]
+    for po in pos:  # a default, so POOut never has to fall back to its own
+        po.last_modified = None
+    if not ids:
+        return
+
+    ranked = (
+        select(
+            Activity.entity_id.label("po_id"),
+            Activity.actor_id.label("actor_id"),
+            Activity.action.label("action"),
+            Activity.created_at.label("at"),
+            func.row_number()
+            .over(
+                partition_by=Activity.entity_id,
+                order_by=(Activity.created_at.desc(), Activity.id.desc()),
+            )
+            .label("rn"),
+        )
+        .where(
+            Activity.entity_type == "purchase_order",
+            Activity.entity_id.in_(ids),
+            Activity.actor_id.is_not(None),
+        )
+        .subquery()
+    )
+    stmt = (
+        select(ranked.c.po_id, ranked.c.action, ranked.c.at, User)
+        .join(User, User.id == ranked.c.actor_id)
+        .where(ranked.c.rn == 1)
+    )
+    # `at` arrives aware and in UTC: that is `UtcDateTime` in db.py doing it for
+    # every datetime the app reads, rather than this column being a special case.
+    latest = {
+        po_id: LastModified(by=OwnerBrief.model_validate(actor), at=at, action=action)
+        for po_id, action, at, actor in db.execute(stmt)
+    }
+    for po in pos:
+        po.last_modified = latest.get(po.id)
+
+
+def _log(db: Session, actor: User, action: str, po: PurchaseOrder, detail: str | None = None) -> None:
+    db.add(
+        Activity(
+            actor_id=actor.id,
+            action=action,
+            entity_type="purchase_order",
+            entity_id=po.id,
+            detail=detail,
+        )
+    )
+
+
+# Fields that earn a line of their own in the trail, and so are kept out of the
+# generic "PO updated" list rather than being reported twice.
+_OWN_LINE = frozenset({"status", "due_date", "locked", "owner_id"})
+
+# An explicit null can never be a legitimate value for one of these.
+_NOT_NULLABLE = frozenset(c.name for c in PurchaseOrder.__table__.columns if not c.nullable)
+
+
+def _canonical(value: object) -> object:
+    """One shape for a value however it arrived, so an echo is not read as an edit.
+
+    The drawer PATCHes its whole draft on every save, so this side of the wire
+    meets the same round-trip distortions `frontend/lib/dirty.ts` had to flatten
+    on the other: a form control never hands back exactly what the API sent it.
+    `None` and an empty string both mean "nothing here"; a string carries
+    whatever whitespace was typed and deleted.
+
+    Enums collapse to their *value*. The database stores the member NAME
+    ("NORMAL" -- see the note at the top of migrations.py), but that spelling
+    never reaches here: SQLAlchemy hands back a member and Pydantic parses one,
+    so `.value` is the one representation both sides already share. `str()` would
+    not be, since on a str-mixin enum it prints "Priority.NORMAL".
+
+    A date is compared as its day. That covers a due date rendered as the instant
+    at midnight and sent back that way -- Pydantic parses it to a `date` before it
+    gets here, so the truncation happens on the typed value and never on free
+    text, where a note that merely begins with a timestamp would otherwise hide a
+    real edit.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):  # before int, because a bool is one
+        return value
+    if isinstance(value, enum.Enum):
+        return _canonical(value.value)
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, date):  # datetime is a date; a due date has no time
+        return value.isoformat()[:10]
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _same(before: object, after: object) -> bool:
+    if before == after:
+        return True
+    before_blank, after_blank = before == "", after == ""
+    # `null`, an absent value and an empty string all mean "nothing here", so one
+    # standing in for another is not a change
+    if before_blank and after_blank:
+        return True
+    # an absent boolean is an off boolean: a form that never drew the checkbox is
+    # not asking for a lock to be cleared
+    if before_blank or after_blank:
+        return before is False or after is False
+    if isinstance(before, bool) or isinstance(after, bool):
+        return bool(before) == bool(after)
+    # a numeric field can arrive as either, depending on which side of the input
+    # it came from
+    if isinstance(before, (int, float)) or isinstance(after, (int, float)):
+        try:
+            return float(before) == float(after)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _differs(po: PurchaseOrder, field: str, value: object) -> bool:
+    """Has this field really moved away from what is stored?
+
+    An explicit null for a column that cannot hold one is not an instruction --
+    it is a payload that never carried the field meaningfully -- so it reads as
+    "no change" rather than as a request to write NULL and fail the constraint.
+    """
+    if value is None and field in _NOT_NULLABLE:
+        return False
+    return not _same(_canonical(getattr(po, field)), _canonical(value))
+
+
+@router.get("", response_model=list[POOut])
+def list_pos(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    start: date | None = Query(None, description="due_date >= start"),
+    end: date | None = Query(None, description="due_date <= end"),
+    status_in: list[POStatus] | None = Query(None, alias="status"),
+    stage: Stage | None = None,
+    priority: Priority | None = None,
+    owner_id: str | None = None,
+    q: str | None = Query(None, description="search job / PO / part / material"),
+    sort: str = Query(
+        "due_asc",
+        pattern="^(due_asc|due_desc|priority_desc|priority_asc|job)$",
+        description="due_asc | due_desc | priority_desc | priority_asc | job",
+    ),
+) -> list[PurchaseOrder]:
+    stmt = select(PurchaseOrder).options(selectinload(PurchaseOrder.owner))
+    if start:
+        stmt = stmt.where(PurchaseOrder.due_date >= start)
+    if end:
+        stmt = stmt.where(PurchaseOrder.due_date <= end)
+    if status_in:
+        stmt = stmt.where(PurchaseOrder.status.in_(status_in))
+    if stage:
+        stmt = stmt.where(
+            PurchaseOrder.status.in_([s for s, st in STAGE_BY_STATUS.items() if st == stage])
+        )
+    if priority:
+        stmt = stmt.where(PurchaseOrder.priority == priority)
+    if owner_id:
+        stmt = stmt.where(PurchaseOrder.owner_id == owner_id)
+    if q:
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                PurchaseOrder.job_no.ilike(like),
+                PurchaseOrder.po_number.ilike(like),
+                PurchaseOrder.part_number.ilike(like),
+                PurchaseOrder.material.ilike(like),
+                PurchaseOrder.customer.ilike(like),
+            )
+        )
+    # rank column so "hot" sorts above "low" instead of alphabetically
+    rank = case(
+        *[(PurchaseOrder.priority == p, r) for p, r in PRIORITY_RANK.items()],
+        else_=len(PRIORITY_RANK),
+    )
+    order = {
+        "due_asc": (PurchaseOrder.due_date.asc(), rank.asc()),
+        "due_desc": (PurchaseOrder.due_date.desc(), rank.asc()),
+        "priority_desc": (rank.asc(), PurchaseOrder.due_date.asc()),
+        "priority_asc": (rank.desc(), PurchaseOrder.due_date.asc()),
+        "job": (PurchaseOrder.job_no.asc(),),
+    }[sort]
+
+    rows = list(db.scalars(stmt.order_by(*order, PurchaseOrder.job_no)))
+    _attach_last_modified(db, rows)
+    return rows
+
+
+@router.post("", response_model=POOut, status_code=status.HTTP_201_CREATED)
+def create_po(
+    payload: POCreate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_editor),
+) -> PurchaseOrder:
+    # New work can't be dated before today. This lives on the create route instead of
+    # on POCreate so it cannot leak into PATCH: the board is full of overdue jobs that
+    # still have to be editable, and the demo seed builds ORM rows directly anyway.
+    today = date.today()
+    if payload.due_date < today:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Due date cannot be in the past; pick {today.isoformat()} or later",
+        )
+    po = PurchaseOrder(**payload.model_dump())
+    # No owner field at all means "mine", the old behaviour. An explicit null is
+    # the picker saying Unassigned, and has to survive rather than snap back to
+    # the creator.
+    if "owner_id" not in payload.model_fields_set:
+        po.owner_id = actor.id
+    else:
+        _resolve_owner(db, po.owner_id)
+    db.add(po)
+    db.flush()
+    _log(db, actor, "PO created", po, f"{po.job_no} · {po.po_number}")
+    db.commit()
+    db.refresh(po)
+    _attach_last_modified(db, [po])
+    return po
+
+
+@router.get("/{po_id}", response_model=POOut)
+def get_po(
+    po_id: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> PurchaseOrder:
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _attach_last_modified(db, [po])
+    return po
+
+
+@router.patch("/{po_id}", response_model=POOut)
+def update_po(
+    po_id: str,
+    payload: POUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_editor),
+) -> PurchaseOrder:
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _guard_locked(po, actor)
+
+    changes = payload.model_dump(exclude_unset=True)
+
+    moved_to = changes.pop("stage", None)
+    if moved_to and STAGE_BY_STATUS[po.status] != moved_to:
+        changes.setdefault("status", STAGE_DEFAULT_STATUS[moved_to])
+
+    # The drawer sends its whole draft, so most of what arrives is an echo of what
+    # is already stored. Narrowing to what genuinely moved, once, is what keeps the
+    # trail honest: pressing Save on an untouched order used to name whoever
+    # pressed it in the dashboard's Modified column for a change nobody made.
+    changed = {field: value for field, value in changes.items() if _differs(po, field, value)}
+
+    if "status" in changed:
+        _log(db, actor, "Status changed", po, f"{po.status.value} -> {changed['status'].value}")
+    if "due_date" in changed:
+        _log(db, actor, "Due date moved", po, f"{po.due_date} -> {changed['due_date']}")
+    if "locked" in changed:
+        was, now = ("locked", "unlocked") if po.locked else ("unlocked", "locked")
+        _log(db, actor, f"PO {now}", po, f"{po.job_no}: {was} -> {now}")
+    # `exclude_unset` above is what keeps "leave the owner alone" apart from
+    # "clear the owner": an absent field never reaches here, an explicit null does.
+    if "owner_id" in changed:
+        handed_to = _resolve_owner(db, changed["owner_id"])
+        _log(db, actor, "Owner changed", po,
+             f"{po.job_no}: {_owner_name(po.owner)} -> {_owner_name(handed_to)}")
+
+    # Only the moved fields are assigned, which is also what leaves `updated_at`
+    # alone on a save that changed nothing: SQLAlchemy issues no UPDATE for a row
+    # it finds unmodified, so the stamp cannot claim an edit the trail denies.
+    for field, value in changed.items():
+        setattr(po, field, value)
+
+    # Fields with a line of their own above are kept out of the catch-all, or a
+    # reassignment would be reported twice.
+    other = sorted(field for field in changed if field not in _OWN_LINE)
+    if other:
+        _log(db, actor, "PO updated", po, ", ".join(other))
+
+    db.commit()
+    db.refresh(po)
+    _attach_last_modified(db, [po])
+    return po
+
+
+@router.delete("/{po_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_po(
+    po_id: str, db: Session = Depends(get_db), actor: User = Depends(require_editor)
+) -> None:
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _guard_locked(po, actor)
+    _log(db, actor, "PO deleted", po, f"{po.job_no} · {po.po_number}")
+    db.delete(po)
+    db.commit()
+
+
+@router.get("/{po_id}/activity", response_model=list[ActivityOut])
+def po_activity(
+    po_id: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> list[Activity]:
+    stmt = (
+        select(Activity)
+        .options(selectinload(Activity.actor))
+        .where(Activity.entity_type == "purchase_order", Activity.entity_id == po_id)
+        .order_by(Activity.created_at.desc())
+        .limit(50)
+    )
+    return list(db.scalars(stmt))
