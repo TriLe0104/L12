@@ -1,12 +1,14 @@
 import type {
   ActivityItem,
   Assignee,
+  POComment,
   PODraft,
   PurchaseOrder,
   StageMeta,
   StatusMeta,
   User,
 } from "./types";
+import type { BoardSettings } from "./boardTypes";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
@@ -97,6 +99,17 @@ export const api = {
   deletePO: (id: string) =>
     request<void>(`/api/purchase-orders/${id}`, { method: "DELETE" }),
   poActivity: (id: string) => request<ActivityItem[]>(`/api/purchase-orders/${id}/activity`),
+  listComments: (id: string) =>
+    request<POComment[]>(`/api/purchase-orders/${id}/comments`),
+  addComment: (id: string, body: string) =>
+    request<POComment>(`/api/purchase-orders/${id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+  deleteComment: (poId: string, commentId: string) =>
+    request<void>(`/api/purchase-orders/${poId}/comments/${commentId}`, {
+      method: "DELETE",
+    }),
 
   listUsers: (params: Record<string, string | undefined> = {}) => {
     const qs = new URLSearchParams(
@@ -116,6 +129,13 @@ export const api = {
 
   statuses: () => request<StatusMeta[]>("/api/meta/statuses"),
   stages: () => request<StageMeta[]>("/api/meta/stages"),
+
+  boardSettings: () => request<BoardSettings>("/api/settings/board"),
+  saveBoardSettings: (document: BoardSettings["document"]) =>
+    request<BoardSettings>("/api/settings/board", {
+      method: "PUT",
+      body: JSON.stringify({ document }),
+    }),
 
   uploadImage: (file: File) => postFile<{ url: string; filename: string }>("/api/uploads", file),
 

@@ -5,7 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
-from ..models import Activity, Role, User, has_rank, role_label
+from ..models import Activity, PurchaseOrder, Role, User, has_rank, role_label
 from ..schemas import ActivityOut, Assignee, UserCreate, UserOut, UserUpdate
 from ..security import (
     PEOPLE_FLOOR,
@@ -264,11 +264,36 @@ def update_user(
 def delete_user(
     user_id: str, db: Session = Depends(get_db), actor: User = Depends(require_admin)
 ) -> None:
+    """Admin-only. Managers may administer people below them, but not remove accounts.
+
+    Self-delete is refused outright. Deleting the last usable admin is refused the
+    same way a demotion would be. Owning purchase orders blocks the delete so
+    cards are never orphaned or cascade-wiped — reassign first. Activity rows
+    authored by the person are removed with the account (ORM cascade); PO
+    comments keep their text with a blank author (SET NULL).
+    """
     if user_id == actor.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You can't delete your own account")
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    if _locks_out_admins(db, user, {"is_active": False}):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This is the only admin who can sign in — promote someone else first",
+        )
+
+    owned = db.scalar(
+        select(func.count()).select_from(PurchaseOrder).where(PurchaseOrder.owner_id == user.id)
+    ) or 0
+    if owned:
+        label = "purchase order" if owned == 1 else "purchase orders"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This person owns {owned} {label} — reassign them first",
+        )
+
     db.delete(user)
     db.commit()
 

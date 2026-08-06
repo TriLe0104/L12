@@ -6,7 +6,7 @@ import { useEffect } from "react";
 
 import { Avatar } from "@/components/Avatar";
 import { BrandMark } from "@/components/Brand";
-import { canAdministerPeople, useAuth } from "@/lib/auth";
+import { canAdministerPeople, canEditBoardSettings, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
 
 const NAV = [
@@ -18,10 +18,12 @@ const NAV = [
 /** `/users` is the directory for the ranks that administer accounts and your own
  *  record for everyone else. The rail names it for whichever it is, rather than
  *  hiding it below Manager: self-service name and photo live on that page, so it
- *  has to stay reachable, and calling it "Users" when it shows one person lies. */
+ *  has to stay reachable, and calling it "Users" when it shows one person lies.
+ *  Settings is Admin-only and omitted from the rail for everyone else. */
 const navFor = (user: User | null) => [
   ...NAV,
   { href: "/users", label: canAdministerPeople(user) ? "Users" : "My profile" },
+  ...(canEditBoardSettings(user) ? [{ href: "/settings", label: "Settings" }] : []),
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

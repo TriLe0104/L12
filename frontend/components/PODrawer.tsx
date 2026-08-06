@@ -3,11 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
-import { canEdit, canModifyPO, LOCKED_REASON, useAuth } from "@/lib/auth";
+import {
+  canEdit,
+  canEditStatus,
+  canModifyPO,
+  canModifyStatus,
+  LOCKED_REASON,
+  useAuth,
+} from "@/lib/auth";
 import { changedFields } from "@/lib/dirty";
 import type { ActivityItem, PODraft, PurchaseOrder, StatusMeta } from "@/lib/types";
 import { ActivityList } from "./ActivityList";
 import { CardEditor } from "./CardEditor";
+import { CommentThread } from "./CommentThread";
 import { LockGlyph } from "./JobCard";
 import { UnsavedChangesPrompt } from "./UnsavedChangesPrompt";
 
@@ -40,6 +48,7 @@ const blank = (defaults: PODraft = {}): PODraft => ({
   model_url: null,
   model_filename: null,
   model_size: null,
+  custom_fields: {},
   ...defaults,
 });
 
@@ -51,6 +60,7 @@ export function PODrawer({
   onClose,
   onSaved,
   onDeleted,
+  onCommentCountChange,
 }: {
   po: PurchaseOrder | null;
   mode: "view" | "create";
@@ -59,9 +69,12 @@ export function PODrawer({
   onClose: () => void;
   onSaved: (po: PurchaseOrder) => void;
   onDeleted: (id: string) => void;
+  /** Dashboard badge refresh when a note is posted from the drawer. */
+  onCommentCountChange?: (poId: string, count: number) => void;
 }) {
   const { user } = useAuth();
   const editable = canEdit(user);
+  const statusCapable = canEditStatus(user);
   // the record the drawer is currently attached to; a create turns into this one's edit view
   const [record, setRecord] = useState<PurchaseOrder | null>(po);
   // A new order starts out owned by whoever is filling it in — the same default
@@ -82,13 +95,19 @@ export function PODrawer({
   const creating = mode === "create" && !record;
   // the lock applies to the record as stored, not to the unsaved draft
   const modifiable = editable && (creating || canModifyPO(user, record));
+  // User (and above) may flip status on an unlocked order without full edit rights
+  const statusEditable = !creating && canModifyStatus(user, record);
+  const statusOnly = statusEditable && !modifiable;
 
   const changed = useMemo(() => changedFields(baseline, draft), [baseline, draft]);
   /* Someone who may not change this order meets a form of disabled fields, so it
      can never reach a dirty state — but the guard says so itself rather than
      leaning on that, or a stray programmatic edit would trap them behind a
-     prompt whose Save can only 403. */
-  const dirty = modifiable && changed.length > 0;
+     prompt whose Save can only 403. Status-only actors dirty solely on status. */
+  const dirty = modifiable
+    ? changed.length > 0
+    : statusOnly && changed.includes("status");
+  const canSave = modifiable || (statusOnly && dirty);
 
   const loadActivity = (id: string) =>
     api.poActivity(id).then(setActivity).catch(() => setActivity([]));
@@ -144,10 +163,13 @@ export function PODrawer({
     setError(null);
     setSavedNote(null);
     try {
-      const payload = { ...draft, qty: Number(draft.qty) || 1 };
+      // Status-only actors send just status — never the whole draft — so a stray
+      // disabled-field echo cannot widen the PATCH past what the server allows.
       const saved = creating
-        ? await api.createPO(payload)
-        : await api.updatePO(record!.id, payload);
+        ? await api.createPO({ ...draft, qty: Number(draft.qty) || 1 })
+        : statusOnly
+          ? await api.updatePO(record!.id, { status: draft.status })
+          : await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
       // stay open on the saved record: server-derived fields (stage, labels) come back here
       setRecord(saved);
       setDraft(saved);
@@ -207,11 +229,12 @@ export function PODrawer({
             }}
             statuses={statuses}
             disabled={!modifiable}
+            statusDisabled={!modifiable && !statusEditable}
             lockable={!creating}
             minDue={creating ? todayLocal() : undefined}
           />
 
-          {!modifiable && editable && record?.locked && (
+          {!modifiable && !statusEditable && statusCapable && record?.locked && (
             <p className="lock-note" role="status">
               <LockGlyph />
               {LOCKED_REASON}
@@ -220,16 +243,16 @@ export function PODrawer({
 
           {error && <p className="error">{error}</p>}
 
-          {editable && (
+          {(modifiable || statusEditable) && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button
                 className="btn btn-primary"
                 onClick={() => void save()}
-                disabled={busy || !modifiable}
+                disabled={busy || !canSave}
               >
                 {busy ? "Saving…" : creating ? "Create PO" : "Save changes"}
               </button>
-              {!creating && record && (
+              {modifiable && !creating && record && (
                 <button
                   className="btn btn-danger"
                   onClick={remove}
@@ -246,8 +269,17 @@ export function PODrawer({
             </div>
           )}
 
-          {!creating && (
+          {!creating && record && (
             <>
+              <div className="section-label">Comments</div>
+              <CommentThread
+                poId={record.id}
+                variant="embedded"
+                onCountChange={(count) => {
+                  setRecord((r) => (r ? { ...r, comment_count: count } : r));
+                  onCommentCountChange?.(record.id, count);
+                }}
+              />
               <div className="section-label">Activity</div>
               <ActivityList items={activity} emptyLabel="No changes recorded yet." />
             </>

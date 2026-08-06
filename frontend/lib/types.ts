@@ -16,20 +16,12 @@ export const roleRank = (role: Role): number => ROLE_ORDER.indexOf(role);
 /** Most authority first — the order pickers should show. */
 export const ROLES_HIGH_TO_LOW: Role[] = [...ROLE_ORDER].reverse();
 
-export type POStatus =
-  | "new"
-  | "rfq_finishing"
-  | "in_machining"
-  | "finishing"
-  | "under_inspection"
-  | "wait_vqc"
-  | "ready_to_ship"
-  | "shipped"
-  | "on_hold";
+export type POStatus = string;
 
 export type Inspection = "formal" | "standard" | "source" | "none";
 
-export type Stage = "pending" | "on_hold" | "in_progress" | "completed";
+/** Kanban column key — day-one values match the old Stage enum. */
+export type Stage = string;
 
 export type Priority = "hot" | "high" | "normal" | "low";
 
@@ -85,10 +77,14 @@ export interface PurchaseOrder {
   model_filename: string | null;
   model_size: number | null;
   owner: OwnerBrief | null;
+  /** Admin-defined attributes; keys match board settings customFields. */
+  custom_fields: Record<string, string | number | null> | null;
   created_at: string;
   updated_at: string;
   /** Null only when no attributable change to the order exists in the trail. */
   last_modified: LastModified | null;
+  /** Notes on this order; derived server-side so the dashboard badge never N+1s. */
+  comment_count: number;
 }
 
 /** An order as the editor holds it. Reads carry the owner expanded; writes carry
@@ -120,15 +116,23 @@ export interface ActivityItem {
   actor: OwnerBrief | null;
 }
 
+/** A note on a purchase order. Separate from activity — does not move Modified. */
+export interface POComment {
+  id: string;
+  body: string;
+  created_at: string;
+  actor: OwnerBrief | null;
+}
+
 export interface StatusMeta {
-  value: POStatus;
+  value: string;
   label: string;
   tone: string;
 }
 
 export interface StageMeta {
-  value: Stage;
+  value: string;
   label: string;
   tone: string;
-  statuses: POStatus[];
+  statuses: string[];
 }

@@ -641,6 +641,11 @@ button.jobcard-thumb:focus-visible {
   border-top: 1px solid var(--rule-soft);
 }
 
+/* Wrapper so field order can be mapped without breaking the 2-col grid. */
+.spec-pair {
+  display: contents;
+}
+
 .spec dt,
 .spec dd {
   margin: 0;
@@ -1045,8 +1050,8 @@ button.jobcard-thumb:focus-visible {
 /* ---------------- kanban ---------------- */
 .kanban {
   display: grid;
-  /* four columns while they fit, then two, then one -- never a sideways scroll */
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* column count comes from board settings via --kanban-cols */
+  grid-template-columns: repeat(var(--kanban-cols, 4), minmax(0, 1fr));
   gap: 0.875rem;
   align-items: start;
   padding-bottom: 0.625rem;
@@ -1282,8 +1287,133 @@ button.jobcard-thumb:focus-visible {
 }
 
 .fc .fc-daygrid-more-link {
-  font-size: 0.66rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.75rem;
+  max-width: calc(100% - 0.25rem);
+  margin: 0.08rem 0.12rem 0.18rem;
+  padding: 0.22rem 0.38rem;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.fc .fc-daygrid-more-link:hover {
+  border-color: var(--tone-blue);
+  background: var(--tone-blue);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.fc .fc-daygrid-more-link:focus-visible {
+  outline: 3px solid var(--paper);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 5px var(--tone-blue);
+}
+
+/* FullCalendar's popover reuses day-grid event harnesses outside the grid.
+   Make those harnesses normal flow rows so compact chips cannot collide. */
+.fc .fc-more-popover {
+  display: flex;
+  flex-direction: column;
+  width: min(22rem, calc(100vw - 1.25rem));
+  max-width: calc(100vw - 1.25rem);
+  max-height: min(36rem, 60dvh);
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 0 20px 48px -24px rgba(13, 17, 23, 0.72);
+}
+
+.fc .fc-more-popover .fc-popover-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.55rem 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--ink);
+  color: #fff;
+}
+
+.fc .fc-more-popover .fc-popover-title {
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.015em;
+}
+
+.fc .fc-more-popover .fc-popover-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.fc .fc-more-popover .fc-popover-close:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.fc .fc-more-popover .fc-popover-close:focus-visible {
+  outline: 3px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.fc .fc-more-popover .fc-popover-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.65rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.fc .fc-more-popover .fc-daygrid-event-harness {
+  position: relative !important;
+  inset: auto !important;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin: 0 !important;
+}
+
+.fc .fc-more-popover .fc-event {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.fc .fc-more-popover .chip {
+  width: 100%;
+}
+
+.fc .fc-more-popover .chip:hover {
+  transform: translateY(-1px);
 }
 
 .fc .fc-button {
@@ -1512,6 +1642,12 @@ button.jobcard-thumb:focus-visible {
 .fc .fc-multimonth .fc-event {
   margin: 0;
   line-height: 0;
+}
+
+/* MultiMonth internally forces overflow links even when the view disables
+   dayMaxEvents. The highlighted day remains the drill-in target. */
+.fc .fc-multimonth .fc-daygrid-more-link {
+  display: none;
 }
 
 .year-dot {
@@ -2593,6 +2729,342 @@ button.jobcard-thumb:focus-visible {
     width: 100%;
     flex-basis: auto;
     height: 6.5rem;
+  }
+}
+
+/* ---------- Board settings ---------- */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+  padding-bottom: 1.5rem;
+}
+
+.settings-head {
+  align-items: flex-start;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.settings-error {
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius);
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  color: #9f1239;
+  font-size: 0.88rem;
+}
+
+.settings-dirty {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tone-amber);
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.settings-editors {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.settings-tabs button {
+  border: 1px solid var(--rule);
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-tabs button[data-active="true"] {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.settings-panel {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.settings-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule-soft);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.settings-list-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 7rem;
+  flex: 1 1 8rem;
+}
+
+.settings-list-label small {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.settings-reorder {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.settings-reorder button {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--rule);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.settings-reorder button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.settings-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--rule-soft);
+}
+
+.settings-add h3 {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.settings-kanban-item {
+  flex-direction: column;
+  align-items: stretch !important;
+}
+
+.settings-kanban-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.settings-status-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.settings-map-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.settings-preview {
+  position: sticky;
+  top: 0.75rem;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.settings-preview-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.settings-preview-head p {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.settings-preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-preview-block h3 {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.settings-preview-card {
+  max-width: 22rem;
+}
+
+.settings-preview-row {
+  display: contents;
+}
+
+.settings-preview-chips,
+.settings-status-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.settings-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--tone, var(--ink));
+  background: color-mix(in srgb, var(--tone, var(--ink)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--ink)) 35%, transparent);
+}
+
+.settings-preview-dash {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.settings-preview-dash span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.45rem;
+  border-bottom: 2px solid var(--rule);
+  color: var(--ink-soft);
+}
+
+.settings-preview-kanban {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.settings-preview-kcol {
+  border: 1px solid var(--rule-soft);
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.9);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-preview-kcol header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.25rem;
+  padding: 0.35rem 0.4rem;
+  background: color-mix(in srgb, var(--tone, var(--ink)) 12%, transparent);
+  border-bottom: 2px solid var(--tone, var(--rule));
+  font-size: 0.65rem;
+}
+
+.settings-preview-kcol header b {
+  letter-spacing: 0.04em;
+}
+
+.settings-preview-kcol header small {
+  opacity: 0.7;
+}
+
+.settings-preview-kcol ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.settings-preview-kcol li {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.settings-leave-hint {
+  align-self: flex-start;
+  font-size: 0.78rem;
+}
+
+.muted {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .settings-preview {
+    position: static;
+    max-height: none;
   }
 }
 

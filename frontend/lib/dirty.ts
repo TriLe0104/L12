@@ -23,6 +23,9 @@ const DERIVED: ReadonlySet<string> = new Set([
   "status_label",
   "priority_label",
   "stage",
+  // server-derived list metadata — never form fields; must not trip the prompt
+  "last_modified",
+  "comment_count",
 ]);
 
 type Flat = string | number | boolean;

@@ -3,6 +3,9 @@
 `Base.metadata.create_all` only creates missing *tables*, so a column added to a
 model after the fact needs an ALTER. Keep entries here append-only; anything more
 involved than adding a nullable/defaulted column should move to Alembic.
+
+New tables (e.g. `po_comments`) are created by `create_all` in the app lifespan —
+no ADDED_COLUMNS entry is needed for them. This module stays column-oriented.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "model_url": "VARCHAR(500)",
         "model_filename": "VARCHAR(255)",
         "model_size": "INTEGER",
+        # Admin-defined attributes; JSON object keyed by custom field key.
+        "custom_fields": "JSON",
     },
     "users": {
         "avatar_url": "VARCHAR(500)",
@@ -37,6 +42,9 @@ REPAIRS: list[str] = [
     # reads a user -- it does, from the lifespan hook. Upper case per the note above.
     "UPDATE users SET role = UPPER(role) WHERE role <> UPPER(role)",
     "UPDATE users SET role = 'MANAGER' WHERE role IN ('PJM', 'PM')",
+    # Board settings stores status as lowercase keys (`new`). The old Enum column
+    # persisted member NAMES (`NEW`); normalise so both shapes keep working.
+    "UPDATE purchase_orders SET status = LOWER(status) WHERE status <> LOWER(status)",
 ]
 
 

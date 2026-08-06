@@ -44,9 +44,10 @@ docker compose up --build
 
 - **Dashboard** — the landing page (`/` redirects here, and it is first in the rail). One dense,
   sortable table with a row per purchase order: job no over part no as a two-line identifier, then
-  PO #, customer, priority, stage, status, owner, material, finish, due date, who last modified it
-  and a right-aligned qty. A locked order wears the lock glyph beside its job number, and an empty
-  cell reads as an em dash rather than as blank space. **Last modified** is derived rather than
+  PO #, customer, priority, stage, status, owner, material, finish, due date, who last modified it,
+  a narrow comments column (chat-bubble icon with a count badge), and a right-aligned qty. A locked
+  order wears the lock glyph beside its job number, and an empty cell reads as an em dash rather than
+  as blank space. **Last modified** is derived rather than
   stored: there is no modifier field on the order, so the list route reads it off the activity trail
   with one `row_number()` window query over every row scoped to `entity_type="purchase_order"` —
   which is what keeps a sign-in or an avatar change from making somebody the last modifier of an
@@ -56,7 +57,12 @@ docker compose up --build
   the cell over, because a save that changes nothing writes no trail row — see **Detail drawer**.
   The cell reads like the owner cell, avatar and
   name, with the time beneath and the action in the tooltip, and it sorts by *when*, not by name.
-  `All / Ongoing / On hold / Completed` filter pills carry live
+  **Comments** sit between Modified and Qty as an icon-sized column (sortable by count): clicking the
+  bubble opens a chat-style thread without opening the drawer (`stopPropagation`), and the same
+  thread is embedded in the detail drawer. Any signed-in rank can read and post — including Viewer —
+  and a locked order still accepts notes, because comments are not order edits and never write
+  activity or move Modified. Each list row carries `comment_count` from one GROUP BY so the badge
+  never N+1s. `All / Ongoing / On hold / Completed` filter pills carry live
   counts derived from each order's stage — the three named buckets partition the four stages, so
   they always add up to All, search included. Search is the server's `q` (job, PO, part, material,
   customer), the same as the task board. Every column sorts on click and reverses on the second
@@ -109,7 +115,13 @@ docker compose up --build
   `lib/dirty.ts` does on the client — `null` against an empty string, whitespace typed and deleted,
   a number or a date that round-tripped through an input, an enum arriving as its value — so a save
   with no edits writes no row at all, and leaves `updated_at` where it was: a stamp that moved
-  while the trail recorded nothing would be the same false claim in another column.
+  while the trail recorded nothing would be the same false claim in another column. Below the form,
+  a **Comments** section shares the same thread UI as the dashboard bubble; posting a note never
+  dirties the unsaved-changes guard and never requires editor rank.
+- **PO comments** — first-class `po_comments` rows (not activity): body, author, timestamp. Any
+  signed-in user may list and post; author or Manager+ may delete. Cascade with the order; author
+  delete SETs NULL so the thread keeps its chronology. No activity row, no lock check, no
+  Modified bump — notes are conversation, not edits.
 - **Unsaved changes** — dismissing the drawer with edits in it asks first. The scrim, `Escape` and
   the `Close` button all route through one guard, and it only fires when the form has really moved
   away from the record it was opened on: `lib/dirty.ts` compares the draft field by field after
@@ -124,7 +136,8 @@ docker compose up --build
   **Discard this new order?** instead, since discarding loses the order rather than an edit. A refused
   save — a 403 on a locked order, a validation message, a dead network — closes nothing: the prompt
   steps aside and the drawer keeps the edits and shows the reason. A read-only drawer renders its
-  fields disabled and so can never reach a dirty state, and never prompts.
+  fields disabled and so can never reach a dirty state, and never prompts. Opening or posting
+  comments is never treated as a draft change.
 - **3D model** — one model per order, in a slot beside the part photo rather than instead of it.
   Click or drop **OBJ, FBX, STEP** (`.stp`/`.step`) or **Rhino 3DM** into the well and it opens in a
   full-screen viewer with orbit, pan and zoom, the camera framed on the part's bounding box, and a
@@ -151,9 +164,11 @@ docker compose up --build
 - **Roles** — a four-rung hierarchy, **Admin > Manager > User > Viewer**. It is written down once,
   as `ROLE_RANK` in `backend/app/models.py` (mirrored by `ROLE_ORDER` in `frontend/lib/types.ts`),
   and every check derives from it rather than from hard-coded role names: "manager and above" is
-  `has_rank(role, Role.MANAGER)`, and "may act on" is `outranks(actor, target)`. Editing purchase
-  orders needs Manager or above; `user` and `viewer` are read-only on orders and differ only in
-  rank for now. Self-registration lands on `user`.
+  `has_rank(role, Role.MANAGER)`, and "may act on" is `outranks(actor, target)`. Full purchase-order
+  edits (create, delete, arbitrary PATCH) need Manager or above (`EDITOR_FLOOR`). A **User** may
+  change **status** and **stage** on an unlocked order (`STATUS_FLOOR`) — drawer status select and
+  kanban column drag — but is refused on every other field; a locked order stays Admin-only.
+  Viewer remains read-only on orders. Self-registration lands on `user`.
 - **Users** — directory with search, role filter and per-user activity, for the ranks that
   administer accounts. Manager and above can invite
   people, set roles and assign an org (pick an existing one or type a new one). Two rules keep that
@@ -195,6 +210,15 @@ docker compose up --build
   (`--ease`, `--t-fast/mid/slow` in `globals.css`); only `transform` and `opacity` are animated, so
   motion stays off the layout path. `prefers-reduced-motion` cuts every transition and skips the
   drag flourishes while leaving the interaction itself intact.
+- **Board settings** (Admin only) — `/settings` in the rail. A published JSON document in
+  `board_settings` configures card field visibility/order (built-ins plus custom attributes), the
+  status catalog (label + tone), dashboard table columns, and Task Progress kanban columns (each
+  with an ordered list of status keys). Live preview on the right uses fixed sample data so edits
+  never mutate production rows. Save publishes atomically for everyone; Cancel reverts the draft.
+  Removing a custom attribute hides it from the UI but does **not** purge values already stored in
+  each PO’s `custom_fields` JSON map. Removing a status that any PO still uses is blocked with a
+  count. Kanban drag still sets status to the target column’s first mapped status (same behaviour as
+  the old stage→default-status rule). Day-one seed matches the previous hard-coded board.
 
 ## API
 
@@ -204,11 +228,14 @@ docker compose up --build
 | GET | `/api/auth/config` | whether sign-up is open, which provider is active |
 | POST | `/api/auth/login` | email + password → JWT |
 | GET | `/api/auth/me` | current user |
-| GET | `/api/purchase-orders` | filters: `start`, `end`, `status`, `stage`, `priority`, `owner_id`, `q`; `sort` = `due_asc` \| `due_desc` \| `priority_desc` \| `priority_asc` \| `job`; every row carries `locked` |
+| GET | `/api/purchase-orders` | filters: `start`, `end`, `status`, `stage`, `priority`, `owner_id`, `q`; `sort` = `due_asc` \| `due_desc` \| `priority_desc` \| `priority_asc` \| `job`; every row carries `locked` and `comment_count` |
 | POST | `/api/purchase-orders` | create — manager and above; `owner_id` assigns it to someone else, an explicit `null` starts it unassigned, and leaving the field out gives it to the creator |
-| PATCH | `/api/purchase-orders/{id}` | partial update, logs status / due-date / lock / owner changes; accepts `locked` (any editor may set it, only an admin may clear it), 403 on any change to a locked order from a `manager`; `owner_id` reassigns — omit it to leave the owner alone, send `null` to clear it, and an unknown id is a 400 rather than a dangling reference |
+| PATCH | `/api/purchase-orders/{id}` | partial update, logs status / due-date / lock / owner changes; accepts `locked` (any editor may set it, only an admin may clear it), 403 on any change to a locked order from below admin; a **User** may PATCH only `status` / `stage` on an unlocked order (other fields 403); `owner_id` reassigns — omit it to leave the owner alone, send `null` to clear it, and an unknown id is a 400 rather than a dangling reference |
 | DELETE | `/api/purchase-orders/{id}` | delete — 403 while the order is `locked` unless admin |
 | GET | `/api/purchase-orders/{id}/activity` | audit trail |
+| GET | `/api/purchase-orders/{id}/comments` | comment thread, oldest→newest — any signed-in rank; lock does not apply |
+| POST | `/api/purchase-orders/{id}/comments` | add a note (`{body}`) — any signed-in rank, including Viewer and on locked orders; empty/whitespace body → 400 plain string; does not write activity or move Modified |
+| DELETE | `/api/purchase-orders/{id}/comments/{comment_id}` | remove a note — author or Manager+ (people floor); lock does not block it |
 | GET | `/api/users` | the full directory, with `q` and `role` filters — manager and above. Carries email, role and sign-in state, so it sits on the same floor as administering accounts; a filter is not a side door |
 | POST | `/api/users` | invite — manager and above, and only at a role strictly below your own |
 | GET | `/api/users/{id}` | one person — your own record at any rank, anyone else's at manager and above. Refuses before it looks, so a 403 doesn't reveal whether the id exists |
@@ -221,10 +248,12 @@ docker compose up --build
 | POST | `/api/uploads` | multipart image for a purchase order (PNG/JPEG/WebP/GIF, ≤ 8 MB) → `/uploads/…` — manager and above |
 | POST | `/api/uploads/avatar` | multipart image, same rules, stored and applied to the caller's own account → updated user; any signed-in rank |
 | POST | `/api/uploads/model` | multipart 3D model for a purchase order (OBJ/FBX/STEP/3DM, ≤ 64 MB) → `{url, filename, size, format}` — manager and above. Validated by extension **and** by the file's leading bytes; the declared MIME type is ignored, so a renamed PNG is refused |
-| GET | `/api/meta/statuses` | status values, labels and colour tones |
-| GET | `/api/meta/stages` | the four kanban columns and the statuses each contains |
+| GET | `/api/meta/statuses` | status values, labels and colour tones — from published board settings |
+| GET | `/api/meta/stages` | kanban columns and the statuses each contains — from published board settings |
 | GET | `/api/meta/priorities` | priority values, labels and colour tones |
 | GET | `/api/meta/roles` | the four roles with their labels and ranks, most authority first |
+| GET | `/api/settings/board` | published board settings document — any signed-in user |
+| PUT | `/api/settings/board` | replace board settings — Admin only; validates unique keys, every status in exactly one kanban column, blocks removing in-use statuses |
 
 Interactive docs: http://localhost:8000/docs
 
@@ -232,7 +261,8 @@ Interactive docs: http://localhost:8000/docs
 
 `AUTH_PROVIDER=local` uses email + password with PBKDF2 hashes and HS256 JWTs. Anyone can
 register at `/register`; new accounts get the role in `SIGNUP_DEFAULT_ROLE`, which ships as
-`user` — signed in, but read-only on orders and unable to administer anyone. **Lower it to
+`user` — signed in, able to change status/stage on unlocked orders, unable to administer anyone
+or edit other order fields. **Lower it to
 `viewer` — or set `ALLOW_SIGNUP=false` — before the app is reachable from staging.** Every protected
 route depends on one function — `get_current_user` in `backend/app/security.py`. To move to
 Entra ID (or Auth0), validate the OIDC token there and map the `email` claim onto a `User` row;
@@ -246,7 +276,9 @@ COLUMN` statements that skip anything already present. Note that `Enum(..., nati
 stores the member *name* (`NORMAL`), so defaults in that file are upper case. Anything beyond
 adding a defaulted column should move to Alembic. Applied so far: `purchase_orders.priority`,
 `purchase_orders.locked`, `purchase_orders.model_url`, `purchase_orders.model_filename`,
-`purchase_orders.model_size` and `users.avatar_url`.
+`purchase_orders.model_size` and `users.avatar_url`. `purchase_orders.custom_fields` (JSON, nullable)
+holds Admin-defined attribute values; the `board_settings` table is created by `create_all` (no
+column entry needed). Status values are normalised to lowercase keys on startup.
 
 The same file carries a short `REPAIRS` list of idempotent `UPDATE`s for rewriting stored enum
 values. That is how the role change landed: rows written under the old hierarchy hold `PJM` and

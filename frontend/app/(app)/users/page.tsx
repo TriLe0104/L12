@@ -13,6 +13,7 @@ export default function UsersPage() {
   // Manager and above administer people; what they may do to any given person is
   // then narrowed per row by canManageUser, mirroring the server's rank rule.
   const canAdmin = canAdministerPeople(me);
+  const isAdmin = me?.role === "admin";
   const canAssign = assignableRoles(me);
 
   const [users, setUsers] = useState<User[]>([]);
@@ -40,6 +41,8 @@ export default function UsersPage() {
   const canManageSelected = canManageUser(me, selected);
   // Your own name and photo are yours at any rank; someone else's needs rank over them.
   const canEditProfile = !!selected && (selected.id === me?.id || canManageSelected);
+  // Delete is Admin-only and never offered on your own row (mirrors the API).
+  const canDeleteSelected = !!isAdmin && !!selected && selected.id !== me?.id;
 
   const load = useCallback(async () => {
     // Below Manager the directory is closed, and there is nothing to browse anyway:
@@ -227,6 +230,28 @@ export default function UsersPage() {
       loadOrgs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invite failed");
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selected || !canDeleteSelected) return;
+    setError(null);
+    if (
+      !window.confirm(
+        `Delete ${selected.name} (${selected.email})?\n\n` +
+          `This permanently removes the account and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const removedId = selected.id;
+    try {
+      await api.deleteUser(removedId);
+      const next = users.filter((u) => u.id !== removedId);
+      setUsers(next);
+      setSelectedId((current) => (current === removedId ? (next[0]?.id ?? null) : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
@@ -569,6 +594,25 @@ export default function UsersPage() {
                       <span style={{ fontSize: "0.75rem", color: "var(--go)" }}>{passwordNote}</span>
                     )}
                   </form>
+                </>
+              )}
+
+              {canDeleteSelected && (
+                <>
+                  <div className="section-label">Danger zone</div>
+                  <div className="inline-controls">
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      aria-label={`Delete ${selected.name}`}
+                      onClick={() => void deleteSelected()}
+                    >
+                      Delete user
+                    </button>
+                    <span style={{ fontSize: "0.75rem", color: "var(--steel)", flex: "1 1 12rem" }}>
+                      Permanently removes this account. Orders they own must be reassigned first.
+                    </span>
+                  </div>
                 </>
               )}
 

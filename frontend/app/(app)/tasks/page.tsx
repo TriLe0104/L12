@@ -5,7 +5,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { JobCard } from "@/components/JobCard";
 import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
-import { canEdit, canModifyPO, useAuth } from "@/lib/auth";
+import { canEdit, canEditStatus, canModifyStatus, useAuth } from "@/lib/auth";
+import { useBoardSettings } from "@/lib/boardSettings";
 import { captureRects, playFlip, type RectMap } from "@/lib/flip";
 import { useBoardDrag } from "@/lib/useBoardDrag";
 import {
@@ -18,7 +19,7 @@ import {
 
 type SortKey = "due_asc" | "due_desc" | "priority_desc" | "priority_asc";
 
-/** "board" is the four-stage kanban; "cards" is every job in one flat grid. */
+/** "board" is the kanban; "cards" is every job in one flat grid. */
 type View = "board" | "cards";
 
 const SORTS: { value: SortKey; label: string }[] = [
@@ -31,6 +32,7 @@ const SORTS: { value: SortKey; label: string }[] = [
 const SORT_STORAGE_KEY = "po_calendar_task_sort";
 const VIEW_STORAGE_KEY = "po_calendar_task_view";
 const ZOOM_STORAGE_KEY = "po_calendar_task_zoom";
+const HIDE_COMPLETED_STORAGE_KEY = "po_calendar_task_hide_completed";
 
 /* Zoom is the grid's minimum track width, not a transform: the cards really are
    bigger, so the type stays sharp and the hit targets stay honest. Each step
@@ -62,15 +64,15 @@ const FALLBACK_STAGES: StageMeta[] = [
   { value: "completed", label: "COMPLETED", tone: "green", statuses: [] },
 ];
 
-const ORDER: Stage[] = ["pending", "in_progress", "on_hold", "completed"];
+const COLUMN_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight"];
 
 export default function TasksPage() {
   const { user } = useAuth();
   const editable = canEdit(user);
+  const canDragStatus = canEditStatus(user);
+  const { document, stages: boardStagesMeta, statuses: boardStatuses } = useBoardSettings();
 
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
-  const [stages, setStages] = useState<StageMeta[]>(FALLBACK_STAGES);
-  const [statuses, setStatuses] = useState<StatusMeta[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
@@ -78,6 +80,33 @@ export default function TasksPage() {
   const [sort, setSort] = useState<SortKey>("due_asc");
   const [view, setView] = useState<View>("board");
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [hideCompleted, setHideCompleted] = useState(false);
+
+  const stages = boardStagesMeta.length ? boardStagesMeta : FALLBACK_STAGES;
+  const statuses: StatusMeta[] = boardStatuses;
+
+  const columnOrder = useMemo(
+    () => (document?.kanbanColumns ?? []).map((c) => c.key as Stage),
+    [document],
+  );
+  const completedKeys = useMemo(() => {
+    const marked = (document?.kanbanColumns ?? [])
+      .filter((c) => c.isCompleted)
+      .map((c) => c.key);
+    return new Set(marked.length ? marked : ["completed"]);
+  }, [document]);
+
+  const ORDER = useMemo(
+    () =>
+      columnOrder.length
+        ? columnOrder
+        : (["pending", "in_progress", "on_hold", "completed"] as Stage[]),
+    [columnOrder],
+  );
+  const ACTIVE_ORDER = useMemo(
+    () => ORDER.filter((s) => !completedKeys.has(s)),
+    [ORDER, completedKeys],
+  );
 
   const boardRef = useRef<HTMLDivElement>(null);
   const pendingFlip = useRef<RectMap | null>(null);
@@ -108,6 +137,9 @@ export default function TasksPage() {
       const level = Number(savedZoom);
       if (Number.isInteger(level) && level >= 0 && level < ZOOM_STEPS.length) setZoom(level);
     }
+
+    const savedHide = window.localStorage.getItem(HIDE_COMPLETED_STORAGE_KEY);
+    if (savedHide === "1" || savedHide === "true") setHideCompleted(true);
   }, []);
 
   const changeSort = (next: SortKey) => {
@@ -128,14 +160,15 @@ export default function TasksPage() {
     window.localStorage.setItem(ZOOM_STORAGE_KEY, String(next));
   };
 
+  const changeHideCompleted = (next: boolean) => {
+    rememberLayout();
+    setHideCompleted(next);
+    window.localStorage.setItem(HIDE_COMPLETED_STORAGE_KEY, next ? "1" : "0");
+  };
+
   const load = useCallback(async () => {
     setPOs(await api.listPOs(query.trim() ? { q: query.trim() } : {}));
   }, [query]);
-
-  useEffect(() => {
-    api.stages().then(setStages).catch(() => setStages(FALLBACK_STAGES));
-    api.statuses().then(setStatuses).catch(() => setStatuses([]));
-  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -146,13 +179,28 @@ export default function TasksPage() {
 
   const byStage = useMemo(() => {
     const map = new Map<Stage, PurchaseOrder[]>(ORDER.map((s) => [s, []]));
-    for (const po of pos) map.get(po.stage)?.push(po);
+    for (const po of pos) {
+      const bucket = map.get(po.stage) ?? map.get(ORDER[0]);
+      bucket?.push(po);
+    }
     for (const list of map.values()) list.sort(COMPARATORS[sort]);
     return map;
-  }, [pos, sort]);
+  }, [pos, sort, ORDER]);
+
+  const boardStages = hideCompleted ? ACTIVE_ORDER : ORDER;
 
   /** the all-cards view sorts the whole set with the same comparator */
-  const allCards = useMemo(() => [...pos].sort(COMPARATORS[sort]), [pos, sort]);
+  const allCards = useMemo(() => {
+    const list = hideCompleted
+      ? pos.filter((p) => !completedKeys.has(p.stage))
+      : pos;
+    return [...list].sort(COMPARATORS[sort]);
+  }, [pos, sort, hideCompleted, completedKeys]);
+
+  const visibleCount =
+    view === "board"
+      ? boardStages.reduce((n, s) => n + (byStage.get(s)?.length ?? 0), 0)
+      : allCards.length;
 
   /** the board re-sorts behind the drawer; the drawer stays open on the saved card */
   const upsert = (saved: PurchaseOrder) => {
@@ -181,11 +229,12 @@ export default function TasksPage() {
     [],
   );
 
-  /** a locked card holds its column for everyone but an admin */
-  const canMove = (po: PurchaseOrder) => canModifyPO(user, po);
+  /** a locked card holds its column for everyone but an admin; Users may move
+   *  unlocked cards (stage), Managers keep the same board drag. */
+  const canMove = (po: PurchaseOrder) => canModifyStatus(user, po);
 
   const { dragging, cardProps, columnProps } = useBoardDrag<Stage>({
-    enabled: editable,
+    enabled: canDragStatus,
     boardRef,
     // the dragged card is carried by its own clone, so FLIP leaves it alone
     onBeforeDrop: (id) => rememberLayout(id),
@@ -201,8 +250,11 @@ export default function TasksPage() {
         <div>
           <h1 className="page-title">Task cards</h1>
           <p className="page-sub">
-            {pos.length} jobs {view === "board" ? "across four columns" : "in one grid"} · sorted by{" "}
-            {SORTS.find((s) => s.value === sort)?.label.toLowerCase()} ·{" "}
+            {visibleCount} jobs{" "}
+            {view === "board"
+              ? `across ${COLUMN_WORDS[boardStages.length - 1] ?? boardStages.length} columns`
+              : "in one grid"}{" "}
+            · sorted by {SORTS.find((s) => s.value === sort)?.label.toLowerCase()} ·{" "}
             {view === "board"
               ? "drag a card to move it"
               : `${ZOOM_STEPS[zoom].label} card size`}
@@ -268,6 +320,17 @@ export default function TasksPage() {
             </div>
           )}
           <div className="seg">
+            <button
+              type="button"
+              data-active={hideCompleted}
+              aria-pressed={hideCompleted}
+              title={hideCompleted ? "Show completed work" : "Hide completed work"}
+              onClick={() => changeHideCompleted(!hideCompleted)}
+            >
+              Hide completed
+            </button>
+          </div>
+          <div className="seg">
             <button data-active={view === "board"} onClick={() => changeView("board")}>
               Progress
             </button>
@@ -280,7 +343,7 @@ export default function TasksPage() {
               className="btn btn-primary"
               onClick={() => {
                 setSelected(null);
-                setCreateStage("pending");
+                setCreateStage(ORDER[0] ?? "pending");
                 setDrawerMode("create");
               }}
             >
@@ -291,8 +354,13 @@ export default function TasksPage() {
       </div>
 
       {view === "board" ? (
-        <div className="kanban" ref={boardRef} data-dragging={dragging !== null}>
-          {ORDER.map((stage) => {
+        <div
+          className="kanban"
+          ref={boardRef}
+          data-dragging={dragging !== null}
+          style={{ ["--kanban-cols" as string]: String(Math.max(boardStages.length, 1)) }}
+        >
+          {boardStages.map((stage) => {
             const meta = stages.find((s) => s.value === stage) ?? FALLBACK_STAGES[0];
             const items = byStage.get(stage) ?? [];
             return (

@@ -3,6 +3,7 @@ import { Archivo, IBM_Plex_Mono } from "next/font/google";
 
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { BoardSettingsProvider } from "@/lib/boardSettings";
 import { RegisterSW } from "./register-sw";
 
 const ui = Archivo({
@@ -38,7 +39,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${ui.variable} ${mono.variable}`}>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <BoardSettingsProvider>{children}</BoardSettingsProvider>
+        </AuthProvider>
         <RegisterSW />
       </body>
     </html>

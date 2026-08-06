@@ -1,11 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from .. import board_service
+from ..db import get_db
 from ..models import (
     PRIORITY_META,
     ROLE_RANK,
-    STAGE_BY_STATUS,
-    STAGE_META,
-    STATUS_META,
     Inspection,
     role_label,
     roles_high_to_low,
@@ -24,24 +24,17 @@ def priorities() -> list[StatusMeta]:
 
 
 @router.get("/stages", response_model=list[StageMeta])
-def stages() -> list[StageMeta]:
-    return [
-        StageMeta(
-            value=stage.value,
-            label=meta["label"],
-            tone=meta["tone"],
-            statuses=[s.value for s, st in STAGE_BY_STATUS.items() if st == stage],
-        )
-        for stage, meta in STAGE_META.items()
-    ]
+def stages(db: Session = Depends(get_db)) -> list[StageMeta]:
+    """Kanban columns from published board settings (seeded from the old stage catalog)."""
+    doc = board_service.get_document(db)
+    return [StageMeta(**row) for row in board_service.stages_for_meta(doc)]
 
 
 @router.get("/statuses", response_model=list[StatusMeta])
-def statuses() -> list[StatusMeta]:
-    return [
-        StatusMeta(value=status.value, label=meta["label"], tone=meta["tone"])
-        for status, meta in STATUS_META.items()
-    ]
+def statuses(db: Session = Depends(get_db)) -> list[StatusMeta]:
+    """Status catalog from published board settings."""
+    doc = board_service.get_document(db)
+    return [StatusMeta(**row) for row in board_service.statuses_for_meta(doc)]
 
 
 @router.get("/roles", response_model=list[RoleMeta])

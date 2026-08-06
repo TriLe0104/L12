@@ -10,22 +10,37 @@ from sqlalchemy.orm import Session, selectinload
 
 from sqlalchemy import case, func
 
+from .. import board_service
 from ..db import get_db
 from ..models import (
     PRIORITY_RANK,
-    STAGE_BY_STATUS,
-    STAGE_DEFAULT_STATUS,
     Activity,
-    POStatus,
+    POComment,
     Priority,
     PurchaseOrder,
-    Stage,
     User,
     has_rank,
     role_label,
 )
-from ..schemas import ActivityOut, LastModified, OwnerBrief, POCreate, POOut, POUpdate
-from ..security import LOCKED_PO_FLOOR, get_current_user, require_editor
+from ..schemas import (
+    ActivityOut,
+    COMMENT_MAX_LEN,
+    CommentCreate,
+    CommentOut,
+    LastModified,
+    OwnerBrief,
+    POCreate,
+    POOut,
+    POUpdate,
+)
+from ..security import (
+    EDITOR_FLOOR,
+    LOCKED_PO_FLOOR,
+    PEOPLE_FLOOR,
+    STATUS_FLOOR,
+    get_current_user,
+    require_editor,
+)
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
 
@@ -132,6 +147,57 @@ def _attach_last_modified(db: Session, pos: Sequence[PurchaseOrder]) -> None:
         po.last_modified = latest.get(po.id)
 
 
+def _attach_comment_counts(db: Session, pos: Sequence[PurchaseOrder]) -> None:
+    """Hang `comment_count` on each order in one GROUP BY — dashboard badge fuel.
+
+    Comments live on their own table and never write activity, so this count is
+    independent of `_attach_last_modified` and cannot move the Modified column.
+    """
+    ids = [po.id for po in pos]
+    for po in pos:
+        po.comment_count = 0
+    if not ids:
+        return
+    stmt = (
+        select(POComment.purchase_order_id, func.count())
+        .where(POComment.purchase_order_id.in_(ids))
+        .group_by(POComment.purchase_order_id)
+    )
+    counts = dict(db.execute(stmt).all())
+    for po in pos:
+        po.comment_count = counts.get(po.id, 0)
+
+
+def _enrich(db: Session, pos: Sequence[PurchaseOrder]) -> None:
+    board_service.apply_po_overlays(db, list(pos))
+    _attach_last_modified(db, pos)
+    _attach_comment_counts(db, pos)
+
+
+def _status_key(value: object) -> str:
+    if isinstance(value, enum.Enum):
+        return str(value.value)
+    return str(value)
+
+
+def _assert_known_status(db: Session, key: str) -> None:
+    doc = board_service.get_document(db)
+    if key not in board_service.status_map(doc):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown status {key!r}. Pick one from the board catalog.",
+        )
+
+
+def _assert_known_column(db: Session, key: str) -> None:
+    doc = board_service.get_document(db)
+    if board_service.column_meta(doc, key) is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown kanban column {key!r}.",
+        )
+
+
 def _log(db: Session, actor: User, action: str, po: PurchaseOrder, detail: str | None = None) -> None:
     db.add(
         Activity(
@@ -221,6 +287,12 @@ def _differs(po: PurchaseOrder, field: str, value: object) -> bool:
     """
     if value is None and field in _NOT_NULLABLE:
         return False
+    if field == "custom_fields":
+        before = getattr(po, "custom_fields", None) or {}
+        after = value or {}
+        if not isinstance(after, dict):
+            return True
+        return before != after
     return not _same(_canonical(getattr(po, field)), _canonical(value))
 
 
@@ -230,8 +302,8 @@ def list_pos(
     _: User = Depends(get_current_user),
     start: date | None = Query(None, description="due_date >= start"),
     end: date | None = Query(None, description="due_date <= end"),
-    status_in: list[POStatus] | None = Query(None, alias="status"),
-    stage: Stage | None = None,
+    status_in: list[str] | None = Query(None, alias="status"),
+    stage: str | None = None,
     priority: Priority | None = None,
     owner_id: str | None = None,
     q: str | None = Query(None, description="search job / PO / part / material"),
@@ -249,9 +321,14 @@ def list_pos(
     if status_in:
         stmt = stmt.where(PurchaseOrder.status.in_(status_in))
     if stage:
-        stmt = stmt.where(
-            PurchaseOrder.status.in_([s for s, st in STAGE_BY_STATUS.items() if st == stage])
+        doc = board_service.get_document(db)
+        members = next(
+            (col.get("statusKeys") or [] for col in doc.get("kanbanColumns", []) if col.get("key") == stage),
+            None,
         )
+        if members is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown stage {stage!r}")
+        stmt = stmt.where(PurchaseOrder.status.in_(list(members)))
     if priority:
         stmt = stmt.where(PurchaseOrder.priority == priority)
     if owner_id:
@@ -281,7 +358,7 @@ def list_pos(
     }[sort]
 
     rows = list(db.scalars(stmt.order_by(*order, PurchaseOrder.job_no)))
-    _attach_last_modified(db, rows)
+    _enrich(db, rows)
     return rows
 
 
@@ -300,7 +377,11 @@ def create_po(
             status.HTTP_400_BAD_REQUEST,
             f"Due date cannot be in the past; pick {today.isoformat()} or later",
         )
-    po = PurchaseOrder(**payload.model_dump())
+    _assert_known_status(db, payload.status)
+    data = payload.model_dump()
+    if data.get("custom_fields") is None:
+        data["custom_fields"] = {}
+    po = PurchaseOrder(**data)
     # No owner field at all means "mine", the old behaviour. An explicit null is
     # the picker saying Unassigned, and has to survive rather than snap back to
     # the creator.
@@ -313,7 +394,7 @@ def create_po(
     _log(db, actor, "PO created", po, f"{po.job_no} · {po.po_number}")
     db.commit()
     db.refresh(po)
-    _attach_last_modified(db, [po])
+    _enrich(db, [po])
     return po
 
 
@@ -324,8 +405,14 @@ def get_po(
     po = db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
-    _attach_last_modified(db, [po])
+    _enrich(db, [po])
     return po
+
+
+# Fields a STATUS_FLOOR actor may actually move. `stage` is accepted on the
+# wire (kanban drag) but resolves to a status change above, so it never appears
+# in `changed` itself.
+_STATUS_ONLY = frozenset({"status"})
 
 
 @router.patch("/{po_id}", response_model=POOut)
@@ -333,8 +420,17 @@ def update_po(
     po_id: str,
     payload: POUpdate,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_editor),
+    actor: User = Depends(get_current_user),
 ) -> PurchaseOrder:
+    # Viewer stays out. User clears STATUS_FLOOR for status/stage only; Manager+
+    # keeps the full editor path. Checked up front so a Viewer never meets the
+    # locked-order message for an edit they could not make either way.
+    if not has_rank(actor.role, STATUS_FLOOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Requires {role_label(STATUS_FLOOR)} or above",
+        )
+
     po = db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
@@ -343,8 +439,21 @@ def update_po(
     changes = payload.model_dump(exclude_unset=True)
 
     moved_to = changes.pop("stage", None)
-    if moved_to and STAGE_BY_STATUS[po.status] != moved_to:
-        changes.setdefault("status", STAGE_DEFAULT_STATUS[moved_to])
+    if moved_to:
+        _assert_known_column(db, moved_to)
+        doc = board_service.get_document(db)
+        current_col = board_service.column_for_status(doc, _status_key(po.status))
+        if current_col != moved_to:
+            default = board_service.default_status_for_column(doc, moved_to)
+            if not default:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Kanban column {moved_to!r} has no default status",
+                )
+            changes.setdefault("status", default)
+
+    if "status" in changes:
+        _assert_known_status(db, _status_key(changes["status"]))
 
     # The drawer sends its whole draft, so most of what arrives is an echo of what
     # is already stored. Narrowing to what genuinely moved, once, is what keeps the
@@ -352,8 +461,22 @@ def update_po(
     # pressed it in the dashboard's Modified column for a change nobody made.
     changed = {field: value for field, value in changes.items() if _differs(po, field, value)}
 
+    # Below editor floor, only a real status (or stage→status) move is allowed.
+    # No-op echoes of other fields are already gone from `changed`, so a User
+    # saving the drawer's whole draft after flipping status alone still passes.
+    if not has_rank(actor.role, EDITOR_FLOOR):
+        forbidden = sorted(field for field in changed if field not in _STATUS_ONLY)
+        if forbidden:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Users may only change status or stage. "
+                f"Requires {role_label(EDITOR_FLOOR).lower()} or above to edit other fields.",
+            )
+
     if "status" in changed:
-        _log(db, actor, "Status changed", po, f"{po.status.value} -> {changed['status'].value}")
+        before = _status_key(po.status)
+        after = _status_key(changed["status"])
+        _log(db, actor, "Status changed", po, f"{before} -> {after}")
     if "due_date" in changed:
         _log(db, actor, "Due date moved", po, f"{po.due_date} -> {changed['due_date']}")
     if "locked" in changed:
@@ -380,7 +503,7 @@ def update_po(
 
     db.commit()
     db.refresh(po)
-    _attach_last_modified(db, [po])
+    _enrich(db, [po])
     return po
 
 
@@ -409,3 +532,82 @@ def po_activity(
         .limit(50)
     )
     return list(db.scalars(stmt))
+
+
+def _require_po(db: Session, po_id: str) -> PurchaseOrder:
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    return po
+
+
+@router.get("/{po_id}/comments", response_model=list[CommentOut])
+def list_comments(
+    po_id: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> list[POComment]:
+    """Oldest first — chat order. Any signed-in rank; lock does not apply."""
+    _require_po(db, po_id)
+    stmt = (
+        select(POComment)
+        .options(selectinload(POComment.actor))
+        .where(POComment.purchase_order_id == po_id)
+        .order_by(POComment.created_at.asc(), POComment.id.asc())
+    )
+    return list(db.scalars(stmt))
+
+
+@router.post("/{po_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
+def add_comment(
+    po_id: str,
+    payload: CommentCreate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> POComment:
+    """Any signed-in user may leave a note — Viewer included, locked orders included.
+
+    Notes are not order edits: no editor floor, no lock guard, no activity row, and
+    `updated_at` / Modified stay where they were.
+    """
+    po = _require_po(db, po_id)
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Comment cannot be empty")
+    if len(body) > COMMENT_MAX_LEN:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Comment is too long (max {COMMENT_MAX_LEN} characters)",
+        )
+    comment = POComment(purchase_order_id=po.id, actor_id=actor.id, body=body)
+    db.add(comment)
+    db.commit()
+    loaded = db.scalars(
+        select(POComment)
+        .options(selectinload(POComment.actor))
+        .where(POComment.id == comment.id)
+    ).one()
+    return loaded
+
+
+@router.delete(
+    "/{po_id}/comments/{comment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_comment(
+    po_id: str,
+    comment_id: str,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> None:
+    """Author or Manager+ (people floor) may remove a note. Lock does not block it."""
+    _require_po(db, po_id)
+    comment = db.get(POComment, comment_id)
+    if comment is None or comment.purchase_order_id != po_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Comment not found")
+    if comment.actor_id != actor.id and not has_rank(actor.role, PEOPLE_FLOOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the author or a manager can delete this comment",
+        )
+    db.delete(comment)
+    db.commit()

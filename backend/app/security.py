@@ -91,6 +91,10 @@ def require_rank(floor: Role):
 
 # The floors, named for what they protect rather than for who currently clears them.
 EDITOR_FLOOR = Role.MANAGER       # changing purchase orders, and attaching files to them
+# Status and stage (kanban column) moves on an unlocked order. Narrower than
+# EDITOR_FLOOR: a User may PATCH only those fields; create/delete/arbitrary
+# edits still need Manager+.
+STATUS_FLOOR = Role.USER
 PEOPLE_FLOOR = Role.MANAGER       # inviting people, setting their roles, reading the directory
 LOCKED_PO_FLOOR = Role.ADMIN      # working through a locked order, unlocking included
 # Your own name and photo are yours at every rank. Written as a floor rather than
@@ -100,6 +104,7 @@ SELF_PHOTO_FLOOR = Role.VIEWER
 
 require_admin = require_rank(Role.ADMIN)
 require_editor = require_rank(EDITOR_FLOOR)
+require_status = require_rank(STATUS_FLOOR)
 require_people_admin = require_rank(PEOPLE_FLOOR)
 require_self_photo = require_rank(SELF_PHOTO_FLOOR)
 

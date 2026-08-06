@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import Boolean, Date, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from .db import Base
 
@@ -27,7 +28,7 @@ class Role(str, enum.Enum):
 
     ADMIN = "admin"
     MANAGER = "manager"   # runs the shop day to day: edits orders, administers people
-    USER = "user"         # signed-in staff; read-only on orders for now
+    USER = "user"         # signed-in staff; may change status/stage on unlocked orders
     VIEWER = "viewer"
 
 
@@ -85,6 +86,8 @@ class User(Base):
     activity: Mapped[list[Activity]] = relationship(
         back_populates="actor", cascade="all, delete-orphan"
     )
+    # Notes stay when the author leaves: SET NULL on actor_id, no delete-orphan.
+    comments: Mapped[list["POComment"]] = relationship(back_populates="actor")
 
     @property
     def initials(self) -> str:
@@ -117,9 +120,10 @@ class PurchaseOrder(Base):
         Enum(Inspection, native_enum=False), default=Inspection.STANDARD
     )
     hardware: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[POStatus] = mapped_column(
-        Enum(POStatus, native_enum=False), default=POStatus.NEW, index=True
-    )
+    # Stored as a plain string so Admin-defined statuses can land without an
+    # enum migration. Seeded / day-one values match POStatus members. Values
+    # are the lowercase keys (`new`), not member names — see migrations.REPAIRS.
+    status: Mapped[str] = mapped_column(String(40), default=POStatus.NEW.value, index=True)
     priority: Mapped[Priority] = mapped_column(
         Enum(Priority, native_enum=False), default=Priority.NORMAL, index=True
     )
@@ -130,6 +134,10 @@ class PurchaseOrder(Base):
     customer: Mapped[str | None] = mapped_column(String(120), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)  # "no dim change, just censoring"
     thumbnail_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Admin-defined attributes. Removing a custom field from board settings
+    # hides it from the UI; values already written here are left alone.
+    custom_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates
@@ -142,20 +150,80 @@ class PurchaseOrder(Base):
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     owner: Mapped[User | None] = relationship(back_populates="purchase_orders")
 
+    comments: Mapped[list[POComment]] = relationship(
+        back_populates="purchase_order", cascade="all, delete-orphan"
+    )
+
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
     @property
     def status_label(self) -> str:
-        return STATUS_META[self.status]["label"]
+        # Prefer the overlay set by board_service.apply_po_overlays; fall back
+        # to the hard-coded catalog so a row is still readable before enrich.
+        overlay = getattr(self, "_status_label", None)
+        if overlay:
+            return overlay
+        try:
+            return STATUS_META[POStatus(self.status)]["label"]
+        except (KeyError, ValueError):
+            return self.status.replace("_", " ").upper()
 
     @property
-    def stage(self) -> Stage:
-        return STAGE_BY_STATUS[self.status]
+    def stage(self) -> str:
+        """Kanban column key. Overlay from board settings when enriched."""
+        overlay = getattr(self, "_stage", None)
+        if overlay:
+            return overlay
+        try:
+            return STAGE_BY_STATUS[POStatus(self.status)].value
+        except (KeyError, ValueError):
+            return Stage.PENDING.value
 
     @property
     def priority_label(self) -> str:
         return PRIORITY_META[self.priority]["label"]
+
+
+class BoardSettings(Base):
+    """Singleton published board configuration (card fields, statuses, kanban, …).
+
+    One row (`id=1`). The JSON document is versioned; Admin PUTs replace it
+    atomically after validation. Everyone reads the same published config.
+    """
+
+    __tablename__ = "board_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document: Mapped[dict] = mapped_column(JSON, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class POComment(Base):
+    """A note on a purchase order. Not an edit: does not touch lock, trail, or Modified.
+
+    `actor_id` is SET NULL on user delete so the thread keeps its chronology with a
+    blank author rather than vanishing (CASCADE) or blocking the delete (RESTRICT).
+    Deleting the order cascades the notes away with it.
+    """
+
+    __tablename__ = "po_comments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    purchase_order_id: Mapped[str] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True
+    )
+    purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="comments")
+    # Prefer SET NULL over CASCADE: wiping notes when someone leaves erases shop
+    # context; prefer a nameless bubble over a hole in the thread.
+    actor_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor: Mapped[User | None] = relationship(back_populates="comments")
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
 
 
 class Activity(Base):

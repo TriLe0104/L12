@@ -89,6 +89,7 @@ export const useAuth = () => useContext(AuthContext);
 
 /** The floors, named for what they protect. Mirrors backend/app/security.py. */
 const EDITOR_FLOOR: Role = "manager"; // changing purchase orders
+const STATUS_FLOOR: Role = "user"; // status / stage moves on unlocked orders
 const PEOPLE_FLOOR: Role = "manager"; // inviting people and setting their roles
 const LOCKED_PO_FLOOR: Role = "admin"; // working through a locked order
 
@@ -96,6 +97,9 @@ const hasRank = (user: User | null, floor: Role) =>
   !!user && roleRank(user.role) >= roleRank(floor);
 
 export const canEdit = (user: User | null) => hasRank(user, EDITOR_FLOOR);
+
+/** Status and kanban stage — narrower than canEdit; does not open other fields. */
+export const canEditStatus = (user: User | null) => hasRank(user, STATUS_FLOOR);
 
 /** Whether the Users page offers invite + role controls at all. */
 export const canAdministerPeople = (user: User | null) => hasRank(user, PEOPLE_FLOOR);
@@ -124,3 +128,10 @@ export const LOCKED_REASON =
  *  clearing the lock is itself a change, so it needs the same rank. */
 export const canModifyPO = (user: User | null, po: { locked: boolean } | null) =>
   canEdit(user) && (!po?.locked || hasRank(user, LOCKED_PO_FLOOR));
+
+/** Status/stage on an unlocked order (or any order, for an admin). */
+export const canModifyStatus = (user: User | null, po: { locked: boolean } | null) =>
+  canEditStatus(user) && (!po?.locked || hasRank(user, LOCKED_PO_FLOOR));
+
+/** Board settings — Admin only. */
+export const canEditBoardSettings = (user: User | null) => hasRank(user, "admin");

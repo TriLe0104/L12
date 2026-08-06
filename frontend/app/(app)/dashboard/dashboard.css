@@ -321,9 +321,10 @@
    The same goes for every column whose vocabulary is bounded: a date, a priority
    tag, a stage pill, a job number, a PO number, a name. Those are sized in rem,
    to whichever is wider of their longest value and the heading word above them,
-   and they hold that size however wide the window gets. The open-ended columns —
-   material, finish, and the longer status labels — are left `auto`, and a fixed
-   table layout hands them everything the measured columns do not take. So the
+   and they hold that size however wide the window gets. Status is capped too:
+   wide enough for its longest label on desktop, then intentionally two-line in
+   tighter bands. The open-ended material and finish columns are left `auto`,
+   and a fixed table layout hands them everything the measured columns do not take. So the
    room a 1920 window has going spare lands on the values that were truncating
    instead of spacing out the numbers, and it does so without a percentage that
    has to be re-derived every time a column joins or leaves. Sizes are in rem
@@ -331,18 +332,46 @@
    holding that content have to shrink with it too. */
 .dash-table [data-col="job"] { width: 4.3rem; }
 .dash-table [data-col="po_number"] { width: 4.8rem; }
-.dash-table [data-col="customer"] { width: 5.9rem; }
+.dash-table [data-col="customer"] { width: 5.7rem; }
 .dash-table [data-col="priority"] { width: 5.4rem; }
 .dash-table [data-col="stage"] { width: 6.7rem; }
 .dash-table [data-col="owner"] { width: 5rem; }
 .dash-table [data-col="due"] { width: 4.3rem; }
-.dash-table [data-col="modified"] { width: 5.5rem; }
-.dash-table [data-col="qty"] { width: 3.5rem; }
+.dash-table [data-col="modified"] { width: 5.4rem; }
+/* icon column between Modified and Qty — chat affordance, not a text cell */
+.dash-table [data-col="comments"] { width: 2.35rem; }
+.dash-table [data-col="status"] { width: 8.75rem; }
+/* Header + horizontal padding + sort caret, with room for the largest value. */
+.dash-table [data-col="qty"] {
+  width: 3.75rem;
+  min-width: 3.75rem;
+}
 
-/* the absorbers: 45.4rem of the table is measured above, these three share the rest */
-.dash-table [data-col="status"],
+/* the absorbers: measured columns above leave the rest to the long specs */
 .dash-table [data-col="material"],
 .dash-table [data-col="finish"] { width: auto; }
+
+.dash-table [data-col="qty"] .dash-sort > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.dash-comments-head {
+  display: inline-flex;
+  color: var(--steel);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* Twelve columns still fit here, but the headings are the widest thing in the
    narrow ones: "MATERIAL" set in letter-spaced caps wants more room than any
@@ -366,19 +395,30 @@
   .dash-table [data-col="finish"] { display: none; }
   .dash-table [data-col="job"] { width: 4rem; }
   .dash-table [data-col="po_number"] { width: 4.7rem; }
-  .dash-table [data-col="customer"] { width: 5.8rem; }
+  .dash-table [data-col="customer"] { width: 5.6rem; }
   .dash-table [data-col="priority"] { width: 5.1rem; }
   .dash-table [data-col="stage"] { width: 6.7rem; }
   .dash-table [data-col="owner"] { width: 4.85rem; }
   .dash-table [data-col="due"] { width: 4.3rem; }
   .dash-table [data-col="modified"] { width: 5.05rem; }
-  .dash-table [data-col="qty"] { width: 3.2rem; }
+  .dash-table [data-col="comments"] { width: 2.25rem; }
+  .dash-table [data-col="status"] { width: 7rem; }
+  .dash-table [data-col="qty"] { width: 3.75rem; min-width: 3.75rem; }
+  .dash-table .dash-status {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    line-height: 1.2;
+    overflow: hidden;
+  }
 }
 
 /* Then the spec detail (PO # and material, both on the card and in the drawer)
    and last-modified. Two person columns is one too many once the table is down
    to eight: owner is who to chase, last-modified is provenance, and provenance
-   is a question you answer by opening the row — which is one tap away here. */
+   is a question you answer by opening the row — which is one tap away here.
+   Comments stay: the icon is cheap and is how you leave a note without opening. */
 @container (max-width: 54rem) {
   .dash-table { min-width: 40rem; }
   .dash-table [data-col="po_number"],
@@ -392,7 +432,15 @@
   .dash-table [data-col="stage"] { width: 6.75rem; }
   .dash-table [data-col="owner"] { width: 4.9rem; }
   .dash-table [data-col="due"] { width: 4.35rem; }
-  .dash-table [data-col="qty"] { width: 3.2rem; }
+  .dash-table [data-col="comments"] { width: 2.25rem; }
+  .dash-table [data-col="status"] { width: 7rem; }
+  .dash-table [data-col="qty"] { width: 3.75rem; min-width: 3.75rem; }
+}
+
+/* Owner leaves one step before Stage so the Customer heading cannot be crushed
+   in the narrow sliver just above the main 40rem column-drop band. */
+@container (max-width: 41rem) {
+  .dash-table [data-col="owner"] { display: none; }
 }
 
 /* stage is implied by the active filter pill; owner is one name in this shop */
@@ -406,24 +454,28 @@
   .dash-table [data-col="job"] { width: 3.8rem; }
   .dash-table [data-col="priority"] { width: 4.9rem; }
   .dash-table [data-col="due"] { width: 4rem; }
-  .dash-table [data-col="qty"] { width: 3rem; }
+  .dash-table [data-col="comments"] { width: 2.15rem; }
+  .dash-table [data-col="status"] { width: 7rem; }
+  .dash-table [data-col="qty"] { width: 3.75rem; min-width: 3.75rem; }
 }
 
 /* customer repeats down the column; status is the scarcer information */
 @container (max-width: 32rem) {
   .dash-table { min-width: 26rem; }
   .dash-table [data-col="customer"] { display: none; }
-  /* status is the last open-ended column, so it takes the whole surplus — which
-     is how "Under inspection" finally fits at 420px instead of ellipsizing. */
+  .dash-table [data-col="status"] { width: 7.5rem; }
+  .dash-table [data-col="qty"] { width: 3.75rem; min-width: 3.75rem; }
 }
 
-/* last stop: what, how urgent, when, how many. Nothing here is open-ended, so
-   the job cell absorbs: it is left-aligned two-line text, and space to the right
-   of it reads as a wide first column rather than as a gap in front of a number. */
+/* last stop: what, how urgent, when, notes, how many. Nothing here is open-ended,
+   so the job cell absorbs. Comments stay — leaving a note should not require a
+   wide viewport. */
 @container (max-width: 26rem) {
   .dash-table { min-width: 0; }
   .dash-table [data-col="status"] { display: none; }
   .dash-table [data-col="job"] { width: auto; }
+  .dash-table [data-col="comments"] { width: 2.1rem; }
+  .dash-table [data-col="qty"] { width: 3.75rem; min-width: 3.75rem; }
 }
 
 @media (max-width: 860px) {

@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Inspection, POStatus, Priority, Role, Stage
+from .models import Inspection, Priority, Role
 
 
 class ORMModel(BaseModel):
@@ -61,7 +61,8 @@ class POBase(BaseModel):
     finish: str | None = None
     inspection: Inspection = Inspection.STANDARD
     hardware: bool = False
-    status: POStatus = POStatus.NEW
+    # Status key from the published board catalog (day-one: POStatus values).
+    status: str = "new"
     priority: Priority = Priority.NORMAL
     customer: str | None = None
     note: str | None = None
@@ -70,6 +71,8 @@ class POBase(BaseModel):
     model_filename: str | None = None
     model_size: int | None = None
     owner_id: str | None = None
+    # Admin-defined attributes; keys match board settings customFields.
+    custom_fields: dict[str, str | int | float | None] | None = None
 
 
 class POCreate(POBase):
@@ -88,12 +91,13 @@ class POUpdate(BaseModel):
     finish: str | None = None
     inspection: Inspection | None = None
     hardware: bool | None = None
-    status: POStatus | None = None
+    status: str | None = None
     priority: Priority | None = None
     locked: bool | None = None
     # Setting a stage moves the card between kanban columns; it resolves to that
     # column's default status unless the current status already sits in the column.
-    stage: Stage | None = None
+    # Stage is now a kanban column key from board settings.
+    stage: str | None = None
     customer: str | None = None
     note: str | None = None
     thumbnail_url: str | None = None
@@ -101,6 +105,7 @@ class POUpdate(BaseModel):
     model_filename: str | None = None
     model_size: int | None = None
     owner_id: str | None = None
+    custom_fields: dict[str, str | int | float | None] | None = None
 
 
 class OwnerBrief(ORMModel):
@@ -145,9 +150,9 @@ class POOut(ORMModel):
     finish: str | None
     inspection: Inspection
     hardware: bool
-    status: POStatus
+    status: str
     status_label: str
-    stage: Stage
+    stage: str
     priority: Priority
     priority_label: str
     locked: bool
@@ -158,11 +163,31 @@ class POOut(ORMModel):
     model_filename: str | None
     model_size: int | None
     owner: OwnerBrief | None
+    custom_fields: dict[str, str | int | float | None] | None = None
     created_at: datetime
     updated_at: datetime
     # Absent unless the route bothered to derive it; the list and every write
     # response do, so the dashboard never has to guess after a save.
     last_modified: LastModified | None = None
+    # How many notes sit on this order. Derived in one GROUP BY for the list so
+    # the dashboard badge never N+1s. Comments are not activity and never move
+    # `last_modified`.
+    comment_count: int = 0
+
+
+# ---------- comments ----------
+COMMENT_MAX_LEN = 2000
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=COMMENT_MAX_LEN)
+
+
+class CommentOut(ORMModel):
+    id: str
+    body: str
+    created_at: datetime
+    actor: OwnerBrief | None
 
 
 # ---------- activity ----------
@@ -224,3 +249,18 @@ class ModelUploadOut(UploadOut):
 
     size: int
     format: str
+
+
+# ---------- board settings ----------
+class BoardSettingsOut(BaseModel):
+    version: int
+    updated_at: datetime | None = None
+    updated_by_id: str | None = None
+    document: dict
+
+
+class BoardSettingsUpdate(BaseModel):
+    """Full document replace. Sections: cardFields, customFields, statuses,
+    dashboardColumns, kanbanColumns."""
+
+    document: dict

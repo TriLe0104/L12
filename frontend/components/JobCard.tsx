@@ -6,6 +6,14 @@ import { Avatar } from "@/components/Avatar";
 import { ImageViewer } from "@/components/ImageViewer";
 import { ModelViewer } from "@/components/ModelViewer";
 import { assetUrl } from "@/lib/api";
+import { useBoardSettings } from "@/lib/boardSettings";
+import {
+  builtinClass,
+  builtinValue,
+  customFieldMap,
+  customValue,
+  visibleCardFields,
+} from "@/lib/cardFields";
 import {
   detectModelFormat,
   formatModelSize,
@@ -25,8 +33,10 @@ export const TONE_BY_STATUS: Record<string, string> = {
   on_hold: "orange",
 };
 
-export const toneStyle = (status: string): CSSProperties =>
-  ({ "--tone": `var(--tone-${TONE_BY_STATUS[status] ?? "slate"})` }) as CSSProperties;
+export const toneStyle = (status: string, tone?: string): CSSProperties =>
+  ({
+    "--tone": `var(--tone-${tone ?? TONE_BY_STATUS[status] ?? "slate"})`,
+  }) as CSSProperties;
 
 export const TONE_BY_PRIORITY: Record<string, string> = {
   hot: "red",
@@ -78,6 +88,27 @@ const isLate = (po: PurchaseOrder) =>
 
 /** Full spreadsheet-style job card: the paper card, rebuilt. */
 export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => void }) {
+  const { document, statusByKey } = useBoardSettings();
+  const fields = visibleCardFields(document);
+  const customs = customFieldMap(document);
+  const tone = statusByKey.get(po.status)?.tone;
+
+  // Until settings load, fall back to the classic nine-row grid.
+  const displayFields =
+    fields.length > 0
+      ? fields
+      : [
+          { key: "po_number", kind: "builtin" as const, label: "PO #", visible: true },
+          { key: "part_number", kind: "builtin" as const, label: "Part #", visible: true },
+          { key: "qty", kind: "builtin" as const, label: "Qty", visible: true },
+          { key: "dims", kind: "builtin" as const, label: "Dims", visible: true },
+          { key: "mat_dim", kind: "builtin" as const, label: "Mat Dim", visible: true },
+          { key: "material", kind: "builtin" as const, label: "Material", visible: true },
+          { key: "finish", kind: "builtin" as const, label: "Finish", visible: true },
+          { key: "inspection", kind: "builtin" as const, label: "Inspection", visible: true },
+          { key: "hardware", kind: "builtin" as const, label: "Hardware", visible: true },
+        ];
+
   const photo = assetUrl(po.thumbnail_url);
   const [viewing, setViewing] = useState(false);
 
@@ -91,7 +122,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
       className="jobcard"
       data-locked={po.locked}
       data-has-model={!!model}
-      style={toneStyle(po.status)}
+      style={toneStyle(po.status, tone)}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -178,24 +209,16 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
         )}
 
         <dl className="spec">
-          <dt>PO #</dt>
-          <dd className="mono">{po.po_number}</dd>
-          <dt>Part #</dt>
-          <dd className="mono">{po.part_number}</dd>
-          <dt>Qty</dt>
-          <dd className="mono">{po.qty}</dd>
-          <dt>Dims</dt>
-          <dd className="mono">{po.dims ?? "—"}</dd>
-          <dt>Mat Dim</dt>
-          <dd className="mono warn">{po.mat_dim ?? "—"}</dd>
-          <dt>Material</dt>
-          <dd>{po.material ?? "—"}</dd>
-          <dt>Finish</dt>
-          <dd className="go">{po.finish ?? "—"}</dd>
-          <dt>Inspection</dt>
-          <dd>{po.inspection.toUpperCase()}</dd>
-          <dt>Hardware</dt>
-          <dd className={po.hardware ? "go" : "warn"}>{po.hardware ? "YES" : "NO"}</dd>
+          {displayFields.map((f) => (
+            <div key={f.key} className="spec-pair">
+              <dt>{f.label}</dt>
+              <dd className={f.kind === "builtin" ? builtinClass(f.key, po) : ""}>
+                {f.kind === "builtin"
+                  ? builtinValue(po, f.key)
+                  : customValue(po, f.key, customs.get(f.key))}
+              </dd>
+            </div>
+          ))}
         </dl>
       </div>
 

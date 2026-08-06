@@ -1,15 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Avatar } from "@/components/Avatar";
+import { CommentBubbleIcon, CommentThread } from "@/components/CommentThread";
 import { LockGlyph, PriorityTag, TONE_BY_STATUS, formatDue } from "@/components/JobCard";
 import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, useAuth } from "@/lib/auth";
+import { useBoardSettings } from "@/lib/boardSettings";
 import {
   PRIORITY_ORDER,
-  type POStatus,
   type PurchaseOrder,
   type Stage,
   type StageMeta,
@@ -30,6 +31,7 @@ type SortKey =
   | "finish"
   | "due"
   | "modified"
+  | "comments"
   | "qty";
 
 type Dir = "asc" | "desc";
@@ -45,15 +47,12 @@ interface Column {
   noun: string;
   /** right-aligned, mono, tabular — the numeric column at the end of the row */
   numeric?: boolean;
-  value: (po: PurchaseOrder, statusRank: Map<string, number>) => SortValue;
+  value: (po: PurchaseOrder, statusRank: Map<string, number>, stageRank: Map<string, number>) => SortValue;
 }
 
-/** Pipeline order, not alphabetical: sorting by stage should walk the board. */
-const STAGE_SEQUENCE: Stage[] = ["pending", "in_progress", "on_hold", "completed"];
-
-/** Process order, mirroring the server's `STATUS_META`. Only used until
- *  `/api/meta/statuses` answers, which is the real source of the sequence. */
-const FALLBACK_STATUS_SEQUENCE: POStatus[] = [
+/** Process order, mirroring the server's day-one catalog. Only used until
+ *  board settings answer. */
+const FALLBACK_STATUS_SEQUENCE = [
   "new",
   "rfq_finishing",
   "in_machining",
@@ -70,15 +69,6 @@ const FALLBACK_STAGES: StageMeta[] = [
   { value: "on_hold", label: "ON HOLD", tone: "orange", statuses: [] },
   { value: "in_progress", label: "IN PROGRESS", tone: "blue", statuses: [] },
   { value: "completed", label: "COMPLETED", tone: "green", statuses: [] },
-];
-
-/** The three named buckets partition the four stages, so their counts always
- *  add up to All — whatever the search has narrowed the set to. */
-const FILTERS: { key: string; label: string; stages: Stage[] }[] = [
-  { key: "all", label: "All", stages: STAGE_SEQUENCE },
-  { key: "ongoing", label: "Ongoing", stages: ["pending", "in_progress"] },
-  { key: "on_hold", label: "On hold", stages: ["on_hold"] },
-  { key: "completed", label: "Completed", stages: ["completed"] },
 ];
 
 const FILTER_STORAGE_KEY = "po_calendar_dashboard_filter";
@@ -127,7 +117,7 @@ const COLUMNS: Column[] = [
     key: "stage",
     label: "Stage",
     noun: "stage",
-    value: (po) => STAGE_SEQUENCE.indexOf(po.stage),
+    value: (po, _sr, stageRank) => stageRank.get(po.stage) ?? 99,
   },
   {
     key: "status",
@@ -147,6 +137,14 @@ const COLUMNS: Column[] = [
     noun: "when it was last modified",
     // the instant, not the name: scanning this column is about recency
     value: (po) => (po.last_modified ? Date.parse(po.last_modified.at) : null),
+  },
+  // After Modified, before Qty: notes sit next to provenance, and Qty stays the
+  // numeric end-cap. Sortable by count so a busy thread floats when useful.
+  {
+    key: "comments",
+    label: "Comments",
+    noun: "comment count",
+    value: (po) => po.comment_count ?? 0,
   },
   { key: "qty", label: "Qty", noun: "quantity", numeric: true, value: (po) => po.qty },
 ];
@@ -174,15 +172,58 @@ const wrapped = (value: string | null): ReactNode =>
 export default function DashboardPage() {
   const { user } = useAuth();
   const editable = canEdit(user);
+  const {
+    document,
+    stages: boardStages,
+    statuses: boardStatuses,
+    statusByKey,
+  } = useBoardSettings();
 
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
-  const [stages, setStages] = useState<StageMeta[]>(FALLBACK_STAGES);
-  const [statuses, setStatuses] = useState<StatusMeta[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
+  const [commentPoId, setCommentPoId] = useState<string | null>(null);
+  const commentAnchorRef = useRef<HTMLButtonElement | null>(null);
+
+  const stages = boardStages.length ? boardStages : FALLBACK_STAGES;
+  const statuses: StatusMeta[] = boardStatuses;
+
+  const stageSequence = useMemo(
+    () => (document?.kanbanColumns ?? stages).map((c) => ("key" in c ? c.key : c.value) as Stage),
+    [document, stages],
+  );
+
+  const completedKeys = useMemo(() => {
+    const marked = (document?.kanbanColumns ?? [])
+      .filter((c) => c.isCompleted)
+      .map((c) => c.key);
+    return new Set(marked.length ? marked : ["completed"]);
+  }, [document]);
+
+  const FILTERS = useMemo(() => {
+    const ongoing = stageSequence.filter((s) => !completedKeys.has(s) && s !== "on_hold");
+    const onHold = stageSequence.filter((s) => s === "on_hold");
+    const completed = stageSequence.filter((s) => completedKeys.has(s));
+    return [
+      { key: "all", label: "All", stages: stageSequence },
+      { key: "ongoing", label: "Ongoing", stages: ongoing.length ? ongoing : stageSequence.filter((s) => !completedKeys.has(s)) },
+      ...(onHold.length ? [{ key: "on_hold", label: "On hold", stages: onHold }] : []),
+      ...(completed.length ? [{ key: "completed", label: "Completed", stages: completed }] : []),
+    ];
+  }, [stageSequence, completedKeys]);
+
+  const visibleColumns = useMemo(() => {
+    const cfg = document?.dashboardColumns;
+    if (!cfg?.length) return COLUMNS;
+    const byKey = new Map(COLUMNS.map((c) => [c.key, c]));
+    return cfg
+      .filter((c) => c.visible)
+      .map((c) => byKey.get(c.key as SortKey))
+      .filter((c): c is Column => !!c);
+  }, [document]);
 
   useEffect(() => {
     const savedFilter = window.localStorage.getItem(FILTER_STORAGE_KEY);
@@ -191,12 +232,7 @@ export default function DashboardPage() {
     const savedSort = window.localStorage.getItem(SORT_STORAGE_KEY);
     const [key, dir] = savedSort?.split(":") ?? [];
     if (key && isSortKey(key) && (dir === "asc" || dir === "desc")) setSort({ key, dir });
-  }, []);
-
-  useEffect(() => {
-    api.stages().then(setStages).catch(() => setStages(FALLBACK_STAGES));
-    api.statuses().then(setStatuses).catch(() => setStatuses([]));
-  }, []);
+  }, [FILTERS]);
 
   /* The search is the server's, same as the task board: it matches job, PO,
      part, material and customer, and everything below counts what came back. */
@@ -231,6 +267,11 @@ export default function DashboardPage() {
     return new Map<string, number>(sequence.map((value, i) => [value, i]));
   }, [statuses]);
 
+  const stageRank = useMemo(
+    () => new Map(stageSequence.map((value, i) => [value, i])),
+    [stageSequence],
+  );
+
   const stageMeta = useMemo(
     () => new Map(stages.map((s) => [s.value, s])),
     [stages],
@@ -242,18 +283,18 @@ export default function DashboardPage() {
       map.set(f.key, pos.filter((po) => f.stages.includes(po.stage)).length);
     }
     return map;
-  }, [pos]);
+  }, [pos, FILTERS]);
 
   const rows = useMemo(() => {
     const active = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
-    const column = COLUMNS.find((c) => c.key === sort.key) ?? COLUMNS[0];
+    const column = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? COLUMNS[0];
     const flip = sort.dir === "asc" ? 1 : -1;
 
     return pos
       .filter((po) => active.stages.includes(po.stage))
       .sort((a, b) => {
-        const av = column.value(a, statusRank);
-        const bv = column.value(b, statusRank);
+        const av = column.value(a, statusRank, stageRank);
+        const bv = column.value(b, statusRank, stageRank);
         let result: number;
         if (av === null || bv === null) {
           // an empty cell is not "smaller", it is absent: park it at the end
@@ -266,7 +307,7 @@ export default function DashboardPage() {
         // job number breaks every tie, so the order is never arbitrary
         return result || naturalCompare(a.job_no, b.job_no);
       });
-  }, [pos, filter, sort, statusRank]);
+  }, [pos, filter, sort, statusRank, stageRank, FILTERS, visibleColumns]);
 
   const open = (po: PurchaseOrder) => {
     setSelected(po);
@@ -280,7 +321,13 @@ export default function DashboardPage() {
         : [...prev, saved],
     );
 
-  const sortColumn = COLUMNS.find((c) => c.key === sort.key) ?? COLUMNS[0];
+  const setCommentCount = useCallback((poId: string, count: number) => {
+    setPOs((prev) =>
+      prev.map((p) => (p.id === poId ? { ...p, comment_count: count } : p)),
+    );
+  }, []);
+
+  const sortColumn = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? COLUMNS[0];
 
   return (
     <>
@@ -336,7 +383,7 @@ export default function DashboardPage() {
           <table className="dash-table">
             <thead>
               <tr>
-                {COLUMNS.map((col) => (
+                {visibleColumns.map((col) => (
                   <th
                     key={col.key}
                     scope="col"
@@ -356,7 +403,14 @@ export default function DashboardPage() {
                       title={`Sort by ${col.noun}`}
                       onClick={() => toggleSort(col.key)}
                     >
-                      <span>{col.label}</span>
+                      {col.key === "comments" ? (
+                        <span className="dash-comments-head" title="Comments">
+                          <CommentBubbleIcon />
+                          <span className="visually-hidden">Comments</span>
+                        </span>
+                      ) : (
+                        <span>{col.label}</span>
+                      )}
                       <Caret />
                     </button>
                   </th>
@@ -382,108 +436,190 @@ export default function DashboardPage() {
                       }
                     }}
                   >
-                    <td data-col="job">
-                      <div className="dash-id">
-                        <span className="dash-id-job">{po.job_no}</span>
-                        {po.locked && (
-                          <span
-                            className="dash-lock"
-                            role="img"
-                            aria-label="Locked"
-                            title="Locked — only an admin can change it"
-                          >
-                            <LockGlyph />
-                          </span>
-                        )}
-                      </div>
-                      <div className="dash-id-sub">{po.part_number}</div>
-                    </td>
-                    <td data-col="po_number">
-                      <span className="dash-mono">{po.po_number}</span>
-                    </td>
-                    <td data-col="customer" title={po.customer ?? undefined}>
-                      {cell(text(po.customer))}
-                    </td>
-                    <td data-col="priority">
-                      <PriorityTag priority={po.priority} label={po.priority_label} />
-                    </td>
-                    <td data-col="stage">
-                      {stage ? (
-                        <span
-                          className="dash-stage"
-                          style={{ ["--tone" as string]: `var(--tone-${stage.tone})` }}
-                        >
-                          {stage.label}
-                        </span>
-                      ) : (
-                        EMPTY
-                      )}
-                    </td>
-                    <td data-col="status" title={po.status_label}>
-                      <span
-                        className="dash-status"
-                        style={{
-                          ["--tone" as string]: `var(--tone-${TONE_BY_STATUS[po.status] ?? "slate"})`,
-                        }}
-                      >
-                        {po.status_label}
-                      </span>
-                    </td>
-                    <td data-col="owner" title={po.owner?.name ?? undefined}>
-                      {po.owner ? (
-                        <div className="dash-person">
-                          <Avatar
-                            size="sm"
-                            initials={po.owner.initials}
-                            avatarUrl={po.owner.avatar_url}
-                            title={po.owner.name}
-                          />
-                          <span>{po.owner.name}</span>
-                        </div>
-                      ) : (
-                        EMPTY
-                      )}
-                    </td>
-                    <td data-col="material" title={po.material ?? undefined}>
-                      {wrapped(text(po.material))}
-                    </td>
-                    <td data-col="finish" title={po.finish ?? undefined}>
-                      {wrapped(text(po.finish))}
-                    </td>
-                    <td data-col="due">
-                      <span className="dash-mono" title={po.due_date}>
-                        {formatDue(po.due_date)}
-                      </span>
-                    </td>
-                    <td
-                      data-col="modified"
-                      title={
-                        po.last_modified
-                          ? `${po.last_modified.action} by ${po.last_modified.by.name} · ` +
-                            new Date(po.last_modified.at).toLocaleString()
-                          : "No recorded change to this order"
+                    {visibleColumns.map((col) => {
+                      if (col.key === "job") {
+                        return (
+                          <td key="job" data-col="job">
+                            <div className="dash-id">
+                              <span className="dash-id-job">{po.job_no}</span>
+                              {po.locked && (
+                                <span
+                                  className="dash-lock"
+                                  role="img"
+                                  aria-label="Locked"
+                                  title="Locked — only an admin can change it"
+                                >
+                                  <LockGlyph />
+                                </span>
+                              )}
+                            </div>
+                            <div className="dash-id-sub">{po.part_number}</div>
+                          </td>
+                        );
                       }
-                    >
-                      {po.last_modified ? (
-                        <>
-                          <div className="dash-person">
-                            <Avatar
-                              size="sm"
-                              initials={po.last_modified.by.initials}
-                              avatarUrl={po.last_modified.by.avatar_url}
-                              title={po.last_modified.by.name}
-                            />
-                            <span>{po.last_modified.by.name}</span>
-                          </div>
-                          <div className="dash-when">{whenModified(po.last_modified.at)}</div>
-                        </>
-                      ) : (
-                        EMPTY
-                      )}
-                    </td>
-                    <td data-col="qty" data-numeric="true">
-                      {po.qty}
-                    </td>
+                      if (col.key === "po_number") {
+                        return (
+                          <td key="po_number" data-col="po_number">
+                            <span className="dash-mono">{po.po_number}</span>
+                          </td>
+                        );
+                      }
+                      if (col.key === "customer") {
+                        return (
+                          <td key="customer" data-col="customer" title={po.customer ?? undefined}>
+                            {cell(text(po.customer))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "priority") {
+                        return (
+                          <td key="priority" data-col="priority">
+                            <PriorityTag priority={po.priority} label={po.priority_label} />
+                          </td>
+                        );
+                      }
+                      if (col.key === "stage") {
+                        return (
+                          <td key="stage" data-col="stage">
+                            {stage ? (
+                              <span
+                                className="dash-stage"
+                                style={{ ["--tone" as string]: `var(--tone-${stage.tone})` }}
+                              >
+                                {stage.label}
+                              </span>
+                            ) : (
+                              EMPTY
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === "status") {
+                        return (
+                          <td key="status" data-col="status" title={po.status_label}>
+                            <span
+                              className="dash-status"
+                              style={{
+                                ["--tone" as string]: `var(--tone-${statusByKey.get(po.status)?.tone ?? TONE_BY_STATUS[po.status] ?? "slate"})`,
+                              }}
+                            >
+                              {po.status_label}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.key === "owner") {
+                        return (
+                          <td key="owner" data-col="owner" title={po.owner?.name ?? undefined}>
+                            {po.owner ? (
+                              <div className="dash-person">
+                                <Avatar
+                                  size="sm"
+                                  initials={po.owner.initials}
+                                  avatarUrl={po.owner.avatar_url}
+                                  title={po.owner.name}
+                                />
+                                <span>{po.owner.name}</span>
+                              </div>
+                            ) : (
+                              EMPTY
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === "material") {
+                        return (
+                          <td key="material" data-col="material" title={po.material ?? undefined}>
+                            {wrapped(text(po.material))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "finish") {
+                        return (
+                          <td key="finish" data-col="finish" title={po.finish ?? undefined}>
+                            {wrapped(text(po.finish))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "due") {
+                        return (
+                          <td key="due" data-col="due">
+                            <span className="dash-mono" title={po.due_date}>
+                              {formatDue(po.due_date)}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.key === "modified") {
+                        return (
+                          <td
+                            key="modified"
+                            data-col="modified"
+                            title={
+                              po.last_modified
+                                ? `${po.last_modified.action} by ${po.last_modified.by.name} · ` +
+                                  new Date(po.last_modified.at).toLocaleString()
+                                : "No recorded change to this order"
+                            }
+                          >
+                            {po.last_modified ? (
+                              <>
+                                <div className="dash-person">
+                                  <Avatar
+                                    size="sm"
+                                    initials={po.last_modified.by.initials}
+                                    avatarUrl={po.last_modified.by.avatar_url}
+                                    title={po.last_modified.by.name}
+                                  />
+                                  <span>{po.last_modified.by.name}</span>
+                                </div>
+                                <div className="dash-when">{whenModified(po.last_modified.at)}</div>
+                              </>
+                            ) : (
+                              EMPTY
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.key === "comments") {
+                        return (
+                          <td key="comments" data-col="comments">
+                            <button
+                              type="button"
+                              className="dash-comment-btn"
+                              data-has={(po.comment_count ?? 0) > 0 ? "true" : "false"}
+                              aria-label={
+                                (po.comment_count ?? 0) > 0
+                                  ? `${po.comment_count} comments on ${po.job_no}`
+                                  : `Comments on ${po.job_no}`
+                              }
+                              aria-expanded={commentPoId === po.id}
+                              title="Comments"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                commentAnchorRef.current = e.currentTarget;
+                                setCommentPoId((cur) => (cur === po.id ? null : po.id));
+                              }}
+                            >
+                              <CommentBubbleIcon filled={(po.comment_count ?? 0) > 0} />
+                              {(po.comment_count ?? 0) > 0 && (
+                                <span className="dash-comment-badge">
+                                  {po.comment_count > 99 ? "99+" : po.comment_count}
+                                </span>
+                              )}
+                            </button>
+                          </td>
+                        );
+                      }
+                      if (col.key === "qty") {
+                        return (
+                          <td key="qty" data-col="qty" data-numeric="true">
+                            {po.qty}
+                          </td>
+                        );
+                      }
+                      return null;
+                    })}
                   </tr>
                 );
               })}
@@ -492,6 +628,16 @@ export default function DashboardPage() {
         </div>
         {rows.length === 0 && <div className="empty">No purchase orders match.</div>}
       </div>
+
+      {commentPoId && (
+        <CommentThread
+          poId={commentPoId}
+          variant="panel"
+          anchorEl={commentAnchorRef.current}
+          onClose={() => setCommentPoId(null)}
+          onCountChange={(count) => setCommentCount(commentPoId, count)}
+        />
+      )}
 
       {drawerMode && (
         <PODrawer
@@ -502,12 +648,16 @@ export default function DashboardPage() {
             setDrawerMode(null);
             setSelected(null);
           }}
-          onSaved={upsert}
+          onSaved={(saved) => {
+            upsert(saved);
+            setSelected(saved);
+          }}
           onDeleted={(id) => {
             setPOs((prev) => prev.filter((p) => p.id !== id));
             setDrawerMode(null);
             setSelected(null);
           }}
+          onCommentCountChange={(poId, count) => setCommentCount(poId, count)}
         />
       )}
     </>

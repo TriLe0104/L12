@@ -1,0 +1,230 @@
+/* Shared comment thread: drawer section + dashboard popover. */
+
+.comment-thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.comment-thread--embedded {
+  gap: 0.5rem;
+}
+
+.comment-thread--panel {
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card), 0 12px 40px rgba(13, 17, 23, 0.14);
+  overflow: hidden;
+}
+
+.comment-thread-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: transparent;
+}
+
+.comment-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--rule-soft);
+  flex-shrink: 0;
+}
+
+.comment-thread-head strong {
+  font-size: 0.78rem;
+  letter-spacing: -0.01em;
+}
+
+.comment-thread-head .btn {
+  margin-left: auto;
+  height: 1.7rem;
+  padding: 0 0.55rem;
+  font-size: 0.68rem;
+}
+
+.comment-thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0.65rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 4rem;
+  max-height: 14rem;
+}
+
+.comment-thread--panel .comment-thread-list {
+  max-height: none;
+}
+
+.comment-thread-empty {
+  padding: 0.75rem 0.15rem;
+  color: var(--steel);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.comment-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.comment-bubble:last-child {
+  border-bottom: 0;
+}
+
+.comment-bubble-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.comment-bubble-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.comment-bubble-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comment-bubble-when {
+  flex-shrink: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  color: var(--steel);
+}
+
+.comment-bubble-del {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--steel-soft);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+
+.comment-bubble-del:hover {
+  color: var(--ink);
+}
+
+.comment-bubble-text {
+  margin: 0.18rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.comment-thread-error {
+  margin: 0 0.65rem;
+  font-size: 0.72rem;
+}
+
+.comment-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem 0.7rem;
+  border-top: 1px solid var(--rule-soft);
+  flex-shrink: 0;
+}
+
+.comment-thread--embedded .comment-composer {
+  padding: 0;
+  border-top: 0;
+}
+
+.comment-composer-input {
+  resize: vertical;
+  min-height: 2.6rem;
+  max-height: 8rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.comment-composer .btn-primary {
+  align-self: flex-end;
+}
+
+/* Dashboard cell: icon button + optional count badge */
+.dash-comment-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--steel-soft);
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+
+.dash-comment-btn:hover,
+.dash-comment-btn[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--rule);
+  background: rgba(13, 17, 23, 0.04);
+}
+
+.dash-comment-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 168, 0, 0.55);
+}
+
+.dash-comment-btn[data-has="true"] {
+  color: var(--ink-soft);
+}
+
+.dash-comment-badge {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.25rem;
+  min-width: 0.95rem;
+  height: 0.95rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 0.95rem;
+  text-align: center;
+}
+
+.comment-icon {
+  display: block;
+}
+
+.dash-table td[data-col="comments"] {
+  text-align: center;
+  overflow: visible;
+}
+
+.dash-table th[data-col="comments"] .dash-sort {
+  justify-content: center;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}

@@ -86,7 +86,7 @@ def seed(db: Session) -> None:
                 [Inspection.FORMAL, Inspection.STANDARD, Inspection.SOURCE, Inspection.NONE]
             ),
             hardware=rng.random() < 0.35,
-            status=rng.choice(statuses),
+            status=rng.choice(statuses).value,
             priority=rng.choices(
                 [Priority.HOT, Priority.HIGH, Priority.NORMAL, Priority.LOW],
                 weights=[1, 3, 5, 2],

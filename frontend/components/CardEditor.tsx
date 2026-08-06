@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, assetUrl } from "@/lib/api";
+import { useBoardSettings } from "@/lib/boardSettings";
+import {
+  customFieldMap,
+  patchCustomField,
+  visibleCardFields,
+} from "@/lib/cardFields";
 import {
   PRIORITY_ORDER,
   ROLE_LABEL,
@@ -24,12 +30,28 @@ import { LockGlyph, TONE_BY_PRIORITY, toneStyle } from "./JobCard";
 
 const INSPECTIONS = ["formal", "standard", "source", "none"] as const;
 
+const FALLBACK_EDITOR_FIELDS = [
+  { key: "po_number", kind: "builtin" as const, label: "PO #", visible: true },
+  { key: "part_number", kind: "builtin" as const, label: "Part #", visible: true },
+  { key: "qty", kind: "builtin" as const, label: "Qty", visible: true },
+  { key: "dims", kind: "builtin" as const, label: "Dims", visible: true },
+  { key: "mat_dim", kind: "builtin" as const, label: "Mat Dim", visible: true },
+  { key: "material", kind: "builtin" as const, label: "Material", visible: true },
+  { key: "finish", kind: "builtin" as const, label: "Finish", visible: true },
+  { key: "inspection", kind: "builtin" as const, label: "Inspection", visible: true },
+  { key: "hardware", kind: "builtin" as const, label: "Hardware", visible: true },
+  { key: "priority", kind: "builtin" as const, label: "Priority", visible: true },
+  { key: "customer", kind: "builtin" as const, label: "Customer", visible: true },
+  { key: "owner", kind: "builtin" as const, label: "Owner", visible: true },
+];
+
 /** The paper card, made editable: same grid as JobCard, every value cell an input. */
 export function CardEditor({
   value,
   onChange,
   statuses,
   disabled = false,
+  statusDisabled,
   lockable = false,
   minDue,
 }: {
@@ -37,12 +59,22 @@ export function CardEditor({
   onChange: (patch: PODraft) => void;
   statuses: StatusMeta[];
   disabled?: boolean;
+  /** When set, gates only the status select — so a User can move status while
+   *  every other field stays read-only. Defaults to `disabled`. */
+  statusDisabled?: boolean;
   /** show the lock toggle — off while creating, since a PO is born unlocked */
   lockable?: boolean;
   /** `YYYY-MM-DD` floor for the due date; left off when editing an existing PO
    *  so overdue jobs stay editable. */
   minDue?: string;
 }) {
+  const statusLocked = statusDisabled ?? disabled;
+  const { document, statusByKey } = useBoardSettings();
+  const configured = visibleCardFields(document);
+  const fields = configured.length > 0 ? configured : FALLBACK_EDITOR_FIELDS;
+  const customs = customFieldMap(document);
+  const statusTone = statusByKey.get(value.status ?? "new")?.tone;
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -117,7 +149,7 @@ export function CardEditor({
   }
 
   return (
-    <article className="jobcard jobcard-edit" style={toneStyle(value.status ?? "new")}>
+    <article className="jobcard jobcard-edit" style={toneStyle(value.status ?? "new", statusTone)}>
       <header className="jobcard-head">
         <input
           className="cell-input job-input"
@@ -319,177 +351,198 @@ export function CardEditor({
         )}
 
         <dl className="spec">
-          <dt>PO #</dt>
-          <dd>
-            <input
-              className="cell-input mono"
-              value={value.po_number ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ po_number: e.target.value })}
-            />
-          </dd>
-
-          <dt>Part #</dt>
-          <dd>
-            <input
-              className="cell-input mono"
-              value={value.part_number ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ part_number: e.target.value })}
-            />
-          </dd>
-
-          <dt>Qty</dt>
-          <dd>
-            <input
-              className="cell-input mono"
-              type="number"
-              min={1}
-              value={value.qty ?? 1}
-              disabled={disabled}
-              onChange={(e) => onChange({ qty: Number(e.target.value) })}
-            />
-          </dd>
-
-          <dt>Dims</dt>
-          <dd>
-            <input
-              className="cell-input mono"
-              placeholder="0.905 x 0.870 x 0.345in"
-              value={value.dims ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ dims: e.target.value })}
-            />
-          </dd>
-
-          <dt>Mat Dim</dt>
-          <dd>
-            <input
-              className="cell-input mono warn"
-              placeholder="1.25 x 1.7 x .500"
-              value={value.mat_dim ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ mat_dim: e.target.value })}
-            />
-          </dd>
-
-          <dt>Material</dt>
-          <dd>
-            <input
-              className="cell-input"
-              placeholder="AL 6061-T651, Plate"
-              value={value.material ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ material: e.target.value })}
-            />
-          </dd>
-
-          <dt>Finish</dt>
-          <dd>
-            <input
-              className="cell-input go"
-              placeholder="CLEAR ANODIZE; CHEM FILM GOLD"
-              value={value.finish ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ finish: e.target.value })}
-            />
-          </dd>
-
-          <dt>Inspection</dt>
-          <dd>
-            <select
-              className="cell-input"
-              value={value.inspection ?? "standard"}
-              disabled={disabled}
-              onChange={(e) =>
-                onChange({ inspection: e.target.value as PurchaseOrder["inspection"] })
-              }
-            >
-              {INSPECTIONS.map((i) => (
-                <option key={i} value={i}>
-                  {i.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </dd>
-
-          <dt>Hardware</dt>
-          <dd>
-            <select
-              className={`cell-input ${value.hardware ? "go" : "warn"}`}
-              value={value.hardware ? "yes" : "no"}
-              disabled={disabled}
-              onChange={(e) => onChange({ hardware: e.target.value === "yes" })}
-            >
-              <option value="no">NO</option>
-              <option value="yes">YES</option>
-            </select>
-          </dd>
-
-          <dt>Priority</dt>
-          <dd>
-            <select
-              className="cell-input"
-              value={value.priority ?? "normal"}
-              disabled={disabled}
-              onChange={(e) => onChange({ priority: e.target.value as PurchaseOrder["priority"] })}
-              style={{
-                color: `var(--tone-${TONE_BY_PRIORITY[value.priority ?? "normal"]})`,
-                fontWeight: 700,
-              }}
-            >
-              {PRIORITY_ORDER.map((p) => (
-                <option key={p} value={p}>
-                  {p.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </dd>
-
-          <dt>Customer</dt>
-          <dd>
-            <input
-              className="cell-input"
-              placeholder="Program or customer"
-              value={value.customer ?? ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ customer: e.target.value })}
-            />
-          </dd>
-
-          <dt>Owner</dt>
-          <dd>
-            <div
-              className="owner-pick"
-              title={
-                owner
-                  ? `Owner: ${owner.name}${listed ? ` · ${ROLE_LABEL[listed.role]}` : ""}`
-                  : "Nobody owns this order yet"
-              }
-            >
-              <Avatar
-                size="sm"
-                initials={owner?.initials ?? "—"}
-                avatarUrl={owner?.avatar_url}
-                title={owner?.name ?? "Unassigned"}
-              />
-              <select
-                className="cell-input"
-                aria-label="Owner"
-                value={ownerId ?? ""}
-                disabled={disabled}
-                onChange={(e) => onChange({ owner_id: e.target.value || null })}
-              >
-                <option value="">Unassigned</option>
-                {stray && <option value={stray.id}>{stray.name}</option>}
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+          {fields.map((f) => (
+            <div key={f.key} className="spec-pair">
+              <dt>{f.label}</dt>
+              <dd>
+                {f.kind === "custom" ? (
+                  (() => {
+                    const meta = customs.get(f.key);
+                    const raw = value.custom_fields?.[f.key];
+                    const str = raw == null ? "" : String(raw);
+                    if (meta?.type === "select") {
+                      return (
+                        <select
+                          className="cell-input"
+                          value={str}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            onChange({
+                              custom_fields: patchCustomField(value, f.key, e.target.value || null),
+                            })
+                          }
+                        >
+                          <option value="">—</option>
+                          {(meta.options ?? []).map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                        </select>
+                      );
+                    }
+                    return (
+                      <input
+                        className="cell-input"
+                        type={meta?.type === "number" ? "number" : meta?.type === "date" ? "date" : "text"}
+                        value={str}
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const v =
+                            meta?.type === "number"
+                              ? e.target.value === ""
+                                ? null
+                                : Number(e.target.value)
+                              : e.target.value || null;
+                          onChange({ custom_fields: patchCustomField(value, f.key, v) });
+                        }}
+                      />
+                    );
+                  })()
+                ) : f.key === "po_number" ? (
+                  <input
+                    className="cell-input mono"
+                    value={value.po_number ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ po_number: e.target.value })}
+                  />
+                ) : f.key === "part_number" ? (
+                  <input
+                    className="cell-input mono"
+                    value={value.part_number ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ part_number: e.target.value })}
+                  />
+                ) : f.key === "qty" ? (
+                  <input
+                    className="cell-input mono"
+                    type="number"
+                    min={1}
+                    value={value.qty ?? 1}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ qty: Number(e.target.value) })}
+                  />
+                ) : f.key === "dims" ? (
+                  <input
+                    className="cell-input mono"
+                    placeholder="0.905 x 0.870 x 0.345in"
+                    value={value.dims ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ dims: e.target.value })}
+                  />
+                ) : f.key === "mat_dim" ? (
+                  <input
+                    className="cell-input mono warn"
+                    placeholder="1.25 x 1.7 x .500"
+                    value={value.mat_dim ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ mat_dim: e.target.value })}
+                  />
+                ) : f.key === "material" ? (
+                  <input
+                    className="cell-input"
+                    placeholder="AL 6061-T651, Plate"
+                    value={value.material ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ material: e.target.value })}
+                  />
+                ) : f.key === "finish" ? (
+                  <input
+                    className="cell-input go"
+                    placeholder="CLEAR ANODIZE; CHEM FILM GOLD"
+                    value={value.finish ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ finish: e.target.value })}
+                  />
+                ) : f.key === "inspection" ? (
+                  <select
+                    className="cell-input"
+                    value={value.inspection ?? "standard"}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      onChange({ inspection: e.target.value as PurchaseOrder["inspection"] })
+                    }
+                  >
+                    {INSPECTIONS.map((i) => (
+                      <option key={i} value={i}>
+                        {i.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                ) : f.key === "hardware" ? (
+                  <select
+                    className={`cell-input ${value.hardware ? "go" : "warn"}`}
+                    value={value.hardware ? "yes" : "no"}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ hardware: e.target.value === "yes" })}
+                  >
+                    <option value="no">NO</option>
+                    <option value="yes">YES</option>
+                  </select>
+                ) : f.key === "priority" ? (
+                  <select
+                    className="cell-input"
+                    value={value.priority ?? "normal"}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      onChange({ priority: e.target.value as PurchaseOrder["priority"] })
+                    }
+                    style={{
+                      color: `var(--tone-${TONE_BY_PRIORITY[value.priority ?? "normal"]})`,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {PRIORITY_ORDER.map((p) => (
+                      <option key={p} value={p}>
+                        {p.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                ) : f.key === "customer" ? (
+                  <input
+                    className="cell-input"
+                    placeholder="Program or customer"
+                    value={value.customer ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ customer: e.target.value })}
+                  />
+                ) : f.key === "owner" ? (
+                  <div
+                    className="owner-pick"
+                    title={
+                      owner
+                        ? `Owner: ${owner.name}${listed ? ` · ${ROLE_LABEL[listed.role]}` : ""}`
+                        : "Nobody owns this order yet"
+                    }
+                  >
+                    <Avatar
+                      size="sm"
+                      initials={owner?.initials ?? "—"}
+                      avatarUrl={owner?.avatar_url}
+                      title={owner?.name ?? "Unassigned"}
+                    />
+                    <select
+                      className="cell-input"
+                      aria-label="Owner"
+                      value={ownerId ?? ""}
+                      disabled={disabled}
+                      onChange={(e) => onChange({ owner_id: e.target.value || null })}
+                    >
+                      <option value="">Unassigned</option>
+                      {stray && <option value={stray.id}>{stray.name}</option>}
+                      {people.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  "—"
+                )}
+              </dd>
             </div>
-          </dd>
+          ))}
         </dl>
       </div>
 
@@ -510,7 +563,7 @@ export function CardEditor({
         <select
           className="cell-input status-input"
           value={value.status ?? "new"}
-          disabled={disabled}
+          disabled={statusLocked}
           onChange={(e) => onChange({ status: e.target.value as PurchaseOrder["status"] })}
         >
           {statuses.map((s) => (

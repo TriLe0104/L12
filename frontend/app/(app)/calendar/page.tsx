@@ -33,6 +33,18 @@ function YearDot({ po }: { po: PurchaseOrder }) {
   );
 }
 
+function enablePopoverCloseKeyboard(eventEl: HTMLElement) {
+  const close = eventEl
+    .closest<HTMLElement>(".fc-more-popover")
+    ?.querySelector<HTMLElement>(".fc-popover-close");
+  if (!close || close.dataset.keyboardReady === "true") return;
+
+  close.dataset.keyboardReady = "true";
+  close.tabIndex = 0;
+  close.setAttribute("role", "button");
+  close.setAttribute("aria-label", close.getAttribute("title") || "Close");
+}
+
 export default function CalendarPage() {
   const { user } = useAuth();
   const editable = canEdit(user);
@@ -55,6 +67,18 @@ export default function CalendarPage() {
 
   useEffect(() => {
     api.statuses().then(setStatuses).catch(() => setStatuses([]));
+  }, []);
+
+  useEffect(() => {
+    const activatePopoverClose = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.matches(".fc-more-popover .fc-popover-close")) return;
+      event.preventDefault();
+      target.click();
+    };
+    document.addEventListener("keydown", activatePopoverClose);
+    return () => document.removeEventListener("keydown", activatePopoverClose);
   }, []);
 
   useEffect(() => {
@@ -178,7 +202,7 @@ export default function CalendarPage() {
             eventStartEditable={editable && !yearView}
             height="auto"
             dayMaxEvents={4}
-            firstDay={1}
+            firstDay={0}
             datesSet={(arg) => setFcView(arg.view.type)}
             dayCellClassNames={(arg) =>
               arg.view.type === YEAR_VIEW && dueDays.has(isoDay(arg.date)) ? ["fc-day-has-jobs"] : []
@@ -192,6 +216,7 @@ export default function CalendarPage() {
               const po = arg.event.extendedProps.po as PurchaseOrder;
               return arg.view.type === YEAR_VIEW ? <YearDot po={po} /> : <JobChip po={po} />;
             }}
+            eventDidMount={(arg) => enablePopoverCloseKeyboard(arg.el)}
             eventClick={(arg) => {
               setSelected(arg.event.extendedProps.po as PurchaseOrder);
               setDrawerMode("view");

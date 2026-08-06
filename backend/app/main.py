@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, meta, purchase_orders, uploads, users
+from .routers import auth, meta, purchase_orders, settings, uploads, users
 from .routers.uploads import UPLOAD_DIR
 from .seed import seed
 
@@ -19,8 +19,13 @@ async def lifespan(app: FastAPI):
     for column in migrations.run(engine):
         print(f"migration: added {column}")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    if settings.seed_on_start:
-        with SessionLocal() as db:
+    # Seed the singleton board settings row so /api/meta/* and the board share
+    # one catalog from the first request.
+    from . import board_service
+
+    with SessionLocal() as db:
+        board_service.ensure_row(db)
+        if settings.seed_on_start:
             seed(db)
     yield
 
@@ -39,6 +44,7 @@ app.include_router(auth.router)
 app.include_router(purchase_orders.router)
 app.include_router(users.router)
 app.include_router(meta.router)
+app.include_router(settings.router)
 app.include_router(uploads.router)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

@@ -25,6 +25,7 @@ const PAGES = [
   "/users",
   "/tasks#cards-min",
   "/tasks#cards-max",
+  "/tasks#hide-completed",
   "/dashboard#stored",
   "/dashboard#modified",
 ];
@@ -65,6 +66,15 @@ for (const width of WIDTHS) {
       }, mode === "cards-min" ? "0" : "4");
       await page.reload({ waitUntil: "networkidle" });
       await page.waitForSelector(".board-all");
+      await page.waitForTimeout(400);
+    }
+    if (mode === "hide-completed") {
+      await page.evaluate(() => {
+        window.localStorage.setItem("po_calendar_task_view", "board");
+        window.localStorage.setItem("po_calendar_task_hide_completed", "1");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.waitForSelector(".kanban");
       await page.waitForTimeout(400);
     }
     if (mode === "stored") {
