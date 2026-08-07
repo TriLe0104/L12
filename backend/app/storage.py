@@ -204,3 +204,81 @@ def serve_upload(name: str) -> Response:
 def _cache_headers() -> dict[str, str]:
     # UUIDs never reuse a name, so browsers may keep them forever.
     return {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+def _endpoint_host() -> str:
+    return (urlparse(_clean_endpoint(settings.s3_endpoint_url or "")).hostname or "").lower()
+
+
+def storage_diagnostics() -> dict[str, object]:
+    """Round-trip a throwaway object so an admin can see the real R2 error.
+
+    Never returns secret values — only whether each is present, the endpoint
+    host, and the precise boto3/botocore failure for each step. Admin-gated by
+    the route that calls it.
+    """
+    report: dict[str, object] = {
+        "backend": "s3" if object_storage_configured() else "local",
+        "endpoint_host": _endpoint_host(),
+        "bucket": (settings.s3_bucket or "").strip().strip("\"'") or None,
+        "region": (settings.s3_region or "auto").strip().strip("\"'") or "auto",
+        "public_base_url": bool(settings.s3_public_base_url),
+        "have_access_key_id": bool((settings.s3_access_key_id or "").strip()),
+        "have_secret_access_key": bool((settings.s3_secret_access_key or "").strip()),
+        "steps": {},
+    }
+    steps: dict[str, str] = report["steps"]  # type: ignore[assignment]
+
+    if not object_storage_configured():
+        report["ok"] = False
+        report["hint"] = "Object storage is not configured; running on local disk."
+        return report
+
+    bucket = report["bucket"]
+    key = f"_diagnostics/{uuid.uuid4().hex}.txt"
+    payload = b"po-calendar storage check"
+
+    def describe(exc: Exception) -> str:
+        code = ""
+        response = getattr(exc, "response", None)
+        if isinstance(response, dict):
+            code = response.get("Error", {}).get("Code", "")
+        return f"{type(exc).__name__}: {code or str(exc)[:200]}"
+
+    try:
+        client = _s3_client()
+    except Exception as exc:  # noqa: BLE001
+        steps["client"] = describe(exc)
+        report["ok"] = False
+        return report
+    steps["client"] = "ok"
+
+    for label, call in (
+        ("write", lambda: client.put_object(Bucket=bucket, Key=key, Body=payload)),
+        ("read", lambda: client.get_object(Bucket=bucket, Key=key)),
+        ("delete", lambda: client.delete_object(Bucket=bucket, Key=key)),
+    ):
+        try:
+            call()
+            steps[label] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            steps[label] = describe(exc)
+            report["ok"] = False
+            report["hint"] = _diagnose_hint(label, steps[label])
+            return report
+
+    report["ok"] = True
+    return report
+
+
+def _diagnose_hint(step: str, message: str) -> str:
+    low = message.lower()
+    if "ssl" in low or "handshake" in low:
+        return "TLS to the R2 endpoint failed — check S3_ENDPOINT_URL account id."
+    if "403" in low or "forbidden" in low or "accessdenied" in low or "signature" in low:
+        return "Auth rejected — check S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY and that the token has Object Read & Write on this bucket."
+    if "nosuchbucket" in low or "404" in low or "notfound" in low:
+        return "Bucket not found — check S3_BUCKET matches the R2 bucket exactly."
+    if "endpoint" in low or "resolve" in low or "connection" in low:
+        return "Could not reach the endpoint — check S3_ENDPOINT_URL host."
+    return f"Failed on {step}."

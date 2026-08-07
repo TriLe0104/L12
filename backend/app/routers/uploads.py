@@ -8,10 +8,20 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Activity, User
 from ..schemas import ModelUploadOut, UploadOut, UserOut
-from ..security import require_editor, require_self_photo
-from ..storage import store_bytes
+from ..security import require_admin, require_editor, require_self_photo
+from ..storage import store_bytes, storage_diagnostics
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+
+
+@router.get("/diagnostics")
+def uploads_diagnostics(_: User = Depends(require_admin)) -> dict[str, object]:
+    """Admin-only: round-trip a test object and report the exact storage error.
+
+    Returns no secret values — only presence flags and the precise failure — so
+    it is safe to read from the browser while wiring up R2.
+    """
+    return storage_diagnostics()
 
 MAX_BYTES = 8 * 1024 * 1024
 ALLOWED = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
