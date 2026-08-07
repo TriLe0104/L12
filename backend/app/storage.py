@@ -87,8 +87,8 @@ def _s3_client():
 
     endpoint = _clean_endpoint(settings.s3_endpoint_url or "")
     host = (urlparse(endpoint).hostname or "").lower()
-    #if host.endswith(".r2.cloudflarestorage.com"):
-    #    _enable_r2_sni_workaround()
+    if host.endswith(".r2.cloudflarestorage.com"):
+        _enable_r2_sni_workaround()
 
     return boto3.client(
         "s3",
