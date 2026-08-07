@@ -1,0 +1,1 @@
+Remove-Item -Force -ErrorAction SilentlyContinue 'C:\Users\tril\Projects\po-calendar\backend\_tmp_cleanup.ps1'; Write-Host 'ok'
