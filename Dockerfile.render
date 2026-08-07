@@ -20,7 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NEXT_TELEMETRY_DISABLED=1
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y gettext-base libstdc++6 nginx \
+    && apt-get install --no-install-recommends -y ca-certificates gettext-base libstdc++6 nginx \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

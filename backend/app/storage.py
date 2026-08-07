@@ -13,11 +13,13 @@ from __future__ import annotations
 import logging
 import mimetypes
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 from .config import settings
 
@@ -45,18 +47,59 @@ def object_storage_configured() -> bool:
     )
 
 
+def _clean_endpoint(raw: str) -> str:
+    # Render / dotenv pastes often wrap values in quotes; those break TLS SNI.
+    value = raw.strip().strip("\"'")
+    return value.rstrip("/")
+
+
+def _enable_r2_sni_workaround() -> None:
+    """Cloudflare sometimes has no cert for `<account>.r2.cloudflarestorage.com`.
+
+    Presenting that hostname as SNI yields `SSLV3_ALERT_HANDSHAKE_FAILURE`.
+    Presenting `r2.cloudflarestorage.com` instead completes TLS against the
+    shared cert, while the HTTP Host header (and SigV4) still use the account
+    endpoint. urllib3 honours `HTTPSConnection.server_hostname` for both SNI
+    and certificate hostname checks.
+    """
+    import urllib3.connection as conn
+
+    if getattr(conn.HTTPSConnection, "_po_r2_sni_patched", False):
+        return
+
+    original_init = conn.HTTPSConnection.__init__
+
+    def patched_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        original_init(self, *args, **kwargs)
+        host = getattr(self, "host", "") or ""
+        if host.endswith(".r2.cloudflarestorage.com") and host != "r2.cloudflarestorage.com":
+            self.server_hostname = "r2.cloudflarestorage.com"
+
+    conn.HTTPSConnection.__init__ = patched_init  # type: ignore[method-assign]
+    conn.HTTPSConnection._po_r2_sni_patched = True  # type: ignore[attr-defined]
+
+
+@lru_cache(maxsize=1)
 def _s3_client():
     # Imported lazily so a laptop without boto3 still boots on the local path.
     import boto3
     from botocore.config import Config
 
+    endpoint = _clean_endpoint(settings.s3_endpoint_url or "")
+    host = (urlparse(endpoint).hostname or "").lower()
+    if host.endswith(".r2.cloudflarestorage.com"):
+        _enable_r2_sni_workaround()
+
     return boto3.client(
         "s3",
-        endpoint_url=settings.s3_endpoint_url,
-        aws_access_key_id=settings.s3_access_key_id,
-        aws_secret_access_key=settings.s3_secret_access_key,
-        region_name=settings.s3_region or "auto",
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        endpoint_url=endpoint,
+        aws_access_key_id=(settings.s3_access_key_id or "").strip().strip("\"'"),
+        aws_secret_access_key=(settings.s3_secret_access_key or "").strip().strip("\"'"),
+        region_name=(settings.s3_region or "auto").strip().strip("\"'") or "auto",
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        ),
     )
 
 
@@ -66,8 +109,16 @@ def _content_type_for(name: str, fallback: str | None = None) -> str:
 
 
 def _public_url(name: str) -> str | None:
-    base = (settings.s3_public_base_url or "").rstrip("/")
+    base = (settings.s3_public_base_url or "").strip().strip("\"'").rstrip("/")
     return f"{base}/{name}" if base else None
+
+
+def _raise_storage(exc: Exception, *, action: str) -> None:
+    logger.exception("object storage %s failed", action)
+    raise HTTPException(
+        status.HTTP_502_BAD_GATEWAY,
+        f"Object storage {action} failed — check S3_* / R2 credentials and endpoint",
+    ) from exc
 
 
 def store_bytes(payload: bytes, extension: str, content_type: str | None = None) -> str:
@@ -81,14 +132,16 @@ def store_bytes(payload: bytes, extension: str, content_type: str | None = None)
     media_type = _content_type_for(name, content_type)
 
     if object_storage_configured():
-        client = _s3_client()
-        client.put_object(
-            Bucket=settings.s3_bucket,
-            Key=name,
-            Body=payload,
-            ContentType=media_type,
-            CacheControl="public, max-age=31536000, immutable",
-        )
+        try:
+            _s3_client().put_object(
+                Bucket=(settings.s3_bucket or "").strip().strip("\"'"),
+                Key=name,
+                Body=payload,
+                ContentType=media_type,
+                CacheControl="public, max-age=31536000, immutable",
+            )
+        except Exception as exc:  # noqa: BLE001 — surface every boto failure as 502
+            _raise_storage(exc, action="upload")
         public = _public_url(name)
         if public:
             return public
@@ -113,8 +166,6 @@ def serve_upload(name: str) -> Response:
     media_type = _content_type_for(name)
 
     if local.is_file():
-        from fastapi.responses import FileResponse
-
         return FileResponse(local, media_type=media_type, headers=_cache_headers())
 
     public = _public_url(name)
@@ -127,10 +178,17 @@ def serve_upload(name: str) -> Response:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
     try:
-        obj = _s3_client().get_object(Bucket=settings.s3_bucket, Key=name)
+        obj = _s3_client().get_object(
+            Bucket=(settings.s3_bucket or "").strip().strip("\"'"),
+            Key=name,
+        )
     except Exception as exc:  # noqa: BLE001 — botocore raises many shapes for missing keys
-        logger.info("upload miss %s: %s", name, exc)
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found") from exc
+        # Missing object → 404; TLS / auth / network → 502 so the dashboard shows why.
+        error_name = type(exc).__name__
+        if "NoSuchKey" in error_name or "404" in str(exc):
+            logger.info("upload miss %s: %s", name, exc)
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found") from exc
+        _raise_storage(exc, action="download")
 
     body: BinaryIO = obj["Body"]
     headers = _cache_headers()
