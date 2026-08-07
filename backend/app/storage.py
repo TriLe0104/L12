@@ -52,33 +52,6 @@ def _clean_endpoint(raw: str) -> str:
     value = raw.strip().strip("\"'")
     return value.rstrip("/")
 
-
-def _enable_r2_sni_workaround() -> None:
-    """Cloudflare sometimes has no cert for `<account>.r2.cloudflarestorage.com`.
-
-    Presenting that hostname as SNI yields `SSLV3_ALERT_HANDSHAKE_FAILURE`.
-    Presenting `r2.cloudflarestorage.com` instead completes TLS against the
-    shared cert, while the HTTP Host header (and SigV4) still use the account
-    endpoint. urllib3 honours `HTTPSConnection.server_hostname` for both SNI
-    and certificate hostname checks.
-    """
-    import urllib3.connection as conn
-
-    if getattr(conn.HTTPSConnection, "_po_r2_sni_patched", False):
-        return
-
-    original_init = conn.HTTPSConnection.__init__
-
-    def patched_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        original_init(self, *args, **kwargs)
-        host = getattr(self, "host", "") or ""
-        if host.endswith(".r2.cloudflarestorage.com") and host != "r2.cloudflarestorage.com":
-            self.server_hostname = "r2.cloudflarestorage.com"
-
-    conn.HTTPSConnection.__init__ = patched_init  # type: ignore[method-assign]
-    conn.HTTPSConnection._po_r2_sni_patched = True  # type: ignore[attr-defined]
-
-
 @lru_cache(maxsize=1)
 def _s3_client():
     # Imported lazily so a laptop without boto3 still boots on the local path.
@@ -87,8 +60,14 @@ def _s3_client():
 
     endpoint = _clean_endpoint(settings.s3_endpoint_url or "")
     host = (urlparse(endpoint).hostname or "").lower()
-    #if host.endswith(".r2.cloudflarestorage.com"):
-    #    _enable_r2_sni_workaround()
+    if host.endswith(".r2.cloudflarestorage.com") and host != "r2.cloudflarestorage.com":
+        # Path-style addressing means the account is identified via the
+        # SigV4 signature, not the hostname — routing everything through
+        # the shared `r2.cloudflarestorage.com` host keeps SNI, the HTTP
+        # Host header, and the TLS cert all in agreement. A mismatch
+        # between SNI and Host looks like domain fronting to Cloudflare's
+        # edge and gets a bare 403 with no body.
+        endpoint = endpoint.replace(host, "r2.cloudflarestorage.com")
 
     return boto3.client(
         "s3",
@@ -101,7 +80,6 @@ def _s3_client():
             s3={"addressing_style": "path"},
         ),
     )
-
 
 def _content_type_for(name: str, fallback: str | None = None) -> str:
     guessed, _ = mimetypes.guess_type(name)
