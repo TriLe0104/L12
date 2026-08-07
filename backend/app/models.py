@@ -33,15 +33,15 @@ class Role(str, enum.Enum):
 
 
 class POStatus(str, enum.Enum):
-    NEW = "new"
-    RFQ_FINISHING = "rfq_finishing"
-    IN_MACHINING = "in_machining"
-    FINISHING = "finishing"
-    UNDER_INSPECTION = "under_inspection"
-    WAIT_VQC = "wait_vqc"
+    NEED_MATERIAL_SIZE = "need_material_size"
+    ORDER_MATERIAL = "order_material"
+    MATERIAL_INCOMING = "material_incoming"
+    WAITING_SETUP = "waiting_setup"
+    RUNNING = "running"
+    DEBURR = "deburr"
+    INSPECTION = "inspection"
+    READY_TO_PLATE = "ready_to_plate"
     READY_TO_SHIP = "ready_to_ship"
-    SHIPPED = "shipped"
-    ON_HOLD = "on_hold"
 
 
 class Stage(str, enum.Enum):
@@ -122,7 +122,7 @@ class PurchaseOrder(Base):
     hardware: Mapped[bool] = mapped_column(Boolean, default=False)
     # Stored as a plain string so Admin-defined statuses can land without an
     # enum migration. Seeded / day-one values match POStatus members. Values
-    # are the lowercase keys (`new`), not member names — see migrations.REPAIRS.
+    # are the lowercase keys (`need_material_size`), not member names — see migrations.REPAIRS.
     status: Mapped[str] = mapped_column(String(40), default=POStatus.NEW.value, index=True)
     priority: Mapped[Priority] = mapped_column(
         Enum(Priority, native_enum=False), default=Priority.NORMAL, index=True
@@ -292,23 +292,23 @@ PRIORITY_RANK: dict[Priority, int] = {
 }
 
 STAGE_BY_STATUS: dict[POStatus, Stage] = {
-    POStatus.NEW: Stage.PENDING,
-    POStatus.RFQ_FINISHING: Stage.PENDING,
-    POStatus.ON_HOLD: Stage.ON_HOLD,
-    POStatus.IN_MACHINING: Stage.IN_PROGRESS,
-    POStatus.FINISHING: Stage.IN_PROGRESS,
-    POStatus.UNDER_INSPECTION: Stage.IN_PROGRESS,
-    POStatus.WAIT_VQC: Stage.IN_PROGRESS,
+    POStatus.NEED_MATERIAL_SIZE: Stage.PENDING,
+    POStatus.ORDER_MATERIAL: Stage.PENDING,
+    POStatus.MATERIAL_INCOMING: Stage.PENDING,
+    POStatus.WAITING_SETUP: Stage.ON_HOLD,
+    POStatus.RUNNING: Stage.IN_PROGRESS,
+    POStatus.DEBURR: Stage.IN_PROGRESS,
+    POStatus.INSPECTION: Stage.IN_PROGRESS,
+    POStatus.READY_TO_PLATE: Stage.IN_PROGRESS,
     POStatus.READY_TO_SHIP: Stage.COMPLETED,
-    POStatus.SHIPPED: Stage.COMPLETED,
 }
 
 # Where a card lands when it is dragged into a column, if its current status
 # doesn't already belong to that column.
 STAGE_DEFAULT_STATUS: dict[Stage, POStatus] = {
-    Stage.PENDING: POStatus.NEW,
-    Stage.ON_HOLD: POStatus.ON_HOLD,
-    Stage.IN_PROGRESS: POStatus.IN_MACHINING,
+    Stage.PENDING: POStatus.NEED_MATERIAL_SIZE,
+    Stage.ON_HOLD: POStatus.WAITING_SETUP,
+    Stage.IN_PROGRESS: POStatus.RUNNING,
     Stage.COMPLETED: POStatus.READY_TO_SHIP,
 }
 
@@ -320,13 +320,13 @@ STAGE_META: dict[Stage, dict[str, str]] = {
 }
 
 STATUS_META: dict[POStatus, dict[str, str]] = {
-    POStatus.NEW: {"label": "NEW", "tone": "slate"},
-    POStatus.RFQ_FINISHING: {"label": "RFQ FINISHING", "tone": "cyan"},
-    POStatus.IN_MACHINING: {"label": "IN MACHINING", "tone": "blue"},
-    POStatus.FINISHING: {"label": "FINISHING", "tone": "teal"},
-    POStatus.UNDER_INSPECTION: {"label": "UNDER INSPECTION", "tone": "amber"},
-    POStatus.WAIT_VQC: {"label": "WAIT VQC", "tone": "red"},
-    POStatus.READY_TO_SHIP: {"label": "READY TO SHIP", "tone": "green"},
-    POStatus.SHIPPED: {"label": "SHIPPED", "tone": "graphite"},
-    POStatus.ON_HOLD: {"label": "ON HOLD", "tone": "orange"},
+    POStatus.NEED_MATERIAL_SIZE: {"label": "Need Material Size", "tone": "slate"},
+    POStatus.ORDER_MATERIAL: {"label": "Order Material", "tone": "amber"},
+    POStatus.MATERIAL_INCOMING: {"label": "Material Incoming", "tone": "cyan"},
+    POStatus.WAITING_SETUP: {"label": "Waiting Setup", "tone": "orange"},
+    POStatus.RUNNING: {"label": "Running", "tone": "blue"},
+    POStatus.DEBURR: {"label": "Deburr", "tone": "teal"},
+    POStatus.INSPECTION: {"label": "Inspection", "tone": "purple"},
+    POStatus.READY_TO_PLATE: {"label": "Ready to plate", "tone": "purple"},
+    POStatus.READY_TO_SHIP: {"label": "Ready to ship", "tone": "green"},
 }

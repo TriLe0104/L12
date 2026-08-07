@@ -2890,6 +2890,44 @@ button.jobcard-thumb:focus-visible {
   font-size: 0.82rem;
 }
 
+.settings-tone-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.settings-tone-swatch {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 0.35rem;
+  background: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-tone-swatch::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.settings-tone-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.25rem;
+}
+
+.settings-tone-swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 0.25rem;
+}
+
+.settings-tone-hex {
+  width: 6.5rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  text-transform: lowercase;
+}
+
 .settings-kanban-item {
   flex-direction: column;
   align-items: stretch !important;

@@ -95,7 +95,7 @@ EDITOR_FLOOR = Role.MANAGER       # changing purchase orders, and attaching file
 # EDITOR_FLOOR: a User may PATCH only those fields; create/delete/arbitrary
 # edits still need Manager+.
 STATUS_FLOOR = Role.USER
-PEOPLE_FLOOR = Role.MANAGER       # inviting people, setting their roles, reading the directory
+PEOPLE_FLOOR = Role.MANAGER       # managing existing people and reading the directory
 LOCKED_PO_FLOOR = Role.ADMIN      # working through a locked order, unlocking included
 # Your own name and photo are yours at every rank. Written as a floor rather than
 # as "no check" so it stays inside the same system: if a rung is ever added below

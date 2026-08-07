@@ -23,6 +23,7 @@ const PAGES = [
   "/calendar",
   "/calendar#year",
   "/users",
+  "/settings",
   "/tasks#cards-min",
   "/tasks#cards-max",
   "/tasks#hide-completed",

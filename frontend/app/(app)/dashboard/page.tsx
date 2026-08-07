@@ -9,6 +9,7 @@ import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
+import { resolveToneColor } from "@/lib/boardTypes";
 import {
   PRIORITY_ORDER,
   type PurchaseOrder,
@@ -484,7 +485,7 @@ export default function DashboardPage() {
                             {stage ? (
                               <span
                                 className="dash-stage"
-                                style={{ ["--tone" as string]: `var(--tone-${stage.tone})` }}
+                                style={{ ["--tone" as string]: resolveToneColor(stage.tone) }}
                               >
                                 {stage.label}
                               </span>
@@ -500,7 +501,9 @@ export default function DashboardPage() {
                             <span
                               className="dash-status"
                               style={{
-                                ["--tone" as string]: `var(--tone-${statusByKey.get(po.status)?.tone ?? TONE_BY_STATUS[po.status] ?? "slate"})`,
+                                ["--tone" as string]: resolveToneColor(
+                                  statusByKey.get(po.status)?.tone ?? TONE_BY_STATUS[po.status],
+                                ),
                               }}
                             >
                               {po.status_label}

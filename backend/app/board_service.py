@@ -18,11 +18,15 @@ from sqlalchemy.orm import Session
 
 from .board_defaults import (
     ALLOWED_CUSTOM_TYPES,
-    ALLOWED_TONES,
     BUILTIN_CARD_KEYS,
     BUILTIN_DASHBOARD_KEYS,
+    DEFAULT_TONE_HEX,
     DOCUMENT_VERSION,
     clone_default,
+    document_needs_status_upgrade,
+    normalize_status_key,
+    normalize_tone,
+    upgrade_document,
 )
 from .models import BoardSettings, PurchaseOrder, User, _now
 
@@ -36,7 +40,12 @@ def _as_dict(row: BoardSettings | None) -> dict[str, Any]:
 
 
 def ensure_row(db: Session) -> BoardSettings:
-    """Return the singleton settings row, seeding defaults on first use."""
+    """Return the singleton settings row, seeding defaults on first use.
+
+    Also runs the idempotent v2 status-catalog repair: rewrite retired PO status
+    keys first (settings validation blocks removing in-use statuses), then upgrade
+    the published document while preserving unrelated Admin config.
+    """
     row = db.get(BoardSettings, 1)
     if row is None:
         row = BoardSettings(id=1, document=clone_default(), version=DOCUMENT_VERSION)
@@ -48,7 +57,44 @@ def ensure_row(db: Session) -> BoardSettings:
         row.version = DOCUMENT_VERSION
         db.commit()
         db.refresh(row)
+
+    po_mapped = repair_purchase_order_statuses(db)
+    doc_upgraded = False
+    if document_needs_status_upgrade(row.document if isinstance(row.document, dict) else None):
+        # Upgrade before any Admin PUT so the in-use check sees the new keys.
+        upgraded = upgrade_document(row.document if isinstance(row.document, dict) else {})
+        # Preserve forward-compatible keys (e.g. materialTypes) already on the row.
+        if isinstance(row.document, dict):
+            for key, value in row.document.items():
+                if key not in upgraded:
+                    upgraded[key] = deepcopy(value)
+        row.document = upgraded
+        row.version = DOCUMENT_VERSION
+        row.updated_at = _now()
+        doc_upgraded = True
+
+    if po_mapped or doc_upgraded:
+        db.commit()
+        db.refresh(row)
     return row
+
+
+def repair_purchase_order_statuses(db: Session) -> dict[str, int]:
+    """Rewrite retired / alias status keys on every PO. Returns {from->to: count}."""
+    mapped: dict[str, int] = {}
+    for po in db.scalars(select(PurchaseOrder)).all():
+        current = (
+            po.status
+            if isinstance(po.status, str)
+            else getattr(po.status, "value", str(po.status))
+        )
+        target = normalize_status_key(current)
+        if target == current:
+            continue
+        po.status = target
+        label = f"{current}->{target}"
+        mapped[label] = mapped.get(label, 0) + 1
+    return mapped
 
 
 def get_document(db: Session) -> dict[str, Any]:
@@ -68,9 +114,12 @@ def status_label(doc: dict[str, Any], key: str) -> str:
 
 def status_tone(doc: dict[str, Any], key: str) -> str:
     meta = status_map(doc).get(key)
-    if meta and meta.get("tone") in ALLOWED_TONES:
-        return str(meta["tone"])
-    return "slate"
+    if meta:
+        try:
+            return normalize_tone(meta.get("tone"))
+        except ValueError:
+            pass
+    return DEFAULT_TONE_HEX
 
 
 def column_for_status(doc: dict[str, Any], status_key: str) -> str | None:
@@ -96,23 +145,33 @@ def column_meta(doc: dict[str, Any], column_key: str) -> dict[str, Any] | None:
 
 
 def statuses_for_meta(doc: dict[str, Any]) -> list[dict[str, str]]:
-    return [
-        {"value": s["key"], "label": s["label"], "tone": s.get("tone", "slate")}
-        for s in doc.get("statuses", [])
-    ]
+    out: list[dict[str, str]] = []
+    for s in doc.get("statuses", []):
+        try:
+            tone = normalize_tone(s.get("tone"))
+        except ValueError:
+            tone = DEFAULT_TONE_HEX
+        out.append({"value": s["key"], "label": s["label"], "tone": tone})
+    return out
 
 
 def stages_for_meta(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """Project kanban columns into the legacy StageMeta shape for /api/meta/stages."""
-    return [
-        {
-            "value": col["key"],
-            "label": col["label"],
-            "tone": col.get("tone", "slate"),
-            "statuses": list(col.get("statusKeys") or []),
-        }
-        for col in doc.get("kanbanColumns", [])
-    ]
+    out: list[dict[str, Any]] = []
+    for col in doc.get("kanbanColumns", []):
+        try:
+            tone = normalize_tone(col.get("tone"))
+        except ValueError:
+            tone = DEFAULT_TONE_HEX
+        out.append(
+            {
+                "value": col["key"],
+                "label": col["label"],
+                "tone": tone,
+                "statuses": list(col.get("statusKeys") or []),
+            }
+        )
+    return out
 
 
 def apply_po_overlays(db: Session, pos: list[PurchaseOrder]) -> None:
@@ -255,12 +314,10 @@ def validate_document(doc: dict[str, Any], *, db: Session, previous: dict[str, A
         label = str(item.get("label") or "").strip()
         if not label:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Status {key} needs a label")
-        tone = str(item.get("tone") or "slate")
-        if tone not in ALLOWED_TONES:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"Status {key} tone must be one of {sorted(ALLOWED_TONES)}",
-            )
+        try:
+            tone = normalize_tone(item.get("tone"), what=f"Status {key} tone")
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
         statuses.append({"key": key, "label": label, "tone": tone})
         status_keys.add(key)
     out["statuses"] = statuses
@@ -320,12 +377,10 @@ def validate_document(doc: dict[str, Any], *, db: Session, previous: dict[str, A
         label = str(item.get("label") or "").strip()
         if not label:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Kanban column {key} needs a label")
-        tone = str(item.get("tone") or "slate")
-        if tone not in ALLOWED_TONES:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"Kanban column {key} tone must be one of {sorted(ALLOWED_TONES)}",
-            )
+        try:
+            tone = normalize_tone(item.get("tone"), what=f"Kanban column {key} tone")
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
         status_keys_list = item.get("statusKeys") or []
         if not isinstance(status_keys_list, list):
             raise HTTPException(
@@ -380,6 +435,27 @@ def validate_document(doc: dict[str, Any], *, db: Session, previous: dict[str, A
             "At most one kanban column may be marked isCompleted (hide-completed uses it)",
         )
     out["kanbanColumns"] = kanban
+
+    # Preserve forward-compatible keys (materialTypes, etc.) from the PUT body or
+    # the previously published document so concurrent settings features aren't wiped.
+    known = {
+        "version",
+        "cardFields",
+        "customFields",
+        "statuses",
+        "dashboardColumns",
+        "kanbanColumns",
+    }
+    for source in (previous, doc):
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if key not in known and key not in out:
+                out[key] = deepcopy(value)
+    for key, value in doc.items():
+        if key not in known:
+            out[key] = deepcopy(value)
+
     return out
 
 

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -62,10 +61,7 @@ export default function LoginPage() {
         <button className="btn btn-primary" type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
-        <p className="auth-alt">
-          No account yet? <Link href="/register">Create one</Link>
-        </p>
-        <p className="hint">prototype auth — swap to Entra ID SSO later</p>
+        <p className="hint">Accounts are created by an administrator.</p>
       </form>
     </AuthScreen>
   );

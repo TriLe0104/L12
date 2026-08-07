@@ -23,7 +23,13 @@ export default function UsersPage() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
-  const [invite, setInvite] = useState({ name: "", email: "", org: "", role: "viewer" as Role });
+  const [invite, setInvite] = useState({
+    name: "",
+    email: "",
+    org: "",
+    role: "viewer" as Role,
+    password: "",
+  });
   const [newPassword, setNewPassword] = useState("");
   const [passwordNote, setPasswordNote] = useState<string | null>(null);
   const [orgs, setOrgs] = useState<string[]>([]);
@@ -220,13 +226,14 @@ export default function UsersPage() {
 
   async function submitInvite(e: React.FormEvent) {
     e.preventDefault();
+    if (!isAdmin) return;
     setError(null);
     try {
       const created = await api.createUser({ ...invite, org: invite.org.trim() || null });
       setUsers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedId(created.id);
       setInviting(false);
-      setInvite({ name: "", email: "", org: "", role: "viewer" });
+      setInvite({ name: "", email: "", org: "", role: "viewer", password: "" });
       loadOrgs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invite failed");
@@ -274,10 +281,10 @@ export default function UsersPage() {
               : "Your name and photo. Ask an administrator to change your role or org."}
           </p>
         </div>
-        {canAdmin && (
+        {isAdmin && (
           <div className="head-tools">
             <button className="btn btn-primary" onClick={() => setInviting((v) => !v)}>
-              {inviting ? "Cancel" : "+ Invite user"}
+              {inviting ? "Cancel" : "+ Create user"}
             </button>
           </div>
         )}
@@ -334,10 +341,22 @@ export default function UsersPage() {
                 ))}
               </select>
             </label>
+            <label>
+              Temporary password
+              <input
+                className="field"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                value={invite.password}
+                onChange={(e) => setInvite({ ...invite, password: e.target.value })}
+              />
+            </label>
           </div>
           <div>
             <button className="btn btn-primary" type="submit">
-              Send invite
+              Create user
             </button>
           </div>
         </form>

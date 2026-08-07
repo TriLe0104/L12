@@ -9,14 +9,9 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .config import settings
 from .models import Activity, Inspection, POStatus, Priority, PurchaseOrder, Role, User
 from .security import hash_password
-
-DEMO_PASSWORD = "demo1234"
-
-USERS: list[tuple[str, str, Role]] = [
-    ("Tri Le (Rack)", "tri@supermicro.com", Role.ADMIN),
-]
 
 MATERIALS = [
     ("AL 6061-T651, Plate", "CLEAR ANODIZE; CHEM FILM GOLD"),
@@ -47,13 +42,16 @@ def seed(db: Session) -> None:
 
     rng = random.Random(42)
     users: list[User] = []
-    for name, email, role in USERS:
+    bootstrap_users = [
+        (settings.bootstrap_admin_name, settings.bootstrap_admin_email, Role.ADMIN),
+    ]
+    for name, email, role in bootstrap_users:
         user = User(
             name=name,
-            email=email,
-            org="Rack Engineering" if "(Rack)" in name else "IT",
+            email=email.lower().strip(),
+            org="IT",
             role=role,
-            password_hash=hash_password(DEMO_PASSWORD),
+            password_hash=hash_password(settings.bootstrap_admin_password),
             is_pending=False,
             last_login_at=datetime.now(timezone.utc) - timedelta(days=rng.randint(0, 9)),
         )

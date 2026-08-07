@@ -207,11 +207,11 @@ show("viewer edits", *call("PATCH", f"/api/purchase-orders/{pid}",
                            {"note": "viewer edit"}, vwr_tok), 403)
 show("viewer deletes", *call("DELETE", f"/api/purchase-orders/{pid}", token=vwr_tok), 403)
 
-section("manager administers people below it")
+section("manager administers existing people below it but cannot create accounts")
 code, out = call("POST", "/api/users", {"name": "V2 Invitee", "email": "v2-invitee@example.com",
                                         "role": "viewer", "password": "smoke-pass-1"}, mgr_tok)
-show("manager invites a viewer", code, out, 201)
-invitee = out if code == 201 else None
+show("manager creates a viewer", code, out, 403)
+invitee = None
 show("manager sets role -> user", *call("PATCH", f"/api/users/{vwr['id']}",
                                         {"role": "user"}, mgr_tok), 200)
 show("manager sets role -> viewer", *call("PATCH", f"/api/users/{usr['id']}",
@@ -223,10 +223,10 @@ call("PATCH", f"/api/users/{usr['id']}", {"role": "user"}, tok)
 section("manager cannot climb")
 show("manager assigns admin", *call("PATCH", f"/api/users/{vwr['id']}",
                                     {"role": "admin"}, mgr_tok), 403)
-show("manager invites an admin", *call("POST", "/api/users",
+show("manager creates an admin", *call("POST", "/api/users",
                                        {"name": "V2 Sneak", "email": "v2-sneak@example.com",
                                         "role": "admin", "password": "smoke-pass-1"}, mgr_tok), 403)
-show("manager invites a manager", *call("POST", "/api/users",
+show("manager creates a manager", *call("POST", "/api/users",
                                         {"name": "V2 Sneak2", "email": "v2-sneak2@example.com",
                                          "role": "manager", "password": "smoke-pass-1"}, mgr_tok), 403)
 show("manager promotes itself", *call("PATCH", f"/api/users/{mgr['id']}",

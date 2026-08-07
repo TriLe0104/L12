@@ -28,9 +28,9 @@ npm install
 npm run dev      # http://localhost:3000
 ```
 
-Register your own account at http://localhost:3000/register (any email — personal or work). On a
-fresh database the seed also creates `tri@supermicro.com` / `demo1234`; it is gone from this
-install, pruned by `tools/prune_users.py`.
+On a fresh database the seed creates the administrator
+`tri@supermicro.com` / `demo1234`. Sign in with it, then create other accounts from **Users**.
+Public self-registration is not exposed.
 
 ## Run with Docker (Postgres)
 
@@ -70,7 +70,7 @@ docker compose up --build
   naturally so `J-9` precedes `J-40`, priority walks HOT → LOW and stage walks the board, and empty
   cells sink to the bottom whichever way the column points. Clicking or Entering a row opens the
   usual detail drawer, so edits and the activity trail work unchanged; the top-right button creates
-  a PO through the same drawer. Signing in and registering land here too. On a desktop-height window
+  a PO through the same drawer. Signing in lands here too. On a desktop-height window
   the column headings pin to the top of the table while the rows scroll under them. Filter and sort
   stick per browser (`po_calendar_dashboard_filter` / `po_calendar_dashboard_sort`).
 - **Calendar view** — FullCalendar year/month/week/list. Each event is a compact job card showing
@@ -168,10 +168,10 @@ docker compose up --build
   edits (create, delete, arbitrary PATCH) need Manager or above (`EDITOR_FLOOR`). A **User** may
   change **status** and **stage** on an unlocked order (`STATUS_FLOOR`) — drawer status select and
   kanban column drag — but is refused on every other field; a locked order stays Admin-only.
-  Viewer remains read-only on orders. Self-registration lands on `user`.
+  Viewer remains read-only on orders. Accounts are provisioned by an Admin.
 - **Users** — directory with search, role filter and per-user activity, for the ranks that
-  administer accounts. Manager and above can invite
-  people, set roles and assign an org (pick an existing one or type a new one). Two rules keep that
+  administer accounts. Only an Admin can create an account and set its initial password. Manager
+  and above can set roles and assign an org (pick an existing one or type a new one). Two rules keep that
   from being a way to climb: **you may only assign a role strictly below your own, and only act on
   people strictly below your own rank.** So a manager can make someone a User or a Viewer, but can't
   mint an Admin, can't edit or demote one, can't touch a fellow manager, and can't promote itself.
@@ -224,7 +224,6 @@ docker compose up --build
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/api/auth/register` | self sign-up → JWT (name, email, 8+ char password) |
 | GET | `/api/auth/config` | whether sign-up is open, which provider is active |
 | POST | `/api/auth/login` | email + password → JWT |
 | GET | `/api/auth/me` | current user |
@@ -237,7 +236,7 @@ docker compose up --build
 | POST | `/api/purchase-orders/{id}/comments` | add a note (`{body}`) — any signed-in rank, including Viewer and on locked orders; empty/whitespace body → 400 plain string; does not write activity or move Modified |
 | DELETE | `/api/purchase-orders/{id}/comments/{comment_id}` | remove a note — author or Manager+ (people floor); lock does not block it |
 | GET | `/api/users` | the full directory, with `q` and `role` filters — manager and above. Carries email, role and sign-in state, so it sits on the same floor as administering accounts; a filter is not a side door |
-| POST | `/api/users` | invite — manager and above, and only at a role strictly below your own |
+| POST | `/api/users` | create an account — admin only; requires an initial 8+ character password |
 | GET | `/api/users/{id}` | one person — your own record at any rank, anyone else's at manager and above. Refuses before it looks, so a 403 doesn't reveal whether the id exists |
 | GET | `/api/users/{id}/activity` | that person's audit trail — gated exactly like the by-id read |
 | GET | `/api/users/orgs` | orgs already in use, for the assignment picker — manager and above, like the rest of the directory |
@@ -259,12 +258,10 @@ Interactive docs: http://localhost:8000/docs
 
 ## Auth: prototype now, SSO later
 
-`AUTH_PROVIDER=local` uses email + password with PBKDF2 hashes and HS256 JWTs. Anyone can
-register at `/register`; new accounts get the role in `SIGNUP_DEFAULT_ROLE`, which ships as
-`user` — signed in, able to change status/stage on unlocked orders, unable to administer anyone
-or edit other order fields. **Lower it to
-`viewer` — or set `ALLOW_SIGNUP=false` — before the app is reachable from staging.** Every protected
-route depends on one function — `get_current_user` in `backend/app/security.py`. To move to
+`AUTH_PROVIDER=local` uses email + password with PBKDF2 hashes and HS256 JWTs. Public
+self-registration is disabled; only an authenticated Admin can create accounts through the Users
+page or `POST /api/users`. Every protected route depends on one function — `get_current_user` in
+`backend/app/security.py`. To move to
 Entra ID (or Auth0), validate the OIDC token there and map the `email` claim onto a `User` row;
 no route or frontend change is required beyond swapping the login page for the provider redirect.
 
@@ -289,9 +286,28 @@ these are member names, not values.
 Handy one-offs in `backend/tools/`: `prune_users.py`, `set_primary_account.py`, and
 `backfill_priorities.py` (spreads priorities over demo POs still sitting at the default).
 
-## Deploy order
+## Free public demo deployment
 
-1. `docker compose up` on the staging VM with a managed Postgres DSN in `DATABASE_URL`.
-2. Set `JWT_SECRET`, `CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE` to the staging hostnames.
-3. Swap `AUTH_PROVIDER` to `entra` once the app registration exists.
-4. Point DNS at the VM, terminate HTTPS (Caddy/nginx/Cloudflare), then cut production over.
+`Dockerfile.render` packages Next.js, FastAPI and nginx into one free Render web service. The
+browser uses one origin; nginx sends `/api` and `/uploads` to FastAPI and everything else to
+Next.js. Use a free Neon Postgres database so order and account data survives Render restarts.
+
+1. Push this repository to GitHub.
+2. Create a free Postgres project at https://neon.com and copy its connection string.
+3. In https://dashboard.render.com choose **New > Blueprint**, connect the repository and select
+   `render.yaml`.
+4. Fill the prompted secrets:
+   - `DATABASE_URL`: the Neon connection string (generic `postgresql://` URLs are normalized to
+     the installed psycopg 3 driver automatically).
+   - `BOOTSTRAP_ADMIN_NAME` and `BOOTSTRAP_ADMIN_EMAIL`: the first administrator.
+   - `BOOTSTRAP_ADMIN_PASSWORD`: a unique long password.
+5. Deploy, open the generated `onrender.com` URL and sign in with those bootstrap credentials.
+   The bootstrap values are used only while seeding an empty database.
+
+The free Render filesystem is ephemeral. Database records persist in Neon, but uploaded images
+and 3D models disappear whenever the service restarts or redeploys. That is acceptable for a
+throwaway demo; durable uploads require object storage or a paid persistent disk. The free service
+also sleeps when idle, so the first request can take about a minute.
+
+For production, use durable object storage, a production Postgres plan, SSO, and an always-on
+service. Set a custom domain and terminate HTTPS at the hosting platform.

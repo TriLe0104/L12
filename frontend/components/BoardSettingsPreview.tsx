@@ -10,7 +10,8 @@ import {
   visibleCardFields,
 } from "@/lib/cardFields";
 import type { BoardDocument } from "@/lib/boardTypes";
-import { PREVIEW_SAMPLE } from "@/lib/boardTypes";
+import { PREVIEW_SAMPLE, resolveToneColor } from "@/lib/boardTypes";
+import type { PODraft } from "@/lib/types";
 
 /** Live preview of card + dashboard headers + kanban, driven by the draft document. */
 export function BoardSettingsPreview({ document }: { document: BoardDocument }) {
@@ -30,10 +31,18 @@ export function BoardSettingsPreview({ document }: { document: BoardDocument }) 
     custom_fields: Object.fromEntries(
       document.customFields.map((f) => [
         f.key,
-        f.type === "number" ? 12 : f.type === "date" ? "2026-08-15" : f.type === "select" ? (f.options?.[0] ?? "—") : "Sample",
+        f.type === "number"
+          ? 12
+          : f.type === "date"
+            ? "2026-08-15"
+            : f.type === "select"
+              ? (f.options?.[0] ?? "—")
+              : "Sample",
       ]),
     ),
-  };
+  } as PODraft;
+
+  const owner = sample.owner ?? { id: "preview", name: "Alex Chen", initials: "AC", avatar_url: null };
 
   return (
     <aside className="settings-preview" aria-label="Live preview">
@@ -48,9 +57,12 @@ export function BoardSettingsPreview({ document }: { document: BoardDocument }) 
           <header className="jobcard-head">
             <div className="jobcard-job">{sample.job_no}</div>
             {sample.priority !== "normal" && (
-              <PriorityTag priority={sample.priority} label={sample.priority_label} />
+              <PriorityTag
+                priority={sample.priority ?? "normal"}
+                label={sample.priority_label ?? "NORMAL"}
+              />
             )}
-            <div className="jobcard-due">DUE {formatDue(sample.due_date)}</div>
+            <div className="jobcard-due">DUE {formatDue(sample.due_date ?? "2026-08-20")}</div>
           </header>
           <div className="jobcard-body">
             <div className="jobcard-thumb">NO IMG</div>
@@ -71,7 +83,7 @@ export function BoardSettingsPreview({ document }: { document: BoardDocument }) 
           <footer className="jobcard-status">
             <span>Status:</span>
             <b>{statusLabel}</b>
-            <Avatar initials={sample.owner.initials} avatarUrl={null} title={sample.owner.name} />
+            <Avatar initials={owner.initials} avatarUrl={null} title={owner.name} />
           </footer>
         </article>
         <div className="settings-preview-chips" aria-label="Status chips">
@@ -79,7 +91,7 @@ export function BoardSettingsPreview({ document }: { document: BoardDocument }) 
             <span
               key={s.key}
               className="settings-status-chip"
-              style={{ ["--tone" as string]: `var(--tone-${s.tone})` }}
+              style={{ ["--tone" as string]: resolveToneColor(s.tone) }}
             >
               {s.label}
             </span>
@@ -104,7 +116,7 @@ export function BoardSettingsPreview({ document }: { document: BoardDocument }) 
         >
           {document.kanbanColumns.map((col) => (
             <div key={col.key} className="settings-preview-kcol">
-              <header style={{ ["--tone" as string]: `var(--tone-${col.tone})` }}>
+              <header style={{ ["--tone" as string]: resolveToneColor(col.tone) }}>
                 <b>{col.label}</b>
                 {col.isCompleted && <small>completed</small>}
               </header>

@@ -21,8 +21,6 @@ services:
       DATABASE_URL: postgresql+psycopg://po:po@db:5432/po_calendar
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
-      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
-      SIGNUP_DEFAULT_ROLE: ${SIGNUP_DEFAULT_ROLE:-admin}
       SEED_ON_START: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     depends_on:

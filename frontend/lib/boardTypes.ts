@@ -2,6 +2,7 @@
 
 export type CustomFieldType = "text" | "number" | "date" | "select";
 
+/** Legacy named tones (still accepted from older documents). */
 export type FieldTone =
   | "slate"
   | "cyan"
@@ -12,6 +13,59 @@ export type FieldTone =
   | "green"
   | "graphite"
   | "orange";
+
+/** Hex values matching frontend/app/globals.css --tone-* tokens. */
+export const TONE_HEX: Record<FieldTone, string> = {
+  slate: "#64748b",
+  cyan: "#0e7490",
+  blue: "#1d4ed8",
+  teal: "#0f766e",
+  amber: "#b45309",
+  red: "#c81e2b",
+  green: "#0b8457",
+  graphite: "#3f4b57",
+  orange: "#c2410c",
+};
+
+export const DEFAULT_TONE_HEX = TONE_HEX.slate;
+
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/** Resolve a stored tone (hex or legacy name) to a CSS color string. */
+export function resolveToneColor(tone?: string | null): string {
+  if (!tone) return DEFAULT_TONE_HEX;
+  const trimmed = tone.trim();
+  const named = TONE_HEX[trimmed.toLowerCase() as FieldTone];
+  if (named) return named;
+  if (HEX_RE.test(trimmed)) {
+    const body = trimmed.slice(1);
+    if (body.length === 3) {
+      return `#${body
+        .split("")
+        .map((c) => c + c)
+        .join("")
+        .toLowerCase()}`;
+    }
+    return `#${body.toLowerCase()}`;
+  }
+  return DEFAULT_TONE_HEX;
+}
+
+/** `#rrggbb` for `<input type="color">` (browsers reject alpha / short forms). */
+export function toColorInputValue(tone?: string | null): string {
+  const resolved = resolveToneColor(tone);
+  if (resolved.length === 9) return resolved.slice(0, 7);
+  return resolved.length === 7 ? resolved : DEFAULT_TONE_HEX;
+}
+
+/** Return a normalised hex if `raw` is valid; otherwise null (for live hex typing). */
+export function tryParseToneHex(raw: string): string | null {
+  const trimmed = raw.trim();
+  const named = TONE_HEX[trimmed.toLowerCase() as FieldTone];
+  if (named) return named;
+  if (!HEX_RE.test(trimmed)) return null;
+  return resolveToneColor(trimmed);
+}
 
 export interface CardFieldConfig {
   key: string;
@@ -30,7 +84,8 @@ export interface CustomFieldConfig {
 export interface StatusConfig {
   key: string;
   label: string;
-  tone: FieldTone | string;
+  /** CSS hex (`#rrggbb`) or legacy named tone. */
+  tone: string;
 }
 
 export interface DashboardColumnConfig {
@@ -42,7 +97,8 @@ export interface DashboardColumnConfig {
 export interface KanbanColumnConfig {
   key: string;
   label: string;
-  tone: FieldTone | string;
+  /** CSS hex (`#rrggbb`) or legacy named tone. */
+  tone: string;
   statusKeys: string[];
   isCompleted: boolean;
 }

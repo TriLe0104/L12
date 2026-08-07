@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 *.db
 .env
+.env.local
+.env.*.local
 
 # uploaded part images
 backend/uploads/
@@ -13,8 +15,11 @@ node_modules/
 .next/
 out/
 *.log
+*.tsbuildinfo
 next-env.d.ts
 frontend/screenshots/
+frontend/tmp-shots/
+frontend/tmp-*.png
 
 # os / editors
 .DS_Store

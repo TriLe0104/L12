@@ -7,6 +7,7 @@ import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, canEditStatus, canModifyStatus, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
+import { resolveToneColor } from "@/lib/boardTypes";
 import { captureRects, playFlip, type RectMap } from "@/lib/flip";
 import { useBoardDrag } from "@/lib/useBoardDrag";
 import {
@@ -367,7 +368,7 @@ export default function TasksPage() {
               <section
                 key={stage}
                 className="kcol"
-                style={{ ["--tone" as string]: `var(--tone-${meta.tone})` }}
+                style={{ ["--tone" as string]: resolveToneColor(meta.tone) }}
                 {...columnProps(stage)}
               >
                 <header className="kcol-head">

@@ -21,7 +21,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str | None = Field(default=None, min_length=6)
+    password: str = Field(min_length=8)
 
 
 class UserUpdate(BaseModel):
@@ -205,12 +205,6 @@ class ActivityOut(ORMModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
-
-
-class RegisterRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=160)
-    email: str = Field(min_length=5, max_length=255)
-    password: str = Field(min_length=8, max_length=200)
 
 
 class TokenResponse(BaseModel):

@@ -103,10 +103,10 @@ def list_users(
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
-    payload: UserCreate, db: Session = Depends(get_db), actor: User = Depends(require_people_admin)
+    payload: UserCreate, db: Session = Depends(get_db), actor: User = Depends(require_admin)
 ) -> User:
-    # An invite hands out a role, so it obeys the same ceiling as changing one:
-    # nobody can conjure a peer or a superior into existence.
+    # Account provisioning is Admin-only. Keep the role check as a defense in
+    # depth and so this stays correct if the route dependency changes later.
     assert_may_assign(actor, payload.role)
 
     email = payload.email.lower().strip()
@@ -119,15 +119,15 @@ def create_user(
         org=_clean_org(payload.org),
         role=payload.role,
         avatar_url=payload.avatar_url,
-        password_hash=hash_password(payload.password) if payload.password else None,
-        is_pending=payload.password is None,
+        password_hash=hash_password(payload.password),
+        is_pending=False,
     )
     db.add(user)
     db.flush()
     db.add(
         Activity(
             actor_id=actor.id,
-            action="User invited",
+            action="User created",
             entity_type="user",
             entity_id=user.id,
             detail=f"{user.email} · {user.role.value}",

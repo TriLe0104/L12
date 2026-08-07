@@ -19,8 +19,10 @@ import {
   formatModelSize,
   MODEL_FORMAT_LABEL,
 } from "@/lib/model-format";
+import { resolveToneColor } from "@/lib/boardTypes";
 import type { PurchaseOrder } from "@/lib/types";
 
+/** Legacy status → named tone (pre-settings). Mapped to hex via resolveToneColor. */
 export const TONE_BY_STATUS: Record<string, string> = {
   new: "slate",
   rfq_finishing: "cyan",
@@ -35,7 +37,7 @@ export const TONE_BY_STATUS: Record<string, string> = {
 
 export const toneStyle = (status: string, tone?: string): CSSProperties =>
   ({
-    "--tone": `var(--tone-${tone ?? TONE_BY_STATUS[status] ?? "slate"})`,
+    "--tone": resolveToneColor(tone ?? TONE_BY_STATUS[status]),
   }) as CSSProperties;
 
 export const TONE_BY_PRIORITY: Record<string, string> = {
@@ -241,11 +243,13 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
 
 /** Compact card used inside calendar day cells. */
 export function JobChip({ po }: { po: PurchaseOrder }) {
+  const { statusByKey } = useBoardSettings();
+  const tone = statusByKey.get(po.status)?.tone;
   return (
     <div
       className="chip"
       data-locked={po.locked}
-      style={toneStyle(po.status)}
+      style={toneStyle(po.status, tone)}
       title={`${po.job_no} · ${po.po_number}${po.locked ? " · locked" : ""}`}
     >
       <div className="chip-top">

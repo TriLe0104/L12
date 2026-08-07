@@ -6,12 +6,11 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..models import Activity, Role, User
-from ..schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from ..models import Activity, User
+from ..schemas import LoginRequest, TokenResponse, UserOut
 from ..security import (
     create_access_token,
     get_current_user,
-    hash_password,
     verify_password,
 )
 
@@ -20,47 +19,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/config")
 def auth_config() -> dict[str, object]:
-    return {"provider": settings.auth_provider, "allow_signup": settings.allow_signup}
-
-
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    if not settings.allow_signup:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Sign-up is closed on this instance")
-
-    email = payload.email.lower().strip()
-    if db.scalar(select(User).where(User.email == email)):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "That email already has an account — sign in instead"
-        )
-
-    try:
-        role = Role(settings.signup_default_role)
-    except ValueError:
-        role = Role.VIEWER
-
-    user = User(
-        email=email,
-        name=payload.name.strip(),
-        role=role,
-        password_hash=hash_password(payload.password),
-        is_pending=False,
-        last_login_at=datetime.now(timezone.utc),
-    )
-    db.add(user)
-    db.flush()
-    db.add(
-        Activity(
-            actor_id=user.id,
-            action="Account registered",
-            entity_type="user",
-            entity_id=user.id,
-            detail=f"{user.email} · {role.value}",
-        )
-    )
-    db.commit()
-    db.refresh(user)
-    return TokenResponse(access_token=create_access_token(user), user=UserOut.model_validate(user))
+    # Accounts are provisioned only by an authenticated admin through /api/users.
+    return {"provider": settings.auth_provider, "allow_signup": False}
 
 
 @router.post("/login", response_model=TokenResponse)

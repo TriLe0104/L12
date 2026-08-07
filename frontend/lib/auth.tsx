@@ -6,15 +6,13 @@ import { useRouter } from "next/navigation";
 import { api, setToken } from "./api";
 import { ROLES_HIGH_TO_LOW, roleRank, type Role, type User } from "./types";
 
-/** Where a signed-in session belongs. One constant so signing in, registering
- *  and bouncing an already-signed-in visitor off /login can never disagree. */
+/** Where a signed-in session belongs. */
 export const LANDING = "/dashboard";
 
 interface AuthState {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => void;
   /** re-read the signed-in account, e.g. after an admin changes their own role */
   refreshUser: () => Promise<void>;
@@ -24,7 +22,6 @@ const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
   signIn: async () => {},
-  signUp: async () => {},
   signOut: () => {},
   refreshUser: async () => {},
 });
@@ -56,16 +53,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [router],
   );
 
-  const signUp = useCallback(
-    async (name: string, email: string, password: string) => {
-      const res = await api.register(name, email, password);
-      setToken(res.access_token);
-      setUser(res.user);
-      router.push(LANDING);
-    },
-    [router],
-  );
-
   const signOut = useCallback(() => {
     setToken(null);
     setUser(null);
@@ -77,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
@@ -90,7 +77,7 @@ export const useAuth = () => useContext(AuthContext);
 /** The floors, named for what they protect. Mirrors backend/app/security.py. */
 const EDITOR_FLOOR: Role = "manager"; // changing purchase orders
 const STATUS_FLOOR: Role = "user"; // status / stage moves on unlocked orders
-const PEOPLE_FLOOR: Role = "manager"; // inviting people and setting their roles
+const PEOPLE_FLOOR: Role = "manager"; // reading the directory and managing existing people
 const LOCKED_PO_FLOOR: Role = "admin"; // working through a locked order
 
 const hasRank = (user: User | null, floor: Role) =>
@@ -101,7 +88,7 @@ export const canEdit = (user: User | null) => hasRank(user, EDITOR_FLOOR);
 /** Status and kanban stage — narrower than canEdit; does not open other fields. */
 export const canEditStatus = (user: User | null) => hasRank(user, STATUS_FLOOR);
 
-/** Whether the Users page offers invite + role controls at all. */
+/** Whether the Users page shows the directory and existing-account controls. */
 export const canAdministerPeople = (user: User | null) => hasRank(user, PEOPLE_FLOOR);
 
 /** You may only act on someone strictly below you; admins are exempt.

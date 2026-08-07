@@ -11,6 +11,7 @@ import { JobCard, JobChip, toneStyle } from "@/components/JobCard";
 import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, canModifyPO, useAuth } from "@/lib/auth";
+import { useBoardSettings } from "@/lib/boardSettings";
 import type { PurchaseOrder, StatusMeta } from "@/lib/types";
 
 type View = "calendar" | "board";
@@ -22,10 +23,12 @@ const isoDay = (d: Date) =>
 
 /** A year of day cells has no room for a chip, so each job becomes a tone dot. */
 function YearDot({ po }: { po: PurchaseOrder }) {
+  const { statusByKey } = useBoardSettings();
+  const tone = statusByKey.get(po.status)?.tone;
   return (
     <span
       className="year-dot"
-      style={toneStyle(po.status)}
+      style={toneStyle(po.status, tone)}
       role="img"
       aria-label={`${po.job_no} ${po.po_number}, ${po.status_label}`}
       title={`${po.job_no} · ${po.po_number} · ${po.status_label}`}

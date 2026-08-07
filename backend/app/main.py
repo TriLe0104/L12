@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, meta, purchase_orders, settings, uploads, users
+from .routers import auth, meta, purchase_orders, uploads, users
+from .routers import settings as settings_router
 from .routers.uploads import UPLOAD_DIR
 from .seed import seed
 
@@ -44,7 +45,7 @@ app.include_router(auth.router)
 app.include_router(purchase_orders.router)
 app.include_router(users.router)
 app.include_router(meta.router)
-app.include_router(settings.router)
+app.include_router(settings_router.router)
 app.include_router(uploads.router)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

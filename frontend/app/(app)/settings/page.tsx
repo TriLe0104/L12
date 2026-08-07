@@ -9,7 +9,11 @@ import { api } from "@/lib/api";
 import { canEditBoardSettings, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
 import {
-  BOARD_TONES,
+  DEFAULT_TONE_HEX,
+  TONE_HEX,
+  resolveToneColor,
+  toColorInputValue,
+  tryParseToneHex,
   type BoardDocument,
   type CardFieldConfig,
   type CustomFieldConfig,
@@ -27,6 +31,51 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "kanban", label: "Task progress" },
 ];
+
+/** Native color well + hex text — opens the OS/browser color picker. */
+function ToneColorField({
+  value,
+  onChange,
+  "aria-label": ariaLabel = "Color",
+}: {
+  value: string;
+  onChange: (hex: string) => void;
+  "aria-label"?: string;
+}) {
+  const resolved = resolveToneColor(value);
+  const [text, setText] = useState(resolved);
+
+  useEffect(() => {
+    setText(resolved);
+  }, [resolved]);
+
+  return (
+    <div className="settings-tone-field">
+      <input
+        type="color"
+        className="settings-tone-swatch"
+        value={toColorInputValue(value)}
+        onChange={(e) => onChange(e.target.value.toLowerCase())}
+        aria-label={ariaLabel}
+        title={ariaLabel}
+      />
+      <input
+        type="text"
+        className="cell-input settings-tone-hex"
+        value={text}
+        spellCheck={false}
+        aria-label={`${ariaLabel} hex`}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          const parsed = tryParseToneHex(next);
+          if (parsed) onChange(parsed);
+        }}
+        onBlur={() => setText(resolveToneColor(value))}
+      />
+    </div>
+  );
+}
 
 function cloneDoc(doc: BoardDocument): BoardDocument {
   return structuredClone(doc);
@@ -372,7 +421,7 @@ function StatusesEditor({
   onChange: (d: BoardDocument) => void;
 }) {
   const [label, setLabel] = useState("");
-  const [tone, setTone] = useState("slate");
+  const [tone, setTone] = useState(DEFAULT_TONE_HEX);
 
   const move = (index: number, dir: -1 | 1) => {
     onChange({ ...draft, statuses: moveItem(draft.statuses, index, index + dir) });
@@ -432,18 +481,11 @@ function StatusesEditor({
               onChange={(e) => update(s.key, { label: e.target.value })}
               aria-label={`Label for ${s.key}`}
             />
-            <select
-              className="cell-input"
+            <ToneColorField
               value={s.tone}
-              onChange={(e) => update(s.key, { tone: e.target.value })}
-              style={{ ["--tone" as string]: `var(--tone-${s.tone})`, color: `var(--tone-${s.tone})` }}
-            >
-              {BOARD_TONES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              onChange={(hex) => update(s.key, { tone: hex })}
+              aria-label={`Color for ${s.label || s.key}`}
+            />
             <small className="mono">{s.key}</small>
             <div className="settings-reorder">
               <button type="button" disabled={i === 0} onClick={() => move(i, -1)}>
@@ -471,13 +513,7 @@ function StatusesEditor({
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
-        <select className="cell-input" value={tone} onChange={(e) => setTone(e.target.value)}>
-          {BOARD_TONES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+        <ToneColorField value={tone} onChange={setTone} aria-label="New status color" />
         <button type="button" className="btn btn-primary" disabled={!label.trim()} onClick={add}>
           Add
         </button>
@@ -554,7 +590,7 @@ function KanbanEditor({
   onChange: (d: BoardDocument) => void;
 }) {
   const [label, setLabel] = useState("");
-  const [tone, setTone] = useState("blue");
+  const [tone, setTone] = useState(TONE_HEX.blue);
 
   const move = (index: number, dir: -1 | 1) => {
     onChange({
@@ -651,17 +687,11 @@ function KanbanEditor({
                 value={c.label}
                 onChange={(e) => update(c.key, { label: e.target.value })}
               />
-              <select
-                className="cell-input"
+              <ToneColorField
                 value={c.tone}
-                onChange={(e) => update(c.key, { tone: e.target.value })}
-              >
-                {BOARD_TONES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+                onChange={(hex) => update(c.key, { tone: hex })}
+                aria-label={`Color for ${c.label || c.key}`}
+              />
               <label className="settings-check">
                 <input
                   type="radio"
@@ -697,7 +727,11 @@ function KanbanEditor({
               {c.statusKeys.map((sk) => {
                 const st = draft.statuses.find((s) => s.key === sk);
                 return (
-                  <span key={sk} className="settings-status-chip" style={{ ["--tone" as string]: `var(--tone-${st?.tone ?? "slate"})` }}>
+                  <span
+                    key={sk}
+                    className="settings-status-chip"
+                    style={{ ["--tone" as string]: resolveToneColor(st?.tone) }}
+                  >
                     {st?.label ?? sk}
                   </span>
                 );
@@ -734,13 +768,7 @@ function KanbanEditor({
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
-        <select className="cell-input" value={tone} onChange={(e) => setTone(e.target.value)}>
-          {BOARD_TONES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+        <ToneColorField value={tone} onChange={setTone} aria-label="New column color" />
         <button type="button" className="btn btn-primary" disabled={!label.trim()} onClick={add}>
           Add
         </button>
