@@ -282,37 +282,3 @@ def _diagnose_hint(step: str, message: str) -> str:
     if "endpoint" in low or "resolve" in low or "connection" in low:
         return "Could not reach the endpoint — check S3_ENDPOINT_URL host."
     return f"Failed on {step}."
-
-@router.get("/api/debug/storage-check")
-async def debug_storage_check():
-    import os
-    from botocore.exceptions import ClientError
-
-    result = {
-        "endpoint": os.environ.get("S3_ENDPOINT_URL", "MISSING"),
-        "bucket": os.environ.get("S3_BUCKET", "MISSING"),
-        "region": os.environ.get("S3_REGION", "MISSING"),
-        "access_key_prefix": (os.environ.get("S3_ACCESS_KEY_ID") or "MISSING")[:6],
-        "secret_key_length": len(os.environ.get("S3_SECRET_ACCESS_KEY") or ""),
-    }
-
-    try:
-        client = _s3_client()
-        client.put_object(
-            Bucket=os.environ["S3_BUCKET"],
-            Key="debug-test.txt",
-            Body=b"debug check",
-        )
-        result["put_object"] = "SUCCESS"
-    except ClientError as e:
-        result["put_object"] = "FAILED"
-        result["error_code"] = e.response.get("Error", {}).get("Code")
-        result["error_message"] = e.response.get("Error", {}).get("Message")
-        result["http_status"] = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        result["request_id"] = e.response.get("ResponseMetadata", {}).get("RequestId")
-    except Exception as e:
-        result["put_object"] = "FAILED"
-        result["error_type"] = type(e).__name__
-        result["error_message"] = str(e)
-
-    return result
