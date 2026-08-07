@@ -218,7 +218,9 @@ docker compose up --build
   Removing a custom attribute hides it from the UI but does **not** purge values already stored in
   each PO’s `custom_fields` JSON map. Removing a status that any PO still uses is blocked with a
   count. Kanban drag still sets status to the target column’s first mapped status (same behaviour as
-  the old stage→default-status rule). Day-one seed matches the previous hard-coded board.
+  the old stage→default-status rule). Day-one seed uses the shop-floor catalog (Need Material Size →
+  Ready to ship); an idempotent startup repair rewrites legacy status keys and upgrades stored
+  `board_settings` to document version 2 while preserving unrelated Admin config.
 
 ## API
 

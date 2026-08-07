@@ -39,6 +39,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Content-Disposition is not CORS-safelisted: without this the browser hides
+    # it from fetch(), so traveler downloads lose their filename + extension.
+    expose_headers=[
+        "Content-Disposition",
+        "Content-Length",
+        "X-Traveler-Preview-Source",
+        "X-Traveler-Preview-Ms",
+    ],
 )
 
 app.include_router(auth.router)

@@ -37,7 +37,7 @@
 .dash-pill:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.22);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 .dash-pill[data-active="true"] {
@@ -67,6 +67,81 @@
   margin-left: auto;
   flex: 0 1 15rem;
   min-width: 8rem;
+}
+
+.dash-filter-field {
+  display: inline-flex;
+  align-items: center;
+}
+
+.dash-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dash-filter-select {
+  height: 2.15rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--steel);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 12rem;
+}
+
+.dash-filter-select:hover {
+  border-color: rgba(13, 17, 23, 0.32);
+  color: var(--ink);
+}
+
+.dash-filter-select:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--signal-ring);
+}
+
+/* The searchable filter wears the same pill as its drop-down neighbours; only
+   the caret is missing, because a text cursor says the same thing. It shrinks
+   before it clips — the list it opens is measured from the box either way. */
+.dash-filter-combo {
+  flex: 0 1 12rem;
+  min-width: 6.5rem;
+}
+
+.dash-filter-input {
+  width: 100%;
+  min-width: 0;
+  height: 2.15rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.dash-filter-input::placeholder {
+  color: var(--steel);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.dash-filter-input:hover {
+  border-color: rgba(13, 17, 23, 0.32);
+}
+
+.dash-filter-input:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 /* ---------------- table shell ---------------- */
@@ -136,7 +211,7 @@
 
 .dash-sort:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(245, 168, 0, 0.55);
+  box-shadow: inset 0 0 0 2px var(--signal-ring-strong);
 }
 
 .dash-sort > span {
@@ -330,6 +405,8 @@
    has to be re-derived every time a column joins or leaves. Sizes are in rem
    because the root size is fluid: the content shrinks with it, so the columns
    holding that content have to shrink with it too. */
+/* Measured column widths are defaults; Admin widthRem (inline style) overrides.
+   Open-ended material/finish stay auto when widthRem is null. */
 .dash-table [data-col="job"] { width: 4.3rem; }
 .dash-table [data-col="po_number"] { width: 4.8rem; }
 .dash-table [data-col="customer"] { width: 5.7rem; }
@@ -350,6 +427,14 @@
 /* the absorbers: measured columns above leave the rest to the long specs */
 .dash-table [data-col="material"],
 .dash-table [data-col="finish"] { width: auto; }
+
+/* Optional builtins / custom columns default to a modest fixed track until
+   Admin sets widthRem (or leaves auto). */
+.dash-table [data-col="part_number"] { width: 4.8rem; }
+.dash-table [data-col="dims"],
+.dash-table [data-col="mat_dim"] { width: 6rem; }
+.dash-table [data-col="inspection"] { width: 5.5rem; }
+.dash-table [data-col="hardware"] { width: 4.5rem; }
 
 .dash-table [data-col="qty"] .dash-sort > span {
   overflow: visible;

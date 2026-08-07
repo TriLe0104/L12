@@ -1,0 +1,325 @@
+"""Traveler packet smoke: in-process template fill plus the live API download.
+
+Run with the backend venv, from backend/ or the repo root:
+  .\\.venv\\Scripts\\python.exe smoke_traveler.py
+
+Part 1 fills the Word / Excel templates and the PDF overlay in-process and
+guards the packet defects that were fixed by hand, since none of them can be
+caught by a byte-size check:
+
+  * no ``#VALUE!`` left by the Excel image-in-cell openpyxl round-trip
+  * no sample ``PAUL`` in the Digitize Packet BY column
+  * uppercase ``DDMMMYY`` dates on every page (never ``Aug`` or ISO)
+  * CAD extension stripped from the part name
+  * Material Dims and Sign drawn in their own columns, not one merged cell
+
+Part 2 hits the API on :8000 as admin and asserts the
+``Traveler_{job}_{po}_{DDMMMYY}_{HHMMSS}.{ext}`` download filename plus the
+activity trail. It only reads one PO (never J-55) and never persists a draft.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+from io import BytesIO
+from datetime import date, datetime
+from pathlib import Path
+
+from docx import Document
+from openpyxl import load_workbook
+from pypdf import PdfReader
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+from app.traveler import (  # noqa: E402
+    DOCX_TEMPLATE,
+    PART_SHEET,
+    PROGRAM_SHEET,
+    TEMPLATE_BASE_PDF,
+    XLSX_TEMPLATE,
+    _part_name_from_model,
+    build_preview_pdf,
+    content_for_format,
+    fill_docx,
+    fill_xlsx,
+    traveler_filename,
+)
+
+API = "http://127.0.0.1:8000"
+ADMIN = ("trile0104@gmail.com", "tvm-temp-2026")
+AVOID_JOBS = {"J-55"}
+FORMATS = ("pdf", "docx", "xlsx", "zip")
+
+# Sample data baked into the source work order, plus the openpyxl round-trip
+# artifact. Either one reaching a customer packet is a hard failure.
+BANNED = (re.compile(r"#VALUE!"), re.compile(r"\bPAUL\b"))
+# Title-case or ISO dates mean a _traveler_date call was missed somewhere.
+BAD_DATE = re.compile(r"\d{2}(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\d{2}|\d{4}-\d{2}-\d{2}")
+
+# Word column divider between the Material Dims and Sign headings, in points
+# from the left edge of the page.
+SIGN_COLUMN_X = 511.85
+
+FIELDS = {
+    "work_order": "260806-01",
+    "due_date": date(2026, 8, 20).isoformat(),
+    "mat_dim": "1.25 x 1.7 x .500",
+    "sign": "Tri Le",
+    "po_number": "PO-SMOKE-1",
+    "part_name": "SMOKE_PART",
+    "part_number": "SMOKE-001",
+    "qty": 2,
+    "finish": "CLEAR ANODIZE",
+    "inserts": "No",
+    "material": "AL 6061-T6",
+    "material_spec": "Per Drawing",
+    "inspection": "Standard Inspection",
+    "part_marking": "None",
+    "certificates": "",
+    "notes": "smoke traveler",
+    "dims": "1.0 x 1.0 x 0.5 in",
+    "part_of": "Part 1 of 1",
+    "customer": "Smoke Test Co",
+    "programmer": "Tri Le",
+    "program_date": "2026-08-06",
+    "created_by": "Tri Le",
+    "generated_by": "Tri Le",
+    "generated_at": datetime(2026, 8, 6).astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+    "status": "Running",
+}
+
+
+def name_pattern(job: str, po_number: str, extension: str) -> re.Pattern[str]:
+    """Traveler_{job}_{po}_{DDMMMYY}_{HHMMSS}.{ext}, sanitised parts escaped."""
+    return re.compile(
+        rf"^Traveler_{re.escape(job)}_{re.escape(po_number)}"
+        rf"_\d{{2}}[A-Z]{{3}}\d{{2}}_\d{{6}}\.{re.escape(extension)}$"
+    )
+
+
+def lower_keys(headers) -> dict[str, str]:
+    """Header names are case-insensitive and Starlette sends them lowercase."""
+    return {key.lower(): value for key, value in headers.items()}
+
+
+def call(
+    method: str,
+    path: str,
+    body: dict | None = None,
+    token: str | None = None,
+) -> tuple[int, bytes, dict[str, str]]:
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(API + path, data=data, method=method)
+    if data:
+        request.add_header("Content-Type", "application/json")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=240) as response:
+            return response.status, response.read(), lower_keys(response.headers)
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(), lower_keys(exc.headers)
+
+
+def pdf_pages_text(payload: bytes) -> list[str]:
+    return [page.extract_text() or "" for page in PdfReader(BytesIO(payload)).pages]
+
+
+def docx_text(payload: bytes) -> str:
+    doc = Document(BytesIO(payload))
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
+
+
+def xlsx_text(payload: bytes) -> str:
+    workbook = load_workbook(BytesIO(payload))
+    parts: list[str] = []
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows(values_only=True):
+            parts.extend(str(value) for value in row if value is not None)
+    return "\n".join(parts)
+
+
+def assert_clean(label: str, text: str) -> None:
+    for pattern in BANNED:
+        found = pattern.search(text)
+        assert not found, f"{label}: banned text {found.group(0)!r}"
+    bad_date = BAD_DATE.search(text)
+    assert not bad_date, f"{label}: non-DDMMMYY date {bad_date.group(0)!r}"
+
+
+def check_columns(payload: bytes) -> None:
+    """Material Dims and Sign must be separate runs in their own columns.
+
+    The Word template merges the input row beneath the two headings, so a
+    regression shows up as one concatenated run instead of two values sitting
+    on either side of the column divider.
+    """
+    runs: list[tuple[float, float, str]] = []
+
+    def visit(text: str, _cm, tm, _font, _size) -> None:
+        stripped = text.strip()
+        if stripped:
+            runs.append((tm[4], tm[5], stripped))
+
+    PdfReader(BytesIO(payload)).pages[0].extract_text(visitor_text=visit)
+    dims = [r for r in runs if r[2] == FIELDS["mat_dim"]]
+    sign = [r for r in runs if r[2] == FIELDS["sign"]]
+    assert dims, "Material Dims value missing from page 1"
+    assert sign, "Sign value missing from page 1"
+    dims_x, dims_y, _ = dims[0]
+    sign_x, sign_y, _ = sign[0]
+    assert dims_x < SIGN_COLUMN_X, f"Material Dims spilled into Sign column at x={dims_x:.1f}"
+    assert sign_x > SIGN_COLUMN_X, f"Sign sits in the Material Dims column at x={sign_x:.1f}"
+    assert abs(dims_y - sign_y) < 1, "Material Dims and Sign are not on the same row"
+    print(f"  columns: dims x={dims_x:.1f} sign x={sign_x:.1f} (divider {SIGN_COLUMN_X})")
+
+
+def check_part_names() -> None:
+    assert _part_name_from_model("BOTTLE HIGH POLY.SLDPRT") == "BOTTLE HIGH POLY"
+    assert _part_name_from_model("SMOKE_PART.stp") == "SMOKE_PART"
+    # A part number that legitimately contains a dot must survive intact.
+    assert _part_name_from_model("PN-1.25-REVB") == "PN-1.25-REVB"
+    assert _part_name_from_model("") == ""
+
+
+def check_fill() -> None:
+    print("DOCX template:", DOCX_TEMPLATE, "exists=", DOCX_TEMPLATE.is_file())
+    print("XLSX template:", XLSX_TEMPLATE, "exists=", XLSX_TEMPLATE.is_file())
+    print("Base PDF:", TEMPLATE_BASE_PDF, "exists=", TEMPLATE_BASE_PDF.is_file())
+    assert DOCX_TEMPLATE.is_file(), f"copy templates into {DOCX_TEMPLATE.parent}"
+    assert XLSX_TEMPLATE.is_file(), f"copy templates into {XLSX_TEMPLATE.parent}"
+
+    check_part_names()
+
+    docx = fill_docx(FIELDS)
+    xlsx = fill_xlsx(FIELDS)
+    pdf, source = build_preview_pdf(FIELDS, po_id="smoke")
+    pages = pdf_pages_text(pdf)
+    print(f"docx={len(docx)} xlsx={len(xlsx)} pdf={len(pdf)} pages={len(pages)} source={source}")
+    assert len(pages) == 3, f"expected a 3-page packet, got {len(pages)}"
+    assert source != "reportlab_fallback", (
+        "PDF fell back to the plain reportlab layout; the pre-rendered "
+        f"{TEMPLATE_BASE_PDF.name} background is missing or stale"
+    )
+
+    workbook = load_workbook(BytesIO(xlsx))
+    part, program = workbook[PART_SHEET], workbook[PROGRAM_SHEET]
+    for sheet, coord in ((part, "A4"), (part, "Z56"), (program, "A2")):
+        value = sheet[coord].value
+        assert value in (None, ""), f"{sheet.title}!{coord} should be blank, got {value!r}"
+
+    assert_clean("docx", docx_text(docx))
+    assert_clean("xlsx", xlsx_text(xlsx))
+    for index, text in enumerate(pages, start=1):
+        assert_clean(f"pdf page {index}", text)
+
+    assert "20AUG26" in pages[0], "page 1 is missing the DDMMMYY due date"
+    assert "20AUG26" in pages[1], "page 2 is missing the DDMMMYY due date"
+    assert "06AUG26" in pages[2], "page 3 is missing the DDMMMYY program date"
+    assert "SMOKE_PART" in pages[0], "page 1 is missing the part name"
+    check_columns(pdf)
+
+    for fmt in FORMATS:
+        data, media, name = content_for_format(fmt, FIELDS, job_no="J-SMOKE")
+        print(f"  {fmt}: {len(data)} bytes media={media} name={name}")
+        assert len(data) > 500, fmt
+        assert name_pattern("J-SMOKE", "PO-SMOKE-1", fmt).match(name), name
+
+    # Unsafe path characters collapse to underscores, and the HHMMSS suffix keeps
+    # two downloads on the same day from overwriting each other.
+    stamp = datetime(2026, 8, 6, 14, 30, 5).astimezone()
+    odd = {**FIELDS, "po_number": "PO / 123"}
+    assert (
+        traveler_filename(odd, "pdf", job_no="J 60", generated_at=stamp)
+        == "Traveler_J_60_PO_123_06AUG26_143005.pdf"
+    )
+    later = datetime(2026, 8, 6, 14, 30, 6).astimezone()
+    assert traveler_filename(odd, "pdf", job_no="J 60", generated_at=later) != traveler_filename(
+        odd, "pdf", job_no="J 60", generated_at=stamp
+    )
+    print("OK in-process traveler fill")
+
+
+def check_api() -> None:
+    status, raw, _ = call("POST", "/api/auth/login", {"email": ADMIN[0], "password": ADMIN[1]})
+    assert status == 200, f"login failed: {status} {raw[:200]!r}"
+    token = json.loads(raw)["access_token"]
+
+    status, raw, _ = call("GET", "/api/purchase-orders", token=token)
+    assert status == 200, raw[:200]
+    orders = json.loads(raw)
+    target = next((p for p in orders if p["job_no"] not in AVOID_JOBS), None)
+    assert target, "no purchase order available outside the protected jobs"
+    po_id = target["id"]
+    before_modified = (target.get("last_modified") or {}).get("action")
+    print(f"subject: {target['job_no']} · {target['po_number']} ({po_id})")
+
+    status, raw, _ = call("GET", f"/api/purchase-orders/{po_id}/traveler", token=token)
+    assert status == 200, raw[:200]
+    fields = json.loads(raw)["fields"]
+    assert fields.get("generated_by"), "traveler draft is missing generated_by"
+    part_name = fields.get("part_name") or ""
+    assert not re.search(r"\.(sldprt|step|stp|iges|igs|x_t|3dm)$", part_name, re.I), (
+        f"part name still carries a CAD extension: {part_name!r}"
+    )
+
+    status, raw, headers = call("GET", f"/api/purchase-orders/{po_id}/traveler/pdf", token=token)
+    assert status == 200 and len(raw) > 500, (status, raw[:200])
+    print(
+        f"preview pdf: {len(raw)} bytes source={headers.get('x-traveler-preview-source')} "
+        f"ms={headers.get('x-traveler-preview-ms')}"
+    )
+    for index, text in enumerate(pdf_pages_text(raw), start=1):
+        assert_clean(f"api pdf page {index}", text)
+
+    job = re.sub(r'[\/\\:*?"<>|\s]+', "_", target["job_no"]).strip("._")
+    po_number = re.sub(r'[\/\\:*?"<>|\s]+', "_", target["po_number"]).strip("._")
+    for fmt in FORMATS:
+        status, raw, headers = call(
+            "POST",
+            f"/api/purchase-orders/{po_id}/traveler/{fmt}",
+            {"fields": fields, "persist": False},
+            token,
+        )
+        disposition = headers.get("content-disposition", "")
+        assert status == 200 and len(raw) > 500, (fmt, status, raw[:200])
+        match = re.search(r'filename="([^"]+)"', disposition)
+        assert match, f"{fmt}: no plain filename in {disposition!r}"
+        filename = match.group(1)
+        print(f"  POST {fmt}: {len(raw)} bytes name={filename}")
+        assert name_pattern(job, po_number, fmt).match(filename), filename
+
+    status, raw, _ = call("GET", f"/api/purchase-orders/{po_id}", token=token)
+    after_modified = (json.loads(raw).get("last_modified") or {}).get("action")
+    assert after_modified != "Traveler generated", "Traveler generated moved the Modified column"
+
+    status, raw, _ = call("GET", f"/api/purchase-orders/{po_id}/activity", token=token)
+    activity = json.loads(raw)
+    assert any(a.get("action") == "Traveler generated" for a in activity), "missing activity row"
+    print(f"modified stayed {before_modified!r} -> {after_modified!r}; activity recorded")
+    print("OK traveler API")
+
+
+def main() -> int:
+    check_fill()
+    print()
+    try:
+        check_api()
+    except urllib.error.URLError as exc:
+        print(f"FAIL: API at {API} is unreachable ({exc.reason}); start uvicorn on :8000")
+        return 1
+    print("\nOK traveler smoke")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -82,13 +82,13 @@ def seed(db: Session) -> None:
             finish=finish,
             inspection=rng.choice(
                 [Inspection.FORMAL, Inspection.STANDARD, Inspection.SOURCE, Inspection.NONE]
-            ),
+            ).value,
             hardware=rng.random() < 0.35,
             status=rng.choice(statuses).value,
             priority=rng.choices(
                 [Priority.HOT, Priority.HIGH, Priority.NORMAL, Priority.LOW],
                 weights=[1, 3, 5, 2],
-            )[0],
+            )[0].value,
             customer=rng.choice(CUSTOMERS),
             note=rng.choice(NOTES),
             owner_id=rng.choice(users).id,

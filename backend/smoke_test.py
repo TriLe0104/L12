@@ -49,7 +49,7 @@ def main() -> None:
             "finish": "CLEAR ANODIZE; CHEM FILM GOLD",
             "inspection": "formal",
             "hardware": False,
-            "status": "wait_vqc",
+            "status": "ready_to_plate",
             "note": "no dim change, just censoring",
         },
         token,
@@ -59,7 +59,7 @@ def main() -> None:
     _, moved = call(
         "PATCH",
         f"/api/purchase-orders/{created['id']}",
-        {"due_date": DUE_MOVED, "status": "shipped"},
+        {"due_date": DUE_MOVED, "status": "ready_to_ship"},
         token,
     )
     print(f"PATCH     due {created['due_date']} -> {moved['due_date']}, status {moved['status_label']}")

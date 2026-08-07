@@ -28,6 +28,11 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/app ./backend/app
+# Traveler Office templates plus the pre-rendered 3-page PDF background. The
+# background can only be produced by Word/Excel COM, so it ships as a built
+# asset; without it Linux would fall back to the plain PDF renderer and the
+# DOCX/XLSX downloads would fail outright.
+COPY backend/templates ./backend/templates
 COPY --from=frontend-builder /app/.next/standalone ./frontend
 COPY --from=frontend-builder /app/.next/static ./frontend/.next/static
 COPY --from=frontend-builder /app/public ./frontend/public

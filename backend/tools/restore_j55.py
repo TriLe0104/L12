@@ -53,10 +53,10 @@ FIELDS: dict[str, object] = {
     "mat_dim": "4.03 x 2.87 x 0.42",
     "material": "AL 6061-T6, Bar",
     "finish": "CHEM FILM CLEAR",
-    "inspection": Inspection.FORMAL,
+    "inspection": Inspection.FORMAL.value,
     "hardware": False,
-    "status": POStatus.ON_HOLD,
-    "priority": Priority.HIGH,
+    "status": POStatus.WAITING_SETUP.value,
+    "priority": Priority.HIGH.value,
     "customer": "Nebula-7",
     "note": "expedite: line-down support",
     "thumbnail_url": None,
@@ -69,7 +69,7 @@ def describe(po: PurchaseOrder) -> str:
         value = getattr(po, name)
         lines.append(f"  {name:<14} {getattr(value, 'name', value)!r}")
     lines.append(f"  {'owner_id':<14} {po.owner_id}")
-    lines.append(f"  {'stage':<14} {po.stage.name} ({po.status_label} / {po.priority_label})")
+    lines.append(f"  {'stage':<14} {po.stage} ({po.status_label} / {po.priority_label})")
     return "\n".join(lines)
 
 

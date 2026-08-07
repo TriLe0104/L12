@@ -17,6 +17,7 @@ import { ActivityList } from "./ActivityList";
 import { CardEditor } from "./CardEditor";
 import { CommentThread } from "./CommentThread";
 import { LockGlyph } from "./JobCard";
+import { TravelerPanel } from "./TravelerPanel";
 import { UnsavedChangesPrompt } from "./UnsavedChangesPrompt";
 
 /** Today in the shop's own timezone. `toISOString()` would report the UTC day,
@@ -40,7 +41,7 @@ const blank = (defaults: PODraft = {}): PODraft => ({
   finish: "",
   inspection: "standard",
   hardware: false,
-  status: "new",
+  status: "need_material_size",
   priority: "normal",
   customer: "",
   note: "",
@@ -271,6 +272,12 @@ export function PODrawer({
 
           {!creating && record && (
             <>
+              <TravelerPanel
+                poId={record.id}
+                jobNo={record.job_no}
+                canEditDraft={modifiable}
+                onGenerated={() => void loadActivity(record.id)}
+              />
               <div className="section-label">Comments</div>
               <CommentThread
                 poId={record.id}

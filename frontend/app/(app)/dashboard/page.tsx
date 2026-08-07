@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Avatar } from "@/components/Avatar";
+import { Combobox } from "@/components/Combobox";
 import { CommentBubbleIcon, CommentThread } from "@/components/CommentThread";
 import { LockGlyph, PriorityTag, TONE_BY_STATUS, formatDue } from "@/components/JobCard";
 import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
-import { resolveToneColor } from "@/lib/boardTypes";
+import { PRIORITY_FIELD_KEY, dashboardColumnWidthStyle, resolveToneColor, selectionOptions, type DashboardColumnConfig } from "@/lib/boardTypes";
+import { customFieldMap } from "@/lib/cardFields";
 import {
   PRIORITY_ORDER,
   type PurchaseOrder,
@@ -20,20 +22,11 @@ import {
 
 import "./dashboard.css";
 
-type SortKey =
-  | "job"
-  | "po_number"
-  | "customer"
-  | "priority"
-  | "stage"
-  | "status"
-  | "owner"
-  | "material"
-  | "finish"
-  | "due"
-  | "modified"
-  | "comments"
-  | "qty";
+function priorityRank(priority: string, order: string[]): number {
+  const key = priority.toLowerCase();
+  const idx = order.findIndex((o) => o.toLowerCase() === key);
+  return idx < 0 ? order.length + 1 : idx;
+}
 
 type Dir = "asc" | "desc";
 
@@ -42,27 +35,28 @@ type Dir = "asc" | "desc";
 type SortValue = string | number | null;
 
 interface Column {
-  key: SortKey;
+  key: string;
   label: string;
   /** how the subtitle and the header tooltip name this column */
   noun: string;
   /** right-aligned, mono, tabular — the numeric column at the end of the row */
   numeric?: boolean;
+  widthRem?: number | null;
   value: (po: PurchaseOrder, statusRank: Map<string, number>, stageRank: Map<string, number>) => SortValue;
 }
 
 /** Process order, mirroring the server's day-one catalog. Only used until
  *  board settings answer. */
 const FALLBACK_STATUS_SEQUENCE = [
-  "new",
-  "rfq_finishing",
-  "in_machining",
-  "finishing",
-  "under_inspection",
-  "wait_vqc",
+  "need_material_size",
+  "order_material",
+  "material_incoming",
+  "waiting_setup",
+  "running",
+  "deburr",
+  "inspection",
+  "ready_to_plate",
   "ready_to_ship",
-  "shipped",
-  "on_hold",
 ];
 
 const FALLBACK_STAGES: StageMeta[] = [
@@ -73,7 +67,22 @@ const FALLBACK_STAGES: StageMeta[] = [
 ];
 
 const FILTER_STORAGE_KEY = "po_calendar_dashboard_filter";
+const FILTERS_STORAGE_KEY = "po_calendar_dashboard_filters_v2";
 const SORT_STORAGE_KEY = "po_calendar_dashboard_sort";
+
+type ColumnFilters = {
+  stage: string;
+  status: string;
+  priority: string;
+  customer: string;
+};
+
+const DEFAULT_COLUMN_FILTERS: ColumnFilters = {
+  stage: "all",
+  status: "all",
+  priority: "all",
+  customer: "all",
+};
 
 const text = (v: string | null | undefined): string | null => {
   const trimmed = v?.trim();
@@ -104,55 +113,110 @@ const whenModified = (iso: string): string => {
     : `${stamp}/${String(year).slice(2)} ${clock}`;
 };
 
-const COLUMNS: Column[] = [
-  { key: "job", label: "Job", noun: "job number", value: (po) => po.job_no },
-  { key: "po_number", label: "PO #", noun: "PO number", value: (po) => po.po_number },
-  { key: "customer", label: "Customer", noun: "customer", value: (po) => text(po.customer) },
-  {
-    key: "priority",
-    label: "Priority",
+type BuiltinColumnDef = Omit<Column, "key" | "label" | "widthRem">;
+
+const BUILTIN_COLUMN_DEFS: Record<string, BuiltinColumnDef> = {
+  job: { noun: "job number", value: (po) => po.job_no },
+  po_number: { noun: "PO number", value: (po) => po.po_number },
+  customer: { noun: "customer", value: (po) => text(po.customer) },
+  priority: {
     noun: "priority",
-    value: (po) => PRIORITY_ORDER.indexOf(po.priority),
+    value: (po) => priorityRank(po.priority, PRIORITY_ORDER),
   },
-  {
-    key: "stage",
-    label: "Stage",
+  stage: {
     noun: "stage",
     value: (po, _sr, stageRank) => stageRank.get(po.stage) ?? 99,
   },
-  {
-    key: "status",
-    label: "Status",
+  status: {
     noun: "status",
     value: (po, statusRank) => statusRank.get(po.status) ?? FALLBACK_STATUS_SEQUENCE.length,
   },
-  { key: "owner", label: "Owner", noun: "owner", value: (po) => text(po.owner?.name) },
-  { key: "material", label: "Material", noun: "material", value: (po) => text(po.material) },
-  { key: "finish", label: "Finish", noun: "finish", value: (po) => text(po.finish) },
-  { key: "due", label: "Due", noun: "due date", value: (po) => dayNumber(po.due_date) },
-  {
-    key: "modified",
-    // "Last modified" set in letter-spaced caps is wider than the column can
-    // earn; the subtitle and the header tooltip carry the full sense.
-    label: "Modified",
+  owner: { noun: "owner", value: (po) => text(po.owner?.name) },
+  material: { noun: "material", value: (po) => text(po.material) },
+  finish: { noun: "finish", value: (po) => text(po.finish) },
+  due: { noun: "due date", value: (po) => dayNumber(po.due_date) },
+  modified: {
     noun: "when it was last modified",
-    // the instant, not the name: scanning this column is about recency
     value: (po) => (po.last_modified ? Date.parse(po.last_modified.at) : null),
   },
-  // After Modified, before Qty: notes sit next to provenance, and Qty stays the
-  // numeric end-cap. Sortable by count so a busy thread floats when useful.
-  {
-    key: "comments",
-    label: "Comments",
+  comments: {
     noun: "comment count",
     value: (po) => po.comment_count ?? 0,
   },
-  { key: "qty", label: "Qty", noun: "quantity", numeric: true, value: (po) => po.qty },
+  qty: { noun: "quantity", numeric: true, value: (po) => po.qty },
+  part_number: { noun: "part number", value: (po) => po.part_number },
+  dims: { noun: "dimensions", value: (po) => text(po.dims) },
+  mat_dim: { noun: "material dimensions", value: (po) => text(po.mat_dim) },
+  inspection: { noun: "inspection", value: (po) => text(po.inspection) },
+  hardware: { noun: "hardware", value: (po) => (po.hardware ? 1 : 0) },
+};
+
+const FALLBACK_COLUMNS: Column[] = [
+  { key: "job", label: "Job", widthRem: 4.3, ...BUILTIN_COLUMN_DEFS.job },
+  { key: "po_number", label: "PO #", widthRem: 4.8, ...BUILTIN_COLUMN_DEFS.po_number },
+  { key: "customer", label: "Customer", widthRem: 5.7, ...BUILTIN_COLUMN_DEFS.customer },
+  { key: "priority", label: "Priority", widthRem: 5.4, ...BUILTIN_COLUMN_DEFS.priority },
+  { key: "stage", label: "Stage", widthRem: 6.7, ...BUILTIN_COLUMN_DEFS.stage },
+  { key: "status", label: "Status", widthRem: 8.75, ...BUILTIN_COLUMN_DEFS.status },
+  { key: "owner", label: "Owner", widthRem: 5.0, ...BUILTIN_COLUMN_DEFS.owner },
+  { key: "material", label: "Material", widthRem: null, ...BUILTIN_COLUMN_DEFS.material },
+  { key: "finish", label: "Finish", widthRem: null, ...BUILTIN_COLUMN_DEFS.finish },
+  { key: "due", label: "Due", widthRem: 4.3, ...BUILTIN_COLUMN_DEFS.due },
+  { key: "modified", label: "Modified", widthRem: 5.4, ...BUILTIN_COLUMN_DEFS.modified },
+  { key: "comments", label: "Comments", widthRem: 2.35, ...BUILTIN_COLUMN_DEFS.comments },
+  { key: "qty", label: "Qty", widthRem: 3.75, ...BUILTIN_COLUMN_DEFS.qty },
 ];
 
-const DEFAULT_SORT: { key: SortKey; dir: Dir } = { key: "due", dir: "asc" };
+const DEFAULT_SORT: { key: string; dir: Dir } = { key: "due", dir: "asc" };
 
-const isSortKey = (v: string): v is SortKey => COLUMNS.some((c) => c.key === v);
+function columnsFromConfig(
+  cfg: DashboardColumnConfig[] | undefined,
+  customs: ReturnType<typeof customFieldMap>,
+  prioOrder: string[],
+): Column[] {
+  const base = FALLBACK_COLUMNS.map((c) =>
+    c.key === "priority"
+      ? { ...c, value: (po: PurchaseOrder) => priorityRank(po.priority, prioOrder) }
+      : c,
+  );
+  if (!cfg?.length) return base;
+  return cfg
+    .filter((c) => c.visible)
+    .map((c): Column | null => {
+      const builtin = BUILTIN_COLUMN_DEFS[c.key];
+      if (builtin) {
+        const col: Column = {
+          key: c.key,
+          label: c.label,
+          widthRem: c.widthRem,
+          ...builtin,
+        };
+        if (c.key === "priority") {
+          col.value = (po) => priorityRank(po.priority, prioOrder);
+        }
+        return col;
+      }
+      const meta = customs.get(c.key);
+      return {
+        key: c.key,
+        label: c.label,
+        noun: c.label.toLowerCase(),
+        widthRem: c.widthRem,
+        numeric: meta?.type === "number",
+        value: (po) => {
+          const raw = po.custom_fields?.[c.key];
+          if (raw === null || raw === undefined || raw === "") return null;
+          if (typeof raw === "number") return raw;
+          if (meta?.type === "number") {
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : String(raw);
+          }
+          return String(raw);
+        },
+      };
+    })
+    .filter((c): c is Column => !!c);
+}
 
 function Caret() {
   return (
@@ -182,7 +246,7 @@ export default function DashboardPage() {
 
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(DEFAULT_COLUMN_FILTERS);
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
@@ -204,7 +268,7 @@ export default function DashboardPage() {
     return new Set(marked.length ? marked : ["completed"]);
   }, [document]);
 
-  const FILTERS = useMemo(() => {
+  const STAGE_FILTERS = useMemo(() => {
     const ongoing = stageSequence.filter((s) => !completedKeys.has(s) && s !== "on_hold");
     const onHold = stageSequence.filter((s) => s === "on_hold");
     const completed = stageSequence.filter((s) => completedKeys.has(s));
@@ -216,24 +280,88 @@ export default function DashboardPage() {
     ];
   }, [stageSequence, completedKeys]);
 
-  const visibleColumns = useMemo(() => {
-    const cfg = document?.dashboardColumns;
-    if (!cfg?.length) return COLUMNS;
-    const byKey = new Map(COLUMNS.map((c) => [c.key, c]));
-    return cfg
-      .filter((c) => c.visible)
-      .map((c) => byKey.get(c.key as SortKey))
-      .filter((c): c is Column => !!c);
+  const filterableByKey = useMemo(() => {
+    const map = new Map<string, boolean>();
+    const cols = document?.dashboardColumns ?? [];
+    const hasFlag = cols.some((c) => "filterable" in c);
+    if (!hasFlag) {
+      // Pre-v8 docs (or missing sync) keep the historic filters.
+      map.set("stage", true);
+      map.set("status", true);
+      map.set("priority", true);
+      return map;
+    }
+    for (const c of cols) {
+      if (c.filterable) map.set(c.key, true);
+    }
+    return map;
   }, [document]);
 
+  /** Filter controls follow dashboard column order among enabled ones. */
+  const enabledFilterKeys = useMemo(() => {
+    const order = ["stage", "status", "priority", "customer"] as const;
+    const fromDoc = (document?.dashboardColumns ?? [])
+      .map((c) => c.key)
+      .filter((k) => filterableByKey.get(k));
+    if (fromDoc.length) {
+      return fromDoc.filter((k) => (order as readonly string[]).includes(k));
+    }
+    return order.filter((k) => filterableByKey.get(k));
+  }, [document, filterableByKey]);
+
+  const showStageFilter = filterableByKey.get("stage") === true;
+  const showStatusFilter = filterableByKey.get("status") === true;
+  const showPriorityFilter = filterableByKey.get("priority") === true;
+  const showCustomerFilter = filterableByKey.get("customer") === true;
+
+  const priorityOptions = useMemo(() => {
+    const opts = selectionOptions(document, PRIORITY_FIELD_KEY);
+    return opts.length ? opts : [...PRIORITY_ORDER];
+  }, [document]);
+
+  const customerOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const po of pos) {
+      const name = text(po.customer);
+      if (name) names.add(name);
+    }
+    return [...names].sort((a, b) => naturalCompare(a, b));
+  }, [pos]);
+
+  const customs = useMemo(() => customFieldMap(document), [document]);
+
+  const visibleColumns = useMemo(() => {
+    return columnsFromConfig(document?.dashboardColumns, customs, priorityOptions);
+  }, [document, customs, priorityOptions]);
+
   useEffect(() => {
-    const savedFilter = window.localStorage.getItem(FILTER_STORAGE_KEY);
-    if (savedFilter && FILTERS.some((f) => f.key === savedFilter)) setFilter(savedFilter);
+    let next = { ...DEFAULT_COLUMN_FILTERS };
+    try {
+      const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ColumnFilters>;
+        if (parsed && typeof parsed === "object") {
+          next = {
+            stage: typeof parsed.stage === "string" ? parsed.stage : "all",
+            status: typeof parsed.status === "string" ? parsed.status : "all",
+            priority: typeof parsed.priority === "string" ? parsed.priority : "all",
+            customer: typeof parsed.customer === "string" ? parsed.customer : "all",
+          };
+        }
+      } else {
+        const legacy = window.localStorage.getItem(FILTER_STORAGE_KEY);
+        if (legacy) next.stage = legacy;
+      }
+    } catch {
+      /* ignore bad localStorage */
+    }
+    if (!STAGE_FILTERS.some((f) => f.key === next.stage)) next.stage = "all";
+    setColumnFilters(next);
 
     const savedSort = window.localStorage.getItem(SORT_STORAGE_KEY);
     const [key, dir] = savedSort?.split(":") ?? [];
-    if (key && isSortKey(key) && (dir === "asc" || dir === "desc")) setSort({ key, dir });
-  }, [FILTERS]);
+    if (key && (dir === "asc" || dir === "desc")) setSort({ key, dir });
+  }, [STAGE_FILTERS]);
 
   /* The search is the server's, same as the task board: it matches job, PO,
      part, material and customer, and everything below counts what came back. */
@@ -248,14 +376,19 @@ export default function DashboardPage() {
     return () => clearTimeout(t);
   }, [load]);
 
-  const changeFilter = (next: string) => {
-    setFilter(next);
-    window.localStorage.setItem(FILTER_STORAGE_KEY, next);
+  const persistColumnFilters = (next: ColumnFilters) => {
+    setColumnFilters(next);
+    window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(FILTER_STORAGE_KEY, next.stage);
+  };
+
+  const changeStageFilter = (next: string) => {
+    persistColumnFilters({ ...columnFilters, stage: next });
   };
 
   /** Same column twice reverses it; a new column starts ascending. */
-  const toggleSort = (key: SortKey) => {
-    const next: { key: SortKey; dir: Dir } =
+  const toggleSort = (key: string) => {
+    const next: { key: string; dir: Dir } =
       sort.key === key ? { key, dir: sort.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" };
     setSort(next);
     window.localStorage.setItem(SORT_STORAGE_KEY, `${next.key}:${next.dir}`);
@@ -278,21 +411,32 @@ export default function DashboardPage() {
     [stages],
   );
 
+  const activeStageFilter = showStageFilter
+    ? (STAGE_FILTERS.find((f) => f.key === columnFilters.stage) ?? STAGE_FILTERS[0])
+    : STAGE_FILTERS[0];
+
   const counts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const f of FILTERS) {
+    for (const f of STAGE_FILTERS) {
       map.set(f.key, pos.filter((po) => f.stages.includes(po.stage)).length);
     }
     return map;
-  }, [pos, FILTERS]);
+  }, [pos, STAGE_FILTERS]);
 
   const rows = useMemo(() => {
-    const active = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
-    const column = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? COLUMNS[0];
+    const column = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? FALLBACK_COLUMNS[0];
     const flip = sort.dir === "asc" ? 1 : -1;
+    const statusSel = showStatusFilter ? columnFilters.status : "all";
+    const prioritySel = showPriorityFilter ? columnFilters.priority : "all";
+    const customerSel = showCustomerFilter ? columnFilters.customer : "all";
 
     return pos
-      .filter((po) => active.stages.includes(po.stage))
+      .filter((po) => activeStageFilter.stages.includes(po.stage))
+      .filter((po) => (statusSel === "all" ? true : po.status === statusSel))
+      .filter((po) =>
+        prioritySel === "all" ? true : po.priority.toLowerCase() === prioritySel.toLowerCase(),
+      )
+      .filter((po) => (customerSel === "all" ? true : text(po.customer) === customerSel))
       .sort((a, b) => {
         const av = column.value(a, statusRank, stageRank);
         const bv = column.value(b, statusRank, stageRank);
@@ -308,7 +452,66 @@ export default function DashboardPage() {
         // job number breaks every tie, so the order is never arbitrary
         return result || naturalCompare(a.job_no, b.job_no);
       });
-  }, [pos, filter, sort, statusRank, stageRank, FILTERS, visibleColumns]);
+  }, [
+    pos,
+    columnFilters,
+    sort,
+    statusRank,
+    stageRank,
+    activeStageFilter,
+    visibleColumns,
+    showStatusFilter,
+    showPriorityFilter,
+    showCustomerFilter,
+  ]);
+
+  /* Drop stale select values when options disappear or the control is hidden.
+     An empty catalog is not evidence that a saved value is gone — statuses and
+     customers both arrive a fetch late, and pruning against nothing would clear
+     the restored filter before its own options showed up. */
+  useEffect(() => {
+    setColumnFilters((prev) => {
+      let next = prev;
+      if (
+        showStatusFilter &&
+        statuses.length > 0 &&
+        prev.status !== "all" &&
+        !statuses.some((s) => s.value === prev.status)
+      ) {
+        next = { ...next, status: "all" };
+      }
+      if (
+        showPriorityFilter &&
+        priorityOptions.length > 0 &&
+        prev.priority !== "all" &&
+        !priorityOptions.some((p) => p.toLowerCase() === prev.priority.toLowerCase())
+      ) {
+        next = { ...next, priority: "all" };
+      }
+      if (
+        showCustomerFilter &&
+        customerOptions.length > 0 &&
+        prev.customer !== "all" &&
+        !customerOptions.includes(prev.customer)
+      ) {
+        next = { ...next, customer: "all" };
+      }
+      if (!showStageFilter && prev.stage !== "all") next = { ...next, stage: "all" };
+      if (next !== prev) {
+        window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(next));
+        window.localStorage.setItem(FILTER_STORAGE_KEY, next.stage);
+      }
+      return next;
+    });
+  }, [
+    showStageFilter,
+    showStatusFilter,
+    showPriorityFilter,
+    showCustomerFilter,
+    statuses,
+    priorityOptions,
+    customerOptions,
+  ]);
 
   const open = (po: PurchaseOrder) => {
     setSelected(po);
@@ -328,7 +531,10 @@ export default function DashboardPage() {
     );
   }, []);
 
-  const sortColumn = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? COLUMNS[0];
+  const sortColumn = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? FALLBACK_COLUMNS[0];
+
+  const priorityLabel = (value: string) =>
+    value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : value;
 
   return (
     <>
@@ -356,20 +562,89 @@ export default function DashboardPage() {
       </div>
 
       <div className="dash-filters">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className="dash-pill"
-            data-filter={f.key}
-            data-active={filter === f.key}
-            aria-pressed={filter === f.key}
-            onClick={() => changeFilter(f.key)}
-          >
-            {f.label}
-            <span className="dash-pill-count">{counts.get(f.key) ?? 0}</span>
-          </button>
-        ))}
+        {enabledFilterKeys.map((key) => {
+          if (key === "stage" && showStageFilter) {
+            return (
+              <div key="stage" className="dash-filter-group" role="group" aria-label="Stage">
+                {STAGE_FILTERS.map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    className="dash-pill"
+                    data-filter={f.key}
+                    data-active={columnFilters.stage === f.key}
+                    aria-pressed={columnFilters.stage === f.key}
+                    onClick={() => changeStageFilter(f.key)}
+                  >
+                    {f.label}
+                    <span className="dash-pill-count">{counts.get(f.key) ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          }
+          if (key === "status" && showStatusFilter) {
+            return (
+              <label key="status" className="dash-filter-field">
+                <span className="visually-hidden">Status</span>
+                <select
+                  className="dash-filter-select"
+                  value={columnFilters.status}
+                  aria-label="Filter by status"
+                  onChange={(e) => persistColumnFilters({ ...columnFilters, status: e.target.value })}
+                >
+                  <option value="all">All statuses</option>
+                  {statuses.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          if (key === "priority" && showPriorityFilter) {
+            return (
+              <label key="priority" className="dash-filter-field">
+                <span className="visually-hidden">Priority</span>
+                <select
+                  className="dash-filter-select"
+                  value={columnFilters.priority}
+                  aria-label="Filter by priority"
+                  onChange={(e) =>
+                    persistColumnFilters({ ...columnFilters, priority: e.target.value })
+                  }
+                >
+                  <option value="all">All priorities</option>
+                  {priorityOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {priorityLabel(p)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          if (key === "customer" && showCustomerFilter) {
+            /* A shop's customer list outgrows a drop-down long before the other
+               filters do, so this one is typed at rather than scrolled. */
+            return (
+              <div key="customer" className="dash-filter-field dash-filter-combo">
+                <Combobox
+                  value={columnFilters.customer === "all" ? null : columnFilters.customer}
+                  options={customerOptions}
+                  className="dash-filter-input"
+                  placeholder="All customers"
+                  aria-label="Filter by customer"
+                  onChange={(next) =>
+                    persistColumnFilters({ ...columnFilters, customer: next ?? "all" })
+                  }
+                />
+              </div>
+            );
+          }
+          return null;
+        })}
         <input
           className="field dash-search"
           placeholder="Search job, PO, part, material…"
@@ -390,6 +665,7 @@ export default function DashboardPage() {
                     scope="col"
                     data-col={col.key}
                     data-numeric={col.numeric ? "true" : undefined}
+                    style={dashboardColumnWidthStyle(col.widthRem)}
                     aria-sort={
                       sort.key === col.key
                         ? sort.dir === "asc"
@@ -438,9 +714,10 @@ export default function DashboardPage() {
                     }}
                   >
                     {visibleColumns.map((col) => {
+                      const widthStyle = dashboardColumnWidthStyle(col.widthRem);
                       if (col.key === "job") {
                         return (
-                          <td key="job" data-col="job">
+                          <td key="job" data-col="job" style={widthStyle}>
                             <div className="dash-id">
                               <span className="dash-id-job">{po.job_no}</span>
                               {po.locked && (
@@ -460,28 +737,33 @@ export default function DashboardPage() {
                       }
                       if (col.key === "po_number") {
                         return (
-                          <td key="po_number" data-col="po_number">
+                          <td key="po_number" data-col="po_number" style={widthStyle}>
                             <span className="dash-mono">{po.po_number}</span>
                           </td>
                         );
                       }
                       if (col.key === "customer") {
                         return (
-                          <td key="customer" data-col="customer" title={po.customer ?? undefined}>
+                          <td
+                            key="customer"
+                            data-col="customer"
+                            style={widthStyle}
+                            title={po.customer ?? undefined}
+                          >
                             {cell(text(po.customer))}
                           </td>
                         );
                       }
                       if (col.key === "priority") {
                         return (
-                          <td key="priority" data-col="priority">
+                          <td key="priority" data-col="priority" style={widthStyle}>
                             <PriorityTag priority={po.priority} label={po.priority_label} />
                           </td>
                         );
                       }
                       if (col.key === "stage") {
                         return (
-                          <td key="stage" data-col="stage">
+                          <td key="stage" data-col="stage" style={widthStyle}>
                             {stage ? (
                               <span
                                 className="dash-stage"
@@ -497,7 +779,12 @@ export default function DashboardPage() {
                       }
                       if (col.key === "status") {
                         return (
-                          <td key="status" data-col="status" title={po.status_label}>
+                          <td
+                            key="status"
+                            data-col="status"
+                            style={widthStyle}
+                            title={po.status_label}
+                          >
                             <span
                               className="dash-status"
                               style={{
@@ -513,7 +800,12 @@ export default function DashboardPage() {
                       }
                       if (col.key === "owner") {
                         return (
-                          <td key="owner" data-col="owner" title={po.owner?.name ?? undefined}>
+                          <td
+                            key="owner"
+                            data-col="owner"
+                            style={widthStyle}
+                            title={po.owner?.name ?? undefined}
+                          >
                             {po.owner ? (
                               <div className="dash-person">
                                 <Avatar
@@ -532,21 +824,31 @@ export default function DashboardPage() {
                       }
                       if (col.key === "material") {
                         return (
-                          <td key="material" data-col="material" title={po.material ?? undefined}>
+                          <td
+                            key="material"
+                            data-col="material"
+                            style={widthStyle}
+                            title={po.material ?? undefined}
+                          >
                             {wrapped(text(po.material))}
                           </td>
                         );
                       }
                       if (col.key === "finish") {
                         return (
-                          <td key="finish" data-col="finish" title={po.finish ?? undefined}>
+                          <td
+                            key="finish"
+                            data-col="finish"
+                            style={widthStyle}
+                            title={po.finish ?? undefined}
+                          >
                             {wrapped(text(po.finish))}
                           </td>
                         );
                       }
                       if (col.key === "due") {
                         return (
-                          <td key="due" data-col="due">
+                          <td key="due" data-col="due" style={widthStyle}>
                             <span className="dash-mono" title={po.due_date}>
                               {formatDue(po.due_date)}
                             </span>
@@ -558,6 +860,7 @@ export default function DashboardPage() {
                           <td
                             key="modified"
                             data-col="modified"
+                            style={widthStyle}
                             title={
                               po.last_modified
                                 ? `${po.last_modified.action} by ${po.last_modified.by.name} · ` +
@@ -586,7 +889,7 @@ export default function DashboardPage() {
                       }
                       if (col.key === "comments") {
                         return (
-                          <td key="comments" data-col="comments">
+                          <td key="comments" data-col="comments" style={widthStyle}>
                             <button
                               type="button"
                               className="dash-comment-btn"
@@ -616,12 +919,77 @@ export default function DashboardPage() {
                       }
                       if (col.key === "qty") {
                         return (
-                          <td key="qty" data-col="qty" data-numeric="true">
+                          <td key="qty" data-col="qty" data-numeric="true" style={widthStyle}>
                             {po.qty}
                           </td>
                         );
                       }
-                      return null;
+                      if (col.key === "part_number") {
+                        return (
+                          <td key="part_number" data-col="part_number" style={widthStyle}>
+                            <span className="dash-mono">{po.part_number}</span>
+                          </td>
+                        );
+                      }
+                      if (col.key === "dims") {
+                        return (
+                          <td
+                            key="dims"
+                            data-col="dims"
+                            style={widthStyle}
+                            title={po.dims ?? undefined}
+                          >
+                            {wrapped(text(po.dims))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "mat_dim") {
+                        return (
+                          <td
+                            key="mat_dim"
+                            data-col="mat_dim"
+                            style={widthStyle}
+                            title={po.mat_dim ?? undefined}
+                          >
+                            {wrapped(text(po.mat_dim))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "inspection") {
+                        const label = (po.inspection ?? "").toUpperCase() || null;
+                        return (
+                          <td key="inspection" data-col="inspection" style={widthStyle}>
+                            {cell(label)}
+                          </td>
+                        );
+                      }
+                      if (col.key === "hardware") {
+                        return (
+                          <td key="hardware" data-col="hardware" style={widthStyle}>
+                            {po.hardware ? "YES" : "NO"}
+                          </td>
+                        );
+                      }
+                      // Custom field column
+                      const meta = customs.get(col.key);
+                      const raw = po.custom_fields?.[col.key];
+                      const display =
+                        raw === null || raw === undefined || raw === ""
+                          ? null
+                          : String(raw);
+                      return (
+                        <td
+                          key={col.key}
+                          data-col={col.key}
+                          data-numeric={meta?.type === "number" ? "true" : undefined}
+                          style={widthStyle}
+                          title={display ?? undefined}
+                        >
+                          {meta?.type === "number" && display != null
+                            ? display
+                            : wrapped(display)}
+                        </td>
+                      );
                     })}
                   </tr>
                 );

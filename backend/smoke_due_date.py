@@ -37,7 +37,7 @@ def po(job_no, due):
         "qty": 1,
         "due_date": due,
         "material": "AL 6061-T651, Plate",
-        "status": "new",
+        "status": "need_material_size",
     }
 
 

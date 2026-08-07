@@ -24,15 +24,15 @@ import type { PurchaseOrder } from "@/lib/types";
 
 /** Legacy status → named tone (pre-settings). Mapped to hex via resolveToneColor. */
 export const TONE_BY_STATUS: Record<string, string> = {
-  new: "slate",
-  rfq_finishing: "cyan",
-  in_machining: "blue",
-  finishing: "teal",
-  under_inspection: "amber",
-  wait_vqc: "red",
+  need_material_size: "slate",
+  order_material: "amber",
+  material_incoming: "cyan",
+  waiting_setup: "orange",
+  running: "blue",
+  deburr: "teal",
+  inspection: "purple",
+  ready_to_plate: "purple",
   ready_to_ship: "green",
-  shipped: "graphite",
-  on_hold: "orange",
 };
 
 export const toneStyle = (status: string, tone?: string): CSSProperties =>
@@ -84,9 +84,8 @@ export function formatDue(iso: string) {
   return `${m}/${d}/${String(y).slice(2)}`;
 }
 
-const isLate = (po: PurchaseOrder) =>
-  po.due_date < new Date().toISOString().slice(0, 10) &&
-  !["shipped", "ready_to_ship"].includes(po.status);
+const isLate = (po: PurchaseOrder, completedStatuses: Set<string>) =>
+  po.due_date < new Date().toISOString().slice(0, 10) && !completedStatuses.has(po.status);
 
 /** Full spreadsheet-style job card: the paper card, rebuilt. */
 export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => void }) {
@@ -94,6 +93,14 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
   const fields = visibleCardFields(document);
   const customs = customFieldMap(document);
   const tone = statusByKey.get(po.status)?.tone;
+  const completedStatuses = new Set<string>();
+  for (const col of document?.kanbanColumns ?? []) {
+    if (col.isCompleted) {
+      for (const key of col.statusKeys) completedStatuses.add(key);
+    }
+  }
+  // Until settings load, treat Ready to ship as completed so late tint stays quiet.
+  if (completedStatuses.size === 0) completedStatuses.add("ready_to_ship");
 
   // Until settings load, fall back to the classic nine-row grid.
   const displayFields =
@@ -163,7 +170,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
         {po.priority !== "normal" && (
           <PriorityTag priority={po.priority} label={po.priority_label} />
         )}
-        <div className="jobcard-due" data-late={isLate(po)}>
+        <div className="jobcard-due" data-late={isLate(po, completedStatuses)}>
           DUE {formatDue(po.due_date)}
         </div>
       </header>
@@ -215,9 +222,16 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
             <div key={f.key} className="spec-pair">
               <dt>{f.label}</dt>
               <dd className={f.kind === "builtin" ? builtinClass(f.key, po) : ""}>
-                {f.kind === "builtin"
-                  ? builtinValue(po, f.key)
-                  : customValue(po, f.key, customs.get(f.key))}
+                {f.kind === "builtin" && f.key === "priority" ? (
+                  <PriorityTag
+                    priority={po.priority}
+                    label={po.priority_label || po.priority.toUpperCase()}
+                  />
+                ) : f.kind === "builtin" ? (
+                  builtinValue(po, f.key)
+                ) : (
+                  customValue(po, f.key, customs.get(f.key))
+                )}
               </dd>
             </div>
           ))}

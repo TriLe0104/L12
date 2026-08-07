@@ -7,7 +7,7 @@ import { PODrawer } from "@/components/PODrawer";
 import { api } from "@/lib/api";
 import { canEdit, canEditStatus, canModifyStatus, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
-import { resolveToneColor } from "@/lib/boardTypes";
+import { PRIORITY_FIELD_KEY, resolveToneColor, selectionOptions } from "@/lib/boardTypes";
 import { captureRects, playFlip, type RectMap } from "@/lib/flip";
 import { useBoardDrag } from "@/lib/useBoardDrag";
 import {
@@ -48,15 +48,11 @@ const ZOOM_STEPS: { min: string; label: string }[] = [
 
 const DEFAULT_ZOOM = 2;
 
-const rank = (po: PurchaseOrder) => PRIORITY_ORDER.indexOf(po.priority);
-
-const COMPARATORS: Record<SortKey, (a: PurchaseOrder, b: PurchaseOrder) => number> = {
-  due_asc: (a, b) => a.due_date.localeCompare(b.due_date) || rank(a) - rank(b),
-  due_desc: (a, b) => b.due_date.localeCompare(a.due_date) || rank(a) - rank(b),
-  // ties inside a priority fall back to the soonest due date
-  priority_desc: (a, b) => rank(a) - rank(b) || a.due_date.localeCompare(b.due_date),
-  priority_asc: (a, b) => rank(b) - rank(a) || a.due_date.localeCompare(b.due_date),
-};
+function priorityRank(priority: string, order: string[]): number {
+  const key = priority.toLowerCase();
+  const idx = order.findIndex((o) => o.toLowerCase() === key);
+  return idx < 0 ? order.length + 1 : idx;
+}
 
 const FALLBACK_STAGES: StageMeta[] = [
   { value: "pending", label: "PENDING", tone: "slate", statuses: [] },
@@ -108,6 +104,25 @@ export default function TasksPage() {
     () => ORDER.filter((s) => !completedKeys.has(s)),
     [ORDER, completedKeys],
   );
+
+  const priorityOrder = useMemo(() => {
+    const opts = selectionOptions(document, PRIORITY_FIELD_KEY);
+    return opts.length ? opts : PRIORITY_ORDER;
+  }, [document]);
+
+  const COMPARATORS = useMemo(() => {
+    const rank = (po: PurchaseOrder) => priorityRank(po.priority, priorityOrder);
+    return {
+      due_asc: (a: PurchaseOrder, b: PurchaseOrder) =>
+        a.due_date.localeCompare(b.due_date) || rank(a) - rank(b),
+      due_desc: (a: PurchaseOrder, b: PurchaseOrder) =>
+        b.due_date.localeCompare(a.due_date) || rank(a) - rank(b),
+      priority_desc: (a: PurchaseOrder, b: PurchaseOrder) =>
+        rank(a) - rank(b) || a.due_date.localeCompare(b.due_date),
+      priority_asc: (a: PurchaseOrder, b: PurchaseOrder) =>
+        rank(b) - rank(a) || a.due_date.localeCompare(b.due_date),
+    } satisfies Record<SortKey, (a: PurchaseOrder, b: PurchaseOrder) => number>;
+  }, [priorityOrder]);
 
   const boardRef = useRef<HTMLDivElement>(null);
   const pendingFlip = useRef<RectMap | null>(null);
@@ -243,7 +258,7 @@ export default function TasksPage() {
   });
 
   const defaultStatusFor = (stage: Stage) =>
-    stages.find((s) => s.value === stage)?.statuses[0] ?? "new";
+    stages.find((s) => s.value === stage)?.statuses[0] ?? "need_material_size";
 
   return (
     <>

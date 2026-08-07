@@ -24,6 +24,13 @@ export function captureRects(root: ParentNode | null): RectMap {
   return rects;
 }
 
+/** Ordered flip ids. Changes when nodes are added, removed or reordered, and
+ *  stays put when only their text does — the difference between "this list
+ *  moved" and "someone is typing in a label". */
+export function rectSignature(rects: RectMap): string {
+  return Array.from(rects.keys()).join("|");
+}
+
 /** Play the difference once the DOM has settled. */
 export function playFlip(
   root: ParentNode | null,

@@ -11,6 +11,10 @@
 
   /* accents: TVM gold + brushed silver */
   --signal: #f5a800;
+  --signal-wash: rgba(245, 168, 0, 0.1);
+  --signal-soft: rgba(245, 168, 0, 0.16);
+  --signal-ring: rgba(245, 168, 0, 0.3);
+  --signal-ring-strong: rgba(245, 168, 0, 0.55);
   --silver: #c9ced3;
   --go: #0b8457;
   --stop: #c81e2b;
@@ -25,9 +29,17 @@
   --tone-green: #0b8457;
   --tone-graphite: #3f4b57;
   --tone-orange: #c2410c;
+  --tone-purple: #6d28d9;
 
   --rail-w: 14.5rem;
   --card-min: 18rem;
+  /* the detail drawer's width, and below it the width the card inside actually
+     gets: the drawer less .drawer-body's padding and the drawer's own border.
+     Stated here because the settings preview redraws that same card at that
+     same width — a narrower copy would answer its container queries at another
+     size step and stop being a preview of anything. */
+  --drawer-w: min(30rem, 100vw);
+  --drawer-card-w: calc(var(--drawer-w) - 2rem - 1px);
   --radius: 4px;
   --shadow-card: 0 1px 0 rgba(13, 17, 23, 0.06), 0 6px 18px -12px rgba(13, 17, 23, 0.5);
   --shadow-lift: 0 1px 0 rgba(13, 17, 23, 0.05), 0 16px 30px -18px rgba(13, 17, 23, 0.6);
@@ -71,7 +83,7 @@ body {
   color: var(--ink);
   background-color: var(--paper);
   background-image:
-    radial-gradient(60rem 42rem at 88% -14%, rgba(245, 168, 0, 0.1), transparent 62%),
+    radial-gradient(60rem 42rem at 88% -14%, var(--signal-wash), transparent 62%),
     radial-gradient(52rem 40rem at 2% 6%, rgba(84, 124, 186, 0.09), transparent 64%),
     radial-gradient(58rem 40rem at 55% 112%, rgba(90, 106, 122, 0.12), transparent 62%),
     linear-gradient(178deg, #f8fafb 0%, #eff2f6 48%, #e8ecf1 100%);
@@ -151,6 +163,12 @@ textarea {
   color: #fff;
 }
 
+.nav-link:focus-visible,
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--signal-ring-strong);
+}
+
 .rail-foot {
   margin-top: auto;
   display: flex;
@@ -222,6 +240,15 @@ textarea {
   line-height: 1;
 }
 
+.page-title::after {
+  content: "";
+  display: block;
+  width: 1.75rem;
+  height: 2px;
+  margin-top: 0.42rem;
+  background: var(--signal);
+}
+
 .page-sub {
   margin: 0.375rem 0 0;
   color: var(--steel);
@@ -267,7 +294,7 @@ textarea {
 .btn:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px rgba(245, 168, 0, 0.22);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 .btn {
@@ -313,8 +340,8 @@ textarea {
   background: var(--ink);
   border-color: var(--ink);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    0 0 0 3px rgba(13, 17, 23, 0.2),
+    inset 0 0 0 1px var(--signal-ring-strong),
+    0 0 0 3px var(--signal-ring),
     0 10px 22px -14px rgba(0, 0, 0, 0.95);
 }
 
@@ -349,6 +376,7 @@ textarea {
 .seg button[data-active="true"] {
   background: var(--ink);
   color: #fff;
+  box-shadow: inset 0 -2px 0 var(--signal);
 }
 
 /* stepped card-size control; a sibling of .seg, so it borrows its metrics */
@@ -383,7 +411,7 @@ textarea {
 
 .zoom button:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(245, 168, 0, 0.55);
+  box-shadow: inset 0 0 0 2px var(--signal-ring-strong);
 }
 
 /* after the hover/focus rules: a button at the end of the range stays focusable
@@ -685,7 +713,11 @@ button.jobcard-thumb:focus-visible {
   }
   .spec dt {
     font-size: 0.61rem;
-    letter-spacing: 0.01em;
+    /* INSPECTION clears this track by barely a pixel, so the label gives up its
+       tracking and some gutter rather than the values giving up track width */
+    letter-spacing: 0;
+    padding-left: 0.28rem;
+    padding-right: 0.28rem;
   }
   .jobcard-body {
     gap: 0.45rem;
@@ -697,11 +729,13 @@ button.jobcard-thumb:focus-visible {
     padding-left: 0.5rem;
     padding-right: 0.5rem;
   }
-  .jobcard-thumb,
-  .thumb-drop {
+  .jobcard-thumb {
     width: 3.4rem;
     flex-basis: 3.4rem;
     height: 3.4rem;
+  }
+  .card-wells {
+    --well: 3.4rem;
   }
   .jobcard-job {
     font-size: 1.05rem;
@@ -715,19 +749,30 @@ button.jobcard-thumb:focus-visible {
    claiming more room than the values it labels, so give the values the width */
 @container (max-width: 15rem) {
   .spec {
-    grid-template-columns: minmax(2.4rem, 3.9rem) minmax(0, 1fr);
+    /* INSPECTION, the longest stock label, has to clear the track on one line:
+       the extra 0.45rem here plus the tighter label gutter below pays for it */
+    grid-template-columns: minmax(2.4rem, 4.35rem) minmax(0, 1fr);
   }
   .spec dt {
-    font-size: 0.55rem;
+    font-size: 0.52rem;
+    /* tracking is pure overhead on a label this small and buys a whole glyph */
+    letter-spacing: 0;
+    padding-left: 0.22rem;
+    padding-right: 0.22rem;
   }
   .spec dd {
     font-size: 0.67rem;
+    /* hand the values back most of what the wider label track just cost them */
+    padding-left: 0.28rem;
+    padding-right: 0.28rem;
   }
-  .jobcard-thumb,
-  .thumb-drop {
+  .jobcard-thumb {
     width: 2.8rem;
     flex-basis: 2.8rem;
     height: 2.8rem;
+  }
+  .card-wells {
+    --well: 2.8rem;
   }
 }
 
@@ -739,12 +784,15 @@ button.jobcard-thumb:focus-visible {
 }
 
 /* the drawer card is narrow enough to trip the compact rules above, but its
-   values are short — buy the labels a track wide enough for INSPECTION */
-.drawer .spec {
+   values are short — buy the labels a track wide enough for INSPECTION.
+   The settings preview draws the same card, so it takes the same metrics. */
+.drawer .spec,
+.card-stage .spec {
   grid-template-columns: minmax(4.8rem, 6.4rem) minmax(0, 1fr);
 }
 
-.drawer .spec dt {
+.drawer .spec dt,
+.card-stage .spec dt {
   font-size: 0.66rem;
   letter-spacing: 0.02em;
 }
@@ -879,6 +927,50 @@ button.jobcard-thumb:focus-visible {
   flex: 1 1 auto;
 }
 
+/* Priority segmented control — same tones as PriorityTag / .prio */
+.prio-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.prio-seg-btn {
+  flex: 1 1 auto;
+  min-width: 2.6rem;
+  margin: 0;
+  padding: 0.14rem 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--prio, var(--tone-slate)) 55%, transparent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--prio, var(--tone-slate));
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.prio-seg-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--prio, var(--tone-slate)) 12%, #fff);
+}
+
+.prio-seg-btn[data-selected] {
+  background: var(--prio, var(--tone-slate));
+  border-color: var(--prio, var(--tone-slate));
+  color: #fff;
+}
+
+.prio-seg-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.prio-seg-btn[data-priority="hot"][data-selected] {
+  animation: prio-pulse 2.4s ease-in-out infinite;
+}
+
 .cell-input {
   width: 100%;
   min-width: 0;
@@ -920,6 +1012,59 @@ button.jobcard-thumb:focus-visible {
 
 .cell-input.warn {
   color: var(--tone-red);
+}
+
+.combo {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.combo-list {
+  position: fixed;
+  z-index: 90;
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.2rem 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.combo-option {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combo-option.is-active,
+.combo-option:hover {
+  background: rgba(15, 40, 60, 0.07);
+}
+
+.combo-option.is-selected {
+  color: var(--tone-blue, #1a5f9e);
+}
+
+.combo-empty {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--steel-soft);
+  cursor: default;
+}
+
+.combo-option.combo-empty {
+  cursor: pointer;
+  font-style: italic;
 }
 
 .cell-input.go {
@@ -981,9 +1126,10 @@ button.jobcard-thumb:focus-visible {
 
 .thumb-drop {
   position: relative;
-  width: 5.25rem;
-  flex: 0 0 5.25rem;
-  height: 5.25rem;
+  /* the media column owns the width; the well fills it at every size step */
+  width: 100%;
+  flex: none;
+  height: var(--well, 5.25rem);
   align-self: flex-start;
   border: 1px dashed rgba(13, 17, 23, 0.28);
   border-radius: 3px;
@@ -1427,8 +1573,52 @@ button.jobcard-thumb:focus-visible {
   padding: 5px 10px;
 }
 
-.fc .fc-button:hover {
-  background: #fff;
+/* Every state below has to restate `color`. FullCalendar's own state rules
+   (`.fc .fc-button-primary:hover` / `:disabled`, specificity 0-3-0) all set
+   `color: var(--fc-button-text-color)` = #fff, which outranks the resting ink
+   in `.fc .fc-button` (0-2-0). Override only the background and the label
+   turns white-on-white and vanishes — that was the blank Week button. So each
+   rule here carries `:not(:disabled)` or an equivalent third class to clear
+   0-3-0, and repeats the text color it needs.
+
+   Hover on an inactive button is a rim, never a fill: the resting background
+   and ink stay put and only the border/glow go gold. The border stays 1px in
+   every state so nothing reflows when it changes color. */
+.fc .fc-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: var(--signal);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--signal-ring-strong), 0 0 10px -3px var(--signal-ring-strong);
+}
+
+/* Without this, FC's `:disabled` rule paints the exhausted Today button its
+   own navy; hovering it then hit the white-on-white case as well. */
+.fc .fc-button:disabled,
+.fc .fc-button-primary:disabled {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: var(--rule);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+/* Kill FullCalendar's gray focus halo (`.fc-button-active:focus` /
+   `.fc-button-primary:focus` → `box-shadow: 0 0 0 .2rem rgba(76,91,106,.5)`).
+   Mouse :focus stays clean; keyboard :focus-visible uses TVM yellow. */
+.fc .fc-button:focus,
+.fc .fc-button-primary:focus,
+.fc .fc-button-primary:not(:disabled).fc-button-active:focus,
+.fc .fc-button-primary:not(:disabled):active:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Carries `:not(:disabled)` to match the hover rule's specificity and win on
+   source order, so a keyboard ring on an already-hovered button still reads as
+   a ring rather than a hover rim. */
+.fc .fc-button:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 .fc .fc-button-primary:not(:disabled).fc-button-active,
@@ -1436,6 +1626,32 @@ button.jobcard-thumb:focus-visible {
   background: var(--ink);
   border-color: var(--ink);
   color: #fff;
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active:focus,
+.fc .fc-button-primary:not(:disabled):active:focus {
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+/* The active button keeps its ink fill and white label on hover and gains the
+   gold rim; the underline is listed first so it stays crisp on top of it.
+   Sits after the :focus reset above, which it ties with on specificity, so the
+   button you just clicked still shows the rim while the pointer rests on it. */
+.fc .fc-button-primary:not(:disabled).fc-button-active:hover,
+.fc .fc-button-primary:not(:disabled):active:hover {
+  background: var(--ink);
+  border-color: var(--signal);
+  color: #fff;
+  box-shadow: inset 0 -2px 0 var(--signal), inset 0 0 0 1px var(--signal-ring-strong),
+    0 0 10px -3px var(--signal-ring-strong);
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active:focus-visible,
+.fc .fc-button-primary:not(:disabled):active:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--signal), 0 0 0 3px var(--signal-ring);
 }
 
 .fc .fc-col-header-cell-cushion {
@@ -1751,7 +1967,7 @@ button.jobcard-thumb:focus-visible {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(30rem, 100vw);
+  width: var(--drawer-w);
   background: linear-gradient(180deg, #fdfefe, #f3f6f8);
   border-left: 1px solid var(--rule);
   box-shadow: -24px 0 60px -30px rgba(9, 12, 16, 0.7);
@@ -1759,6 +1975,7 @@ button.jobcard-thumb:focus-visible {
   display: flex;
   flex-direction: column;
   animation: slide-in var(--t-slow) var(--ease) both;
+  will-change: transform;
 }
 
 @keyframes slide-in {
@@ -1843,11 +2060,18 @@ button.jobcard-thumb:focus-visible {
    own metrics, so every container-query size step already applies to the photo
    well unchanged. */
 .card-wells {
+  /* the one place the media column's width is stated; the size steps re-state
+     it and both wells follow */
+  --well: 5.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   align-self: flex-start;
-  min-width: 0;
+  /* a track of its own, and a rigid one: the spec grid beside it is happy to
+     take every pixel going, and a shrunk column would leave the photo well —
+     which cannot shrink — painting over the label column */
+  flex: 0 0 var(--well);
+  width: var(--well);
 }
 
 /* A strip rather than a second square: the model is identified by name and
@@ -1859,13 +2083,28 @@ button.jobcard-thumb:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.2rem 0.9rem 0.2rem 0.25rem;
+  /* empty, there are no corner buttons to clear — the label gets the width */
+  padding: 0.2rem 0.25rem;
   border: 1px dashed rgba(13, 17, 23, 0.28);
   border-radius: 3px;
   background: linear-gradient(135deg, #eef2f5, #dee5eb);
   cursor: pointer;
   overflow: hidden;
+  /* the strip decides for itself how much of the model it can name */
+  container-type: inline-size;
   transition: border-color 130ms ease, background 130ms ease;
+}
+
+/* beside the spec grid there is only room for the format, and the filename is
+   in the title; stacked under the card it has the width to spell both out */
+@container (max-width: 8.5rem) {
+  .model-drop-name,
+  .model-drop-size {
+    display: none;
+  }
+  .model-drop .model-tag {
+    margin-inline: auto;
+  }
 }
 
 .model-drop:hover,
@@ -1877,7 +2116,8 @@ button.jobcard-thumb:focus-visible {
 .model-drop[data-filled="true"] {
   border-style: solid;
   border-color: var(--rule);
-  padding-left: 1.35rem;
+  /* filled, the two corner buttons need their gutters back */
+  padding: 0.2rem 1.35rem;
 }
 
 .model-drop-label,
@@ -1893,6 +2133,11 @@ button.jobcard-thumb:focus-visible {
 .model-drop-label {
   letter-spacing: 0.1em;
   margin-inline: auto;
+  /* centred while it fits; past that it ends in an ellipsis rather than being
+     sliced at both ends */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* the filename is the part that gives, and it gives before the size does */
@@ -2281,6 +2526,7 @@ button.jobcard-thumb:focus-visible {
   width: 100%;
   padding: 9px 12px;
   border: 0;
+  border-left: 2px solid transparent;
   border-bottom: 1px solid var(--rule-soft);
   background: transparent;
   cursor: pointer;
@@ -2295,6 +2541,7 @@ button.jobcard-thumb:focus-visible {
 
 .user-row[data-active="true"] {
   background: rgba(13, 17, 23, 0.075);
+  border-left-color: var(--signal);
 }
 
 .avatar {
@@ -2690,8 +2937,10 @@ button.jobcard-thumb:focus-visible {
   .main {
     padding: 1rem 0.875rem 3rem;
   }
-  .drawer {
-    width: 100vw;
+  /* the drawer goes full-bleed here; the settings preview's copy of its card
+     follows because both read the same variable */
+  :root {
+    --drawer-w: 100vw;
   }
   .form-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -2724,31 +2973,105 @@ button.jobcard-thumb:focus-visible {
   .jobcard-body {
     flex-direction: column;
   }
-  .jobcard-thumb,
-  .thumb-drop {
+  .jobcard-thumb {
     width: 100%;
     flex-basis: auto;
+    height: 6.5rem;
+  }
+  /* stacked, the media column spans the card — and its basis is now a height,
+     so it has to go back to auto */
+  .card-wells {
+    --well: 100%;
+    flex-basis: auto;
+  }
+  .card-wells .thumb-drop {
     height: 6.5rem;
   }
 }
 
 /* ---------- Board settings ---------- */
 .settings-page {
+  /* Only the dirty dock floats over the page, so only a dirty page owes it
+     room. A settled board keeps every pixel below the last control. */
+  --settings-dock-clearance: 0rem;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
   min-height: 0;
-  padding-bottom: 1.5rem;
+  padding-bottom: var(--settings-dock-clearance);
+  scroll-padding-bottom: var(--settings-dock-clearance);
+}
+
+.settings-page[data-dirty="true"] {
+  --settings-dock-clearance: calc(5rem + env(safe-area-inset-bottom));
 }
 
 .settings-head {
   align-items: flex-start;
 }
 
+.settings-save-dock {
+  position: fixed;
+  z-index: 35;
+  right: clamp(0.9rem, 1.8vw, 1.9rem);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: calc(var(--rail-w) + clamp(0.9rem, 1.8vw, 1.9rem));
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem 0.5rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--signal);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 18px 40px -22px rgba(13, 17, 23, 0.75);
+  backdrop-filter: blur(10px);
+  transition:
+    opacity var(--t-mid) var(--ease),
+    transform var(--t-mid) var(--ease);
+}
+
+/* Hidden rather than unmounted so the dock can slide out as cleanly as it
+   slid in; `visibility` also keeps it out of the accessibility tree. */
+.settings-save-dock[data-dirty="false"] {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(0.6rem);
+  pointer-events: none;
+}
+
+.settings-saved-toast {
+  position: fixed;
+  z-index: 35;
+  right: clamp(0.9rem, 1.8vw, 1.9rem);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: calc(var(--rail-w) + clamp(0.9rem, 1.8vw, 1.9rem));
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  margin-inline: auto;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--signal);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 18px 40px -22px rgba(13, 17, 23, 0.75);
+  backdrop-filter: blur(10px);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  animation: fade var(--t-mid) var(--ease) both;
+}
+
 .settings-actions {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .settings-error {
@@ -2765,6 +3088,7 @@ button.jobcard-thumb:focus-visible {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--tone-amber);
 }
 
@@ -2780,6 +3104,7 @@ button.jobcard-thumb:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  scroll-padding-bottom: var(--settings-dock-clearance);
 }
 
 .settings-tabs {
@@ -2796,12 +3121,24 @@ button.jobcard-thumb:focus-visible {
   font-size: 0.78rem;
   font-weight: 650;
   cursor: pointer;
+  transition:
+    color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    transform var(--t-mid) var(--ease),
+    box-shadow var(--t-mid) var(--ease);
+}
+
+.settings-tabs button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
 }
 
 .settings-tabs button[data-active="true"] {
   background: var(--ink);
   color: #fff;
   border-color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--signal);
 }
 
 .settings-panel {
@@ -2812,6 +3149,14 @@ button.jobcard-thumb:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  animation: settings-panel-in var(--t-slow) var(--ease) both;
+}
+
+@keyframes settings-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
 }
 
 .settings-list {
@@ -2832,6 +3177,248 @@ button.jobcard-thumb:focus-visible {
   border-radius: var(--radius);
   border: 1px solid var(--rule-soft);
   background: rgba(255, 255, 255, 0.9);
+  transition:
+    opacity var(--t-mid) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    box-shadow var(--t-mid) var(--ease);
+}
+
+.settings-list > li.settings-field-with-options {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.settings-field-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  width: 100%;
+}
+
+.settings-field-identity {
+  min-width: 9rem;
+  flex: 1 1 10rem;
+}
+
+.settings-field-name {
+  width: 100%;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.settings-field-type {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.settings-field-type .cell-input {
+  min-width: 6.5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.78rem;
+}
+
+.settings-field-type .cell-input:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.settings-options-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.45rem 0.35rem 0.15rem;
+  border-top: 1px dashed var(--rule-soft);
+}
+
+.settings-options-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.2rem 0.35rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.settings-options-toggle:hover,
+.settings-options-toggle:focus-visible {
+  background: rgba(13, 17, 23, 0.06);
+  outline: none;
+}
+
+.settings-options-toggle small {
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.settings-options-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-options-list {
+  max-height: 16rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.settings-options-list > li.settings-option-row {
+  min-height: 40px;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  padding: 0.25rem 0.35rem;
+}
+
+.settings-option-row .settings-drag-handle {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-basis: 1.75rem;
+}
+
+.settings-option-input {
+  flex: 1 1 auto;
+  width: auto;
+  height: 2rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-option-controls {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.settings-option-controls button {
+  width: 30px;
+  height: 32px;
+}
+
+.settings-option-controls .settings-remove-action {
+  min-width: 68px;
+  min-height: 32px;
+  height: 32px;
+  padding-inline: 0.55rem;
+  font-size: 0.75rem;
+}
+
+.settings-option-add {
+  flex-wrap: nowrap;
+  min-width: 0;
+  padding-top: 0.3rem;
+}
+
+.settings-option-add h3 {
+  flex: 0 0 auto;
+}
+
+.settings-option-add .cell-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 2rem;
+}
+
+.settings-option-add .btn {
+  flex: 0 0 auto;
+  height: 2rem;
+}
+
+.settings-options-filter {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-list > li[data-dragging="true"] {
+  opacity: 0.22;
+  border-color: rgba(13, 17, 23, 0.22);
+  background: rgba(201, 206, 211, 0.3);
+}
+
+.settings-drag-handle {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: 0 0 1.7rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--steel);
+  cursor: grab;
+  touch-action: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  transition:
+    color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.settings-drag-handle:hover,
+.settings-drag-handle:focus-visible {
+  color: var(--ink);
+  background: var(--signal-soft);
+  outline: none;
+  transform: scale(1.06);
+}
+
+.settings-drag-handle:focus-visible {
+  box-shadow: 0 0 0 2px var(--signal-ring-strong);
+}
+
+.settings-row-ghost {
+  position: fixed;
+  z-index: 65;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid rgba(13, 17, 23, 0.2);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+  will-change: transform;
+  transform-origin: 50% 50%;
+  transition:
+    box-shadow var(--t-mid) var(--ease),
+    filter var(--t-mid) var(--ease);
+}
+
+.settings-row-ghost[data-lifted="true"] {
+  box-shadow: var(--shadow-drag);
+  filter: saturate(1.04);
+}
+
+.is-dragging-setting,
+.is-dragging-setting * {
+  cursor: grabbing !important;
+  user-select: none;
 }
 
 .settings-list-label {
@@ -2855,24 +3442,93 @@ button.jobcard-thumb:focus-visible {
   font-weight: 600;
 }
 
+.settings-width {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--steel);
+  white-space: nowrap;
+}
+
+.settings-width-input {
+  width: 4.25rem;
+  padding: 0.2rem 0.35rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.74rem;
+}
+
+.settings-width-unit {
+  color: var(--steel-soft);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
 .settings-reorder {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.2rem;
 }
 
 .settings-reorder button {
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 36px;
+  height: 36px;
   border-radius: 0.35rem;
   border: 1px solid var(--rule);
   background: #fff;
   cursor: pointer;
   font-weight: 700;
+  transition:
+    color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.settings-reorder button:not(:disabled):hover {
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+  transform: translateY(-1px);
 }
 
 .settings-reorder button:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+.settings-remove-action,
+.settings-reorder .settings-remove-action {
+  width: auto;
+  min-width: 80px;
+  min-height: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding-inline: 0.75rem;
+  overflow: visible;
+}
+
+.settings-remove-action:hover:not(:disabled),
+.settings-reorder .settings-remove-action:hover:not(:disabled) {
+  color: #fff;
+  background: var(--stop);
+  border-color: var(--stop);
+}
+
+.settings-remove-action:focus-visible,
+.settings-reorder .settings-remove-action:focus-visible {
+  border-color: var(--stop);
+  box-shadow: 0 0 0 3px rgba(200, 30, 43, 0.2);
+}
+
+.settings-remove-action:disabled,
+.settings-reorder .settings-remove-action:disabled {
+  color: var(--stop);
+  background: rgba(200, 30, 43, 0.04);
+  border-color: rgba(200, 30, 43, 0.25);
 }
 
 .settings-add {
@@ -2958,19 +3614,28 @@ button.jobcard-thumb:focus-visible {
 .settings-preview {
   position: sticky;
   top: 0.75rem;
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
-  padding: 0.85rem;
+  padding: 0.85rem 0.85rem 1.35rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-height: calc(100vh - 2rem);
+  /* Its own scrollport ends above whatever the page is reserving below it. */
+  max-height: calc(100vh - 1.5rem - var(--settings-dock-clearance));
   overflow: auto;
+  scroll-padding-bottom: 1.35rem;
+  box-shadow: var(--shadow-card);
+  transition:
+    box-shadow var(--t-mid) var(--ease),
+    border-color var(--t-fast) var(--ease);
 }
 
 .settings-preview-head h2 {
   margin: 0;
+  padding-left: 0.55rem;
+  border-left: 2px solid var(--signal);
   font-size: 1rem;
 }
 
@@ -2994,12 +3659,25 @@ button.jobcard-thumb:focus-visible {
   color: var(--ink-soft);
 }
 
-.settings-preview-card {
-  max-width: 22rem;
+/* The preview pane is narrower than the drawer, and a narrower card is a
+   different card: its container queries would answer at another size step and
+   labels would wrap where the real ones do not. So the card keeps the width it
+   has in the drawer and the stage scales the whole thing down to fit. JS sets
+   the scale and the stage's height, which the transform no longer reports. */
+.card-stage {
+  /* clip, not hidden: the card is wider than the stage in layout terms even
+     though the transform paints it inside, and hidden would make that a real
+     scroll container */
+  overflow: clip;
 }
 
-.settings-preview-row {
-  display: contents;
+.card-stage-inner {
+  width: var(--drawer-card-w);
+  transform: scale(var(--card-stage-scale, 1));
+  transform-origin: top left;
+  /* only reachable once the pane is wider than the card; below that the scale
+     is what makes it fit and there is no slack left to centre */
+  margin-inline: auto;
 }
 
 .settings-preview-chips,
@@ -3020,12 +3698,39 @@ button.jobcard-thumb:focus-visible {
   color: var(--tone, var(--ink));
   background: color-mix(in srgb, var(--tone, var(--ink)) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--tone, var(--ink)) 35%, transparent);
+  transition:
+    color var(--t-mid) var(--ease),
+    background var(--t-mid) var(--ease),
+    border-color var(--t-mid) var(--ease);
 }
 
 .settings-preview-dash {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.settings-preview-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+
+.settings-preview-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 1.55rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--steel);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .settings-preview-dash span {
@@ -3036,6 +3741,10 @@ button.jobcard-thumb:focus-visible {
   padding: 0.3rem 0.45rem;
   border-bottom: 2px solid var(--rule);
   color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .settings-preview-kanban {
@@ -3050,6 +3759,9 @@ button.jobcard-thumb:focus-visible {
   background: rgba(255, 255, 255, 0.9);
   min-width: 0;
   overflow: hidden;
+  transition:
+    border-color var(--t-mid) var(--ease),
+    box-shadow var(--t-mid) var(--ease);
 }
 
 .settings-preview-kcol header {
@@ -3086,14 +3798,193 @@ button.jobcard-thumb:focus-visible {
 }
 
 .settings-leave-hint {
-  align-self: flex-start;
   font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .muted {
   color: var(--ink-soft);
   font-size: 0.85rem;
   margin: 0;
+}
+
+/* ---------------- traveler packet ---------------- */
+.traveler-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.traveler-hint {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.traveler-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.traveler-meta strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.traveler-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+
+.traveler-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--rule);
+  background: linear-gradient(180deg, #f7fafc, #eef3f7);
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+.traveler-progress .btn {
+  flex: none;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.traveler-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--go);
+}
+
+.traveler-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem 0.65rem;
+}
+
+.traveler-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--steel);
+  min-width: 0;
+}
+
+.traveler-grid .traveler-span {
+  grid-column: 1 / -1;
+}
+
+.scrim.traveler-preview-scrim {
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+
+.traveler-preview-dialog {
+  position: relative;
+  width: min(92vw, 1200px);
+  height: 90vh;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 30px 80px -28px rgba(9, 12, 16, 0.85);
+  animation: viewer-in var(--t-mid) var(--ease) both;
+}
+
+.traveler-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.4rem 2.8rem 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+}
+
+.traveler-preview-head strong {
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  letter-spacing: -0.02em;
+}
+
+.traveler-preview-head .btn {
+  flex: none;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.traveler-preview-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #e8edf2;
+}
+
+.traveler-preview-loading {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-content: center;
+  gap: 0.35rem;
+  text-align: center;
+  background: linear-gradient(180deg, #eef2f6, #e4ebf2);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.traveler-preview-loading .muted {
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.traveler-preview-footnote {
+  flex: none;
+  padding: 0.35rem 0.75rem;
+  border-top: 1px solid var(--rule);
+  background: linear-gradient(180deg, #fdfefe, #f3f6f8);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 640px) {
+  .traveler-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .traveler-preview-dialog {
+    width: calc(100vw - 0.75rem);
+    height: calc(100vh - 0.75rem);
+    height: calc(100dvh - 0.75rem);
+  }
+
+  .traveler-preview-footnote {
+    display: none;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -3103,6 +3994,38 @@ button.jobcard-thumb:focus-visible {
   .settings-preview {
     position: static;
     max-height: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .settings-save-dock,
+  .settings-saved-toast {
+    right: 0.875rem;
+    left: 0.875rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .settings-page[data-dirty="true"] {
+    --settings-dock-clearance: calc(9rem + env(safe-area-inset-bottom));
+  }
+  .settings-save-dock {
+    width: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    border-radius: var(--radius);
+    border-left-width: 1px;
+    border-top: 3px solid var(--signal);
+    padding: 0.6rem;
+  }
+  .settings-dirty {
+    flex: 1 0 100%;
+  }
+  .settings-actions {
+    width: 100%;
+  }
+  .settings-actions .btn {
+    flex: 1;
   }
 }
 

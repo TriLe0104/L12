@@ -108,7 +108,7 @@ def modifier(po):
 _, po = call("POST", "/api/purchase-orders", {
     "job_no": JOB, "po_number": "SMOKEACT", "part_number": "SMK-ACT", "qty": 3,
     "due_date": DUE, "note": "baseline note", "customer": "Smoke Co",
-    "status": "new", "priority": "normal", "inspection": "standard", "hardware": False,
+    "status": "need_material_size", "priority": "normal", "inspection": "standard", "hardware": False,
 }, admin_tok)
 pid = po["id"]
 base = row()
@@ -162,7 +162,7 @@ patch("empty payload", {})
 patch("whitespace around a string", {"note": "  baseline note  "})
 patch("null vs empty string", {"material": "", "dims": None, "finish": ""})
 patch("number back as a string", {"qty": "3"})
-patch("enum by value not member", {"status": "new", "priority": "normal",
+patch("enum by value not member", {"status": "need_material_size", "priority": "normal",
                                    "inspection": "standard"})
 patch("date as a timestamp", {"due_date": f"{DUE}T00:00:00"})
 patch("derived stage re-sent", {"stage": "pending"})
@@ -191,11 +191,11 @@ check("modified follows a real edit", modifier(moved).startswith("Smoke Auditor"
       f"{base['updated_at']} at create")
 
 print("\ndedicated lines -- one each, and none on an echo")
-patch("status changed", {"status": "in_machining"}, expect=1,
-      action=["Status changed"], detail=["new -> in_machining"])
-patch("  same status again", {"status": "in_machining"})
+patch("status changed", {"status": "running"}, expect=1,
+      action=["Status changed"], detail=["need_material_size -> running"])
+patch("  same status again", {"status": "running"})
 patch("stage moved", {"stage": "completed"}, expect=1, action=["Status changed"],
-      detail=["in_machining -> ready_to_ship"])
+      detail=["running -> ready_to_ship"])
 patch("  same stage again", {"stage": "completed"})
 patch("due date moved", {"due_date": LATER}, expect=1, action=["Due date moved"],
       detail=[f"{DUE} -> {LATER}"])

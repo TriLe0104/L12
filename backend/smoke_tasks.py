@@ -53,7 +53,7 @@ def main() -> None:
             "qty": 8,
             "due_date": (date.today() + timedelta(days=20)).isoformat(),
             "material": "AL 6061-T651, Plate",
-            "status": "new",
+            "status": "need_material_size",
             "thumbnail_url": up["url"],
         },
         token,
@@ -65,9 +65,9 @@ def main() -> None:
         print(f"MOVE      -> {stage:<12} status={moved['status_label']:<14} stage={moved['stage']}")
 
     # a card already in the target column keeps its exact status
-    _, moved = call("PATCH", f"/api/purchase-orders/{po['id']}", {"status": "wait_vqc"}, token)
+    _, moved = call("PATCH", f"/api/purchase-orders/{po['id']}", {"status": "ready_to_plate"}, token)
     _, same = call("PATCH", f"/api/purchase-orders/{po['id']}", {"stage": "in_progress"}, token)
-    print(f"KEEP      wait_vqc stays {same['status_label']} in {same['stage']}")
+    print(f"KEEP      ready_to_plate stays {same['status_label']} in {same['stage']}")
 
     for stage in ("pending", "on_hold", "in_progress", "completed"):
         _, items = call("GET", f"/api/purchase-orders?stage={stage}", None, token)

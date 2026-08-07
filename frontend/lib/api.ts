@@ -146,6 +146,47 @@ export const api = {
       "/api/uploads/model",
       file,
     ),
+
+  /** Merged traveler field map for the editable packet editor. */
+  getTraveler: (poId: string) =>
+    request<{
+      fields: Record<string, string | number | null>;
+      saved: Record<string, string | number | null> | null;
+    }>(`/api/purchase-orders/${poId}/traveler`),
+
+  /** Persist traveler_draft JSON on the PO (editor floor). */
+  saveTraveler: (poId: string, fields: Record<string, string | number | null>) =>
+    request<{
+      fields: Record<string, string | number | null>;
+      saved: Record<string, string | number | null> | null;
+    }>(`/api/purchase-orders/${poId}/traveler`, {
+      method: "PUT",
+      body: JSON.stringify({ fields }),
+    }),
+
+  /** Silent preview fetch (no activity). */
+  previewTraveler: (poId: string, fmt: PacketFmt, init?: { signal?: AbortSignal }) =>
+    fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}`, fmt, {
+      method: "GET",
+      signal: init?.signal,
+    }),
+
+  /** Download packet and record “Traveler generated”. */
+  generateTraveler: (
+    poId: string,
+    fmt: PacketFmt,
+    body?: {
+      fields?: Record<string, string | number | null>;
+      persist?: boolean;
+    },
+    init?: { signal?: AbortSignal },
+  ) =>
+    fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}`, fmt, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+      headers: { "Content-Type": "application/json" },
+      signal: init?.signal,
+    }),
 };
 
 /** Multipart upload. Deliberately not routed through `request`, which forces a
@@ -170,4 +211,75 @@ async function postFile<T>(path: string, file: File): Promise<T> {
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as T;
+}
+
+export type PacketFmt = "pdf" | "docx" | "xlsx";
+
+/** Word / Excel only open these files when the MIME type matches the extension. */
+const PACKET_MIME: Record<PacketFmt, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      return star[1].trim();
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain?.[1]?.trim() || null;
+}
+
+/** The extension drives what the OS opens the download with, so it must always
+ *  match the requested format even when the server name is missing or odd. */
+function packetFilename(served: string | null, fmt: PacketFmt): string {
+  const base = served?.split(/[\\/]/).pop()?.trim();
+  if (!base) return `traveler.${fmt}`;
+  return base.toLowerCase().endsWith(`.${fmt}`) ? base : `${base}.${fmt}`;
+}
+
+/** Binary traveler / export downloads. */
+async function fetchBinary(
+  path: string,
+  fmt: PacketFmt,
+  init: RequestInit = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = typeof body.detail === "string" ? body.detail : detail;
+    } catch {
+      /* non-json error */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const raw = await res.blob();
+  const servedType = res.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase();
+  const type =
+    servedType && servedType !== "application/octet-stream"
+      ? servedType
+      : PACKET_MIME[fmt];
+  const blob = raw.type === type ? raw : new Blob([raw], { type });
+  // Cross-origin reads need Access-Control-Expose-Headers: Content-Disposition;
+  // fall back to a format-correct name rather than an unopenable one.
+  const filename = packetFilename(
+    filenameFromDisposition(res.headers.get("Content-Disposition")),
+    fmt,
+  );
+  return { blob, filename };
 }

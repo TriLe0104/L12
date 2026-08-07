@@ -115,18 +115,15 @@ class PurchaseOrder(Base):
     material: Mapped[str | None] = mapped_column(String(160), nullable=True)  # AL 6061-T651, Plate
     finish: Mapped[str | None] = mapped_column(String(200), nullable=True)    # CLEAR ANODIZE; CHEM FILM GOLD
 
-    # process
-    inspection: Mapped[Inspection] = mapped_column(
-        Enum(Inspection, native_enum=False), default=Inspection.STANDARD
-    )
+    # process — inspection / priority are plain strings so Admin can extend the
+    # published selectionLists without an enum migration (same pattern as status).
+    inspection: Mapped[str] = mapped_column(String(40), default=Inspection.STANDARD.value)
     hardware: Mapped[bool] = mapped_column(Boolean, default=False)
     # Stored as a plain string so Admin-defined statuses can land without an
     # enum migration. Seeded / day-one values match POStatus members. Values
     # are the lowercase keys (`need_material_size`), not member names — see migrations.REPAIRS.
-    status: Mapped[str] = mapped_column(String(40), default=POStatus.NEW.value, index=True)
-    priority: Mapped[Priority] = mapped_column(
-        Enum(Priority, native_enum=False), default=Priority.NORMAL, index=True
-    )
+    status: Mapped[str] = mapped_column(String(40), default=POStatus.NEED_MATERIAL_SIZE.value, index=True)
+    priority: Mapped[str] = mapped_column(String(40), default=Priority.NORMAL.value, index=True)
     # while set, only an admin may change the row -- including clearing it
     locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -138,6 +135,11 @@ class PurchaseOrder(Base):
     # Admin-defined attributes. Removing a custom field from board settings
     # hides it from the UI; values already written here are left alone.
     custom_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Editable traveler packet overrides (work order / program / Word fields).
+    # Merged over live PO values when generating PDF/DOCX/XLSX. Does not move
+    # Modified — traveler generate activity is excluded from that derivation.
+    traveler_draft: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates
@@ -182,7 +184,14 @@ class PurchaseOrder(Base):
 
     @property
     def priority_label(self) -> str:
-        return PRIORITY_META[self.priority]["label"]
+        overlay = getattr(self, "_priority_label", None)
+        if overlay:
+            return overlay
+        key = self.priority if isinstance(self.priority, str) else getattr(self.priority, "value", str(self.priority))
+        try:
+            return PRIORITY_META[Priority(str(key).casefold())]["label"]
+        except (KeyError, ValueError):
+            return str(key).replace("_", " ").upper()
 
 
 class BoardSettings(Base):

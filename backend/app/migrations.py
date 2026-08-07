@@ -13,11 +13,12 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-# NOTE: SQLAlchemy's Enum(..., native_enum=False) persists the member *name*
-# ("NORMAL"), not its value ("normal"), so defaults here must be upper case.
+# NOTE: Role still uses Enum(..., native_enum=False) which persists member
+# *names* ("MANAGER"). Priority / inspection are plain lowercase strings now
+# (`hot`, `standard`); see REPAIRS below.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "purchase_orders": {
-        "priority": "VARCHAR(20) NOT NULL DEFAULT 'NORMAL'",
+        "priority": "VARCHAR(20) NOT NULL DEFAULT 'normal'",
         # SQLite has no boolean type; `hardware` is a BOOLEAN column holding 0/1
         "locked": "BOOLEAN NOT NULL DEFAULT 0",
         # the 3D model slot, alongside `thumbnail_url` rather than replacing it.
@@ -27,6 +28,8 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "model_size": "INTEGER",
         # Admin-defined attributes; JSON object keyed by custom field key.
         "custom_fields": "JSON",
+        # Editable traveler packet field overrides (nullable JSON object).
+        "traveler_draft": "JSON",
     },
     "users": {
         "avatar_url": "VARCHAR(500)",
@@ -35,16 +38,31 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
 
 # Idempotent data repairs applied after the column work.
 REPAIRS: list[str] = [
-    "UPDATE purchase_orders SET priority = UPPER(priority) WHERE priority <> UPPER(priority)",
+    # Priority / inspection are lowercase wire values (`hot`, `standard`). Older
+    # Enum(..., native_enum=False) rows stored member NAMES (`NORMAL`, `STANDARD`).
+    "UPDATE purchase_orders SET priority = LOWER(priority) WHERE priority <> LOWER(priority)",
+    "UPDATE purchase_orders SET inspection = LOWER(inspection) WHERE inspection <> LOWER(inspection)",
     # Role hierarchy change (Admin > Manager > User > Viewer): the retired `pjm` and
     # `pm` rungs both collapse into `manager`. Rows still holding the old strings
     # would fail to deserialize into the new enum, so this has to run before the app
     # reads a user -- it does, from the lifespan hook. Upper case per the note above.
     "UPDATE users SET role = UPPER(role) WHERE role <> UPPER(role)",
     "UPDATE users SET role = 'MANAGER' WHERE role IN ('PJM', 'PM')",
-    # Board settings stores status as lowercase keys (`new`). The old Enum column
-    # persisted member NAMES (`NEW`); normalise so both shapes keep working.
+    # Board settings stores status as lowercase keys (`need_material_size`). The old
+    # Enum column persisted member NAMES (`NEW`); normalise so both shapes keep working.
     "UPDATE purchase_orders SET status = LOWER(status) WHERE status <> LOWER(status)",
+    # v2 shop-floor catalog — rewrite retired keys before board_settings validation
+    # can refuse to drop them. Idempotent; Python repair in board_service covers
+    # aliases / case the SQL misses.
+    "UPDATE purchase_orders SET status = 'need_material_size' WHERE status IN ('new')",
+    "UPDATE purchase_orders SET status = 'order_material' WHERE status IN ('rfq_finishing')",
+    "UPDATE purchase_orders SET status = 'material_incoming' WHERE status IN ('await_material')",
+    "UPDATE purchase_orders SET status = 'waiting_setup' WHERE status IN ('on_hold')",
+    "UPDATE purchase_orders SET status = 'running' WHERE status IN ('in_machining')",
+    "UPDATE purchase_orders SET status = 'deburr' WHERE status IN ('finishing')",
+    "UPDATE purchase_orders SET status = 'inspection' WHERE status IN ('under_inspection')",
+    "UPDATE purchase_orders SET status = 'ready_to_plate' WHERE status IN ('wait_vqc')",
+    "UPDATE purchase_orders SET status = 'ready_to_ship' WHERE status IN ('shipped')",
 ]
 
 

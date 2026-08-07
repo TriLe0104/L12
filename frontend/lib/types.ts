@@ -18,15 +18,19 @@ export const ROLES_HIGH_TO_LOW: Role[] = [...ROLE_ORDER].reverse();
 
 export type POStatus = string;
 
-export type Inspection = "formal" | "standard" | "source" | "none";
+export type Inspection = string;
 
 /** Kanban column key — day-one values match the old Stage enum. */
 export type Stage = string;
 
-export type Priority = "hot" | "high" | "normal" | "low";
+export type Priority = string;
 
-/** highest urgency first — used for sorting and for ordering the picker */
+/** highest urgency first — day-one seed; prefer board settings selectionLists.priority */
 export const PRIORITY_ORDER: Priority[] = ["hot", "high", "normal", "low"];
+
+export const INSPECTION_ORDER: Inspection[] = ["formal", "standard", "source", "none"];
+
+export const HARDWARE_ORDER = ["no", "yes"] as const;
 
 export interface OwnerBrief {
   id: string;
@@ -79,6 +83,8 @@ export interface PurchaseOrder {
   owner: OwnerBrief | null;
   /** Admin-defined attributes; keys match board settings customFields. */
   custom_fields: Record<string, string | number | null> | null;
+  /** Editable traveler packet overrides persisted on the PO. */
+  traveler_draft?: Record<string, string | number | null> | null;
   created_at: string;
   updated_at: string;
   /** Null only when no attributable change to the order exists in the trail. */

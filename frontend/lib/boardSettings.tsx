@@ -39,6 +39,39 @@ const BoardSettingsContext = createContext<BoardSettingsState>({
   statusByKey: new Map(),
 });
 
+/** The projections every consumer reads instead of the raw document. Shared so
+ *  a preview drawn against a draft sees exactly what the board sees. */
+function useBoardProjections(document: BoardDocument | null) {
+  const statuses = useMemo<StatusMeta[]>(
+    () =>
+      (document?.statuses ?? []).map((s) => ({
+        value: s.key as StatusMeta["value"],
+        label: s.label,
+        tone: s.tone,
+      })),
+    [document],
+  );
+
+  const stages = useMemo<StageMeta[]>(
+    () =>
+      (document?.kanbanColumns ?? []).map((c) => ({
+        value: c.key as StageMeta["value"],
+        label: c.label,
+        tone: c.tone,
+        statuses: c.statusKeys as StageMeta["statuses"],
+      })),
+    [document],
+  );
+
+  const statusByKey = useMemo(() => {
+    const map = new Map<string, StatusConfig>();
+    for (const s of document?.statuses ?? []) map.set(s.key, s);
+    return map;
+  }, [document]);
+
+  return { statuses, stages, statusByKey };
+}
+
 export function BoardSettingsProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<BoardSettings | null>(null);
@@ -69,33 +102,7 @@ export function BoardSettingsProvider({ children }: { children: ReactNode }) {
   }, [authLoading, refresh]);
 
   const document = settings?.document ?? null;
-
-  const statuses = useMemo<StatusMeta[]>(
-    () =>
-      (document?.statuses ?? []).map((s) => ({
-        value: s.key as StatusMeta["value"],
-        label: s.label,
-        tone: s.tone,
-      })),
-    [document],
-  );
-
-  const stages = useMemo<StageMeta[]>(
-    () =>
-      (document?.kanbanColumns ?? []).map((c) => ({
-        value: c.key as StageMeta["value"],
-        label: c.label,
-        tone: c.tone,
-        statuses: c.statusKeys as StageMeta["statuses"],
-      })),
-    [document],
-  );
-
-  const statusByKey = useMemo(() => {
-    const map = new Map<string, StatusConfig>();
-    for (const s of document?.statuses ?? []) map.set(s.key, s);
-    return map;
-  }, [document]);
+  const { statuses, stages, statusByKey } = useBoardProjections(document);
 
   const value = useMemo(
     () => ({
@@ -111,6 +118,35 @@ export function BoardSettingsProvider({ children }: { children: ReactNode }) {
     [settings, document, loading, error, refresh, statuses, stages, statusByKey],
   );
 
+  return (
+    <BoardSettingsContext.Provider value={value}>{children}</BoardSettingsContext.Provider>
+  );
+}
+
+/** Draws a subtree against a document that is not the saved one. The settings
+ *  page uses this to render the real card components against the admin's draft,
+ *  so the live preview cannot drift from the card it is previewing. */
+export function BoardSettingsScope({
+  document,
+  children,
+}: {
+  document: BoardDocument;
+  children: ReactNode;
+}) {
+  const { statuses, stages, statusByKey } = useBoardProjections(document);
+  const value = useMemo<BoardSettingsState>(
+    () => ({
+      settings: null,
+      document,
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      statuses,
+      stages,
+      statusByKey,
+    }),
+    [document, statuses, stages, statusByKey],
+  );
   return (
     <BoardSettingsContext.Provider value={value}>{children}</BoardSettingsContext.Provider>
   );

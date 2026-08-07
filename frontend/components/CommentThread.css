@@ -190,7 +190,7 @@
 
 .dash-comment-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(245, 168, 0, 0.55);
+  box-shadow: 0 0 0 2px var(--signal-ring-strong);
 }
 
 .dash-comment-btn[data-has="true"] {

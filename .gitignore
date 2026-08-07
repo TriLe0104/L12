@@ -10,6 +10,9 @@ __pycache__/
 # uploaded part images
 backend/uploads/
 
+# traveler Office PDF render cache
+backend/.cache/
+
 # node
 node_modules/
 .next/

@@ -4,9 +4,7 @@ from sqlalchemy.orm import Session
 from .. import board_service
 from ..db import get_db
 from ..models import (
-    PRIORITY_META,
     ROLE_RANK,
-    Inspection,
     role_label,
     roles_high_to_low,
 )
@@ -16,11 +14,9 @@ router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
 @router.get("/priorities", response_model=list[StatusMeta])
-def priorities() -> list[StatusMeta]:
-    return [
-        StatusMeta(value=priority.value, label=meta["label"], tone=meta["tone"])
-        for priority, meta in PRIORITY_META.items()
-    ]
+def priorities(db: Session = Depends(get_db)) -> list[StatusMeta]:
+    doc = board_service.get_document(db)
+    return [StatusMeta(**row) for row in board_service.priorities_for_meta(doc)]
 
 
 @router.get("/stages", response_model=list[StageMeta])
@@ -47,5 +43,6 @@ def roles() -> list[RoleMeta]:
 
 
 @router.get("/inspections")
-def inspections() -> list[dict[str, str]]:
-    return [{"value": i.value, "label": i.value.upper()} for i in Inspection]
+def inspections(db: Session = Depends(get_db)) -> list[dict[str, str]]:
+    doc = board_service.get_document(db)
+    return board_service.inspections_for_meta(doc)

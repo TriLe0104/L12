@@ -26,6 +26,8 @@ const DERIVED: ReadonlySet<string> = new Set([
   // server-derived list metadata — never form fields; must not trip the prompt
   "last_modified",
   "comment_count",
+  // traveler packet edits use a dedicated panel + API, not the card Save
+  "traveler_draft",
 ]);
 
 type Flat = string | number | boolean;

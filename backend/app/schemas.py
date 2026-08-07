@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Inspection, Priority, Role
+from .models import Role
 
 
 class ORMModel(BaseModel):
@@ -59,11 +59,11 @@ class POBase(BaseModel):
     mat_dim: str | None = None
     material: str | None = None
     finish: str | None = None
-    inspection: Inspection = Inspection.STANDARD
+    inspection: str = "standard"
     hardware: bool = False
     # Status key from the published board catalog (day-one: POStatus values).
-    status: str = "new"
-    priority: Priority = Priority.NORMAL
+    status: str = "need_material_size"
+    priority: str = "normal"
     customer: str | None = None
     note: str | None = None
     thumbnail_url: str | None = None
@@ -89,10 +89,10 @@ class POUpdate(BaseModel):
     mat_dim: str | None = None
     material: str | None = None
     finish: str | None = None
-    inspection: Inspection | None = None
+    inspection: str | None = None
     hardware: bool | None = None
     status: str | None = None
-    priority: Priority | None = None
+    priority: str | None = None
     locked: bool | None = None
     # Setting a stage moves the card between kanban columns; it resolves to that
     # column's default status unless the current status already sits in the column.
@@ -148,12 +148,12 @@ class POOut(ORMModel):
     mat_dim: str | None
     material: str | None
     finish: str | None
-    inspection: Inspection
+    inspection: str
     hardware: bool
     status: str
     status_label: str
     stage: str
-    priority: Priority
+    priority: str
     priority_label: str
     locked: bool
     customer: str | None
@@ -164,6 +164,8 @@ class POOut(ORMModel):
     model_size: int | None
     owner: OwnerBrief | None
     custom_fields: dict[str, str | int | float | None] | None = None
+    # Editable traveler packet overrides; merged over live PO values on generate.
+    traveler_draft: dict[str, str | int | float | None] | None = None
     created_at: datetime
     updated_at: datetime
     # Absent unless the route bothered to derive it; the list and every write
@@ -173,6 +175,26 @@ class POOut(ORMModel):
     # the dashboard badge never N+1s. Comments are not activity and never move
     # `last_modified`.
     comment_count: int = 0
+
+
+class TravelerDraftOut(BaseModel):
+    """Merged traveler field map ready for the editor / packet fill."""
+
+    fields: dict[str, str | int | float | None]
+    saved: dict[str, str | int | float | None] | None = None
+
+
+class TravelerDraftUpdate(BaseModel):
+    """Persist editable traveler overrides onto the PO (`traveler_draft` JSON)."""
+
+    fields: dict[str, str | int | float | None]
+
+
+class TravelerGenerateBody(BaseModel):
+    """Optional field overrides when downloading a packet; may also persist."""
+
+    fields: dict[str, str | int | float | None] | None = None
+    persist: bool = False
 
 
 # ---------- comments ----------

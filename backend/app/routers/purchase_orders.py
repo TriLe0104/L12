@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import enum
+import time
 from collections.abc import Sequence
 from datetime import date
+from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from sqlalchemy import case, func
 
 from .. import board_service
+from .. import traveler as traveler_svc
 from ..db import get_db
 from ..models import (
-    PRIORITY_RANK,
     Activity,
     POComment,
-    Priority,
     PurchaseOrder,
     User,
     has_rank,
@@ -32,6 +35,9 @@ from ..schemas import (
     POCreate,
     POOut,
     POUpdate,
+    TravelerDraftOut,
+    TravelerDraftUpdate,
+    TravelerGenerateBody,
 )
 from ..security import (
     EDITOR_FLOOR,
@@ -129,6 +135,9 @@ def _attach_last_modified(db: Session, pos: Sequence[PurchaseOrder]) -> None:
             Activity.entity_type == "purchase_order",
             Activity.entity_id.in_(ids),
             Activity.actor_id.is_not(None),
+            # Traveler generate (and any future non-modifying actions) must not
+            # move the dashboard Modified column.
+            Activity.action.notin_(tuple(traveler_svc.NON_MODIFYING_ACTIONS)),
         )
         .subquery()
     )
@@ -304,7 +313,7 @@ def list_pos(
     end: date | None = Query(None, description="due_date <= end"),
     status_in: list[str] | None = Query(None, alias="status"),
     stage: str | None = None,
-    priority: Priority | None = None,
+    priority: str | None = None,
     owner_id: str | None = None,
     q: str | None = Query(None, description="search job / PO / part / material"),
     sort: str = Query(
@@ -330,7 +339,7 @@ def list_pos(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown stage {stage!r}")
         stmt = stmt.where(PurchaseOrder.status.in_(list(members)))
     if priority:
-        stmt = stmt.where(PurchaseOrder.priority == priority)
+        stmt = stmt.where(PurchaseOrder.priority == priority.casefold())
     if owner_id:
         stmt = stmt.where(PurchaseOrder.owner_id == owner_id)
     if q:
@@ -344,10 +353,11 @@ def list_pos(
                 PurchaseOrder.customer.ilike(like),
             )
         )
-    # rank column so "hot" sorts above "low" instead of alphabetically
+    # Rank from published priority options order (hot-first day-one seed).
+    prio_opts = board_service.field_options(db=db, field_key="priority")
     rank = case(
-        *[(PurchaseOrder.priority == p, r) for p, r in PRIORITY_RANK.items()],
-        else_=len(PRIORITY_RANK),
+        *[(PurchaseOrder.priority == opt.casefold(), i) for i, opt in enumerate(prio_opts)],
+        else_=len(prio_opts) + 1,
     )
     order = {
         "due_asc": (PurchaseOrder.due_date.asc(), rank.asc()),
@@ -378,9 +388,17 @@ def create_po(
             f"Due date cannot be in the past; pick {today.isoformat()} or later",
         )
     _assert_known_status(db, payload.status)
+    board_service.assert_known_material(db, payload.material)
+    board_service.assert_known_inspection(db, payload.inspection)
+    board_service.assert_known_priority(db, payload.priority)
+    board_service.assert_known_custom_selects(db, payload.custom_fields)
     data = payload.model_dump()
     if data.get("custom_fields") is None:
         data["custom_fields"] = {}
+    if isinstance(data.get("inspection"), str):
+        data["inspection"] = data["inspection"].strip().casefold()
+    if isinstance(data.get("priority"), str):
+        data["priority"] = data["priority"].strip().casefold()
     po = PurchaseOrder(**data)
     # No owner field at all means "mine", the old behaviour. An explicit null is
     # the picker saying Unassigned, and has to survive rather than snap back to
@@ -460,6 +478,19 @@ def update_po(
     # trail honest: pressing Save on an untouched order used to name whoever
     # pressed it in the dashboard's Modified column for a change nobody made.
     changed = {field: value for field, value in changes.items() if _differs(po, field, value)}
+
+    if "material" in changed:
+        board_service.assert_known_material(db, changed.get("material"))
+    if "inspection" in changed:
+        board_service.assert_known_inspection(db, changed.get("inspection"))
+        if isinstance(changed.get("inspection"), str):
+            changed["inspection"] = changed["inspection"].strip().casefold()
+    if "priority" in changed:
+        board_service.assert_known_priority(db, changed.get("priority"))
+        if isinstance(changed.get("priority"), str):
+            changed["priority"] = changed["priority"].strip().casefold()
+    if "custom_fields" in changed:
+        board_service.assert_known_custom_selects(db, changed.get("custom_fields"))
 
     # Below editor floor, only a real status (or stage→status) move is allowed.
     # No-op echoes of other fields are already gone from `changed`, so a User
@@ -611,3 +642,172 @@ def delete_comment(
         )
     db.delete(comment)
     db.commit()
+
+
+# ---------- traveler packet ----------
+
+_TRAVELER_FORMATS = frozenset({"pdf", "docx", "xlsx", "excel", "zip"})
+
+
+def _load_po_for_traveler(db: Session, po_id: str) -> PurchaseOrder:
+    po = db.scalars(
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.owner))
+        .where(PurchaseOrder.id == po_id)
+    ).first()
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    board_service.apply_po_overlays(db, [po])
+    return po
+
+
+def _merged_traveler_fields(
+    db: Session,
+    po: PurchaseOrder,
+    actor: User,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base = traveler_svc.draft_from_po(db, po, actor=actor)
+    return traveler_svc.apply_draft_overrides(base, overrides)
+
+
+def _content_disposition(filename: str, *, inline: bool = False) -> str:
+    """RFC 6266 disposition with both the plain and UTF-8 encoded filename."""
+    disposition = "inline" if inline else "attachment"
+    ascii_name = filename.encode("ascii", "replace").decode("ascii").replace('"', "'")
+    return (
+        f'{disposition}; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(filename, safe='')}"
+    )
+
+
+def _traveler_file_response(
+    fmt: str,
+    fields: dict[str, Any],
+    *,
+    job_no: str,
+    po_id: str | None = None,
+    inline: bool = False,
+) -> Response:
+    try:
+        data, media, filename = traveler_svc.content_for_format(
+            fmt, fields, job_no=job_no, po_id=po_id
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": _content_disposition(filename, inline=inline)},
+    )
+
+
+@router.get("/{po_id}/traveler", response_model=TravelerDraftOut)
+def get_traveler(
+    po_id: str,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> TravelerDraftOut:
+    """Merged editable traveler fields. Any authenticated user."""
+    po = _load_po_for_traveler(db, po_id)
+    fields = traveler_svc.draft_from_po(db, po, actor=actor)
+    saved = po.traveler_draft if isinstance(po.traveler_draft, dict) else None
+    return TravelerDraftOut(fields=fields, saved=saved)
+
+
+@router.put("/{po_id}/traveler", response_model=TravelerDraftOut)
+def put_traveler(
+    po_id: str,
+    payload: TravelerDraftUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_editor),
+) -> TravelerDraftOut:
+    """Persist traveler field overrides on the PO. Does not write activity."""
+    po = _load_po_for_traveler(db, po_id)
+    _guard_locked(po, actor)
+    normalised = traveler_svc.normalize_draft(payload.fields)
+    po.traveler_draft = normalised or None
+    db.commit()
+    db.refresh(po)
+    fields = traveler_svc.draft_from_po(db, po, actor=actor)
+    return TravelerDraftOut(fields=fields, saved=po.traveler_draft)
+
+
+@router.get("/{po_id}/traveler/{fmt}")
+def preview_traveler(
+    po_id: str,
+    fmt: str,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> Response:
+    """Preview / silent file fetch — no activity row (use POST to record generate).
+
+    PDF preview and download share the same cached template-background overlay.
+    """
+    if fmt.lower() not in _TRAVELER_FORMATS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown format {fmt!r}")
+    po = _load_po_for_traveler(db, po_id)
+    fields = _merged_traveler_fields(db, po, actor)
+    if fmt.lower() == "pdf":
+        t0 = time.perf_counter()
+        try:
+            data, source = traveler_svc.build_preview_pdf(fields, po_id=po.id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        filename = traveler_svc.traveler_filename(fields, "pdf", job_no=po.job_no)
+        return Response(
+            content=data,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": _content_disposition(filename, inline=True),
+                "X-Traveler-Preview-Source": source,
+                "X-Traveler-Preview-Ms": str(elapsed_ms),
+            },
+        )
+    return _traveler_file_response(
+        fmt, fields, job_no=po.job_no, po_id=po.id, inline=True
+    )
+
+
+@router.post("/{po_id}/traveler/{fmt}")
+def generate_traveler(
+    po_id: str,
+    fmt: str,
+    payload: TravelerGenerateBody | None = None,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> Response:
+    """Download a filled traveler packet and record ``Traveler generated``.
+
+    Activity is excluded from Modified. Optional body may override fields and
+    persist them onto ``traveler_draft`` (editor floor + unlocked).
+    """
+    if fmt.lower() not in _TRAVELER_FORMATS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown format {fmt!r}")
+    po = _load_po_for_traveler(db, po_id)
+    body = payload or TravelerGenerateBody()
+    if body.persist:
+        if not has_rank(actor.role, EDITOR_FLOOR):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Requires {role_label(EDITOR_FLOOR).lower()} or above to save traveler draft",
+            )
+        _guard_locked(po, actor)
+        po.traveler_draft = traveler_svc.normalize_draft(body.fields) or None
+    fields = _merged_traveler_fields(db, po, actor, body.fields)
+    _log(
+        db,
+        actor,
+        "Traveler generated",
+        po,
+        f"{po.job_no} · {fmt.lower()} · by {actor.name}",
+    )
+    db.commit()
+    return _traveler_file_response(fmt, fields, job_no=po.job_no, po_id=po.id)

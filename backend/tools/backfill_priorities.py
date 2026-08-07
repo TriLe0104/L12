@@ -25,15 +25,15 @@ from app.models import Priority, PurchaseOrder  # noqa: E402
 def main() -> None:
     rng = random.Random(7)
     with SessionLocal() as db:
-        rows = list(db.scalars(select(PurchaseOrder).where(PurchaseOrder.priority == Priority.NORMAL)))
+        rows = list(db.scalars(select(PurchaseOrder).where(PurchaseOrder.priority == "normal")))
         for po in rows:
             po.priority = rng.choices(
-                [Priority.HOT, Priority.HIGH, Priority.NORMAL, Priority.LOW],
+                [Priority.HOT.value, Priority.HIGH.value, Priority.NORMAL.value, Priority.LOW.value],
                 weights=[1, 3, 5, 2],
             )[0]
         db.commit()
 
-        counts = Counter(p.priority.value for p in db.scalars(select(PurchaseOrder)))
+        counts = Counter(p.priority for p in db.scalars(select(PurchaseOrder)))
         print(f"updated {len(rows)} POs")
         for value in ("hot", "high", "normal", "low"):
             print(f"  {value:<7} {counts.get(value, 0)}")
