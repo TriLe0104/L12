@@ -75,7 +75,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(160))
     org: Mapped[str | None] = mapped_column(String(120), nullable=True)
     role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False), default=Role.VIEWER)
-    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_pending: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -130,7 +130,7 @@ class PurchaseOrder(Base):
     # context
     customer: Mapped[str | None] = mapped_column(String(120), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)  # "no dim change, just censoring"
-    thumbnail_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Admin-defined attributes. Removing a custom field from board settings
     # hides it from the UI; values already written here are left alone.
@@ -145,7 +145,7 @@ class PurchaseOrder(Base):
     # file exactly as uploaded -- no server-side conversion; the browser translates
     # CAD formats itself. Name and size ride along so the card can label the slot
     # without fetching the model.
-    model_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    model_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     model_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     model_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

@@ -1,17 +1,16 @@
-import mimetypes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .routers import auth, meta, purchase_orders, uploads, users
 from .routers import settings as settings_router
-from .routers.uploads import UPLOAD_DIR
 from .seed import seed
+from .storage import UPLOAD_DIR, object_storage_configured, serve_upload
 
 
 @asynccontextmanager
@@ -28,6 +27,8 @@ async def lifespan(app: FastAPI):
         board_service.ensure_row(db)
         if settings.seed_on_start:
             seed(db)
+    backend = "s3" if object_storage_configured() else "local"
+    print(f"uploads: backend={backend}")
     yield
 
 
@@ -58,21 +59,18 @@ app.include_router(uploads.router)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Starlette falls back to text/plain for extensions Python doesn't know, which is
-# actively wrong for a binary FBX or 3DM. Teach it the model types before the
-# static mount so the browser gets a truthful Content-Type.
-for _extension, _media_type in {
-    ".obj": "model/obj",
-    ".fbx": "application/octet-stream",
-    ".stp": "model/step",
-    ".step": "model/step",
-    ".3dm": "model/vnd.3dm",
-}.items():
-    mimetypes.add_type(_media_type, _extension)
 
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+@app.get("/uploads/{name}")
+def get_upload(name: str) -> Response:
+    # Local disk first, then the configured object store — so a free Render
+    # instance that just woke still has every file that survived in the bucket.
+    return serve_upload(name)
 
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "auth_provider": settings.auth_provider}
+    return {
+        "status": "ok",
+        "auth_provider": settings.auth_provider,
+        "uploads": "s3" if object_storage_configured() else "local",
+    }

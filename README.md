@@ -308,24 +308,36 @@ Handy one-offs in `backend/tools/`: `prune_users.py`, `set_primary_account.py`, 
 
 `Dockerfile.render` packages Next.js, FastAPI and nginx into one free Render web service. The
 browser uses one origin; nginx sends `/api` and `/uploads` to FastAPI and everything else to
-Next.js. Use a free Neon Postgres database so order and account data survives Render restarts.
+Next.js. Use a free Neon Postgres database so order and account data survives Render restarts,
+and a free Cloudflare R2 (S3-compatible) bucket so uploaded images and 3D models survive too.
 
 1. Push this repository to GitHub.
 2. Create a free Postgres project at https://neon.com and copy its connection string.
-3. In https://dashboard.render.com choose **New > Blueprint**, connect the repository and select
+3. Create a free R2 bucket at https://dash.cloudflare.com → **R2**:
+   - Create a bucket (any name).
+   - **Manage R2 API Tokens** → create a token with Object Read & Write on that bucket.
+   - Copy the **Account ID**, Access Key ID and Secret Access Key. The S3 API endpoint is
+     `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+   - Public access is optional. Leave the bucket private (recommended): the app serves
+     `/uploads/…` by streaming from R2. Or enable an **r2.dev** public subdomain and set
+     `S3_PUBLIC_BASE_URL` so the browser hits the CDN directly.
+4. In https://dashboard.render.com choose **New > Blueprint**, connect the repository and select
    `render.yaml`.
-4. Fill the prompted secrets:
+5. Fill the prompted secrets:
    - `DATABASE_URL`: the Neon connection string (generic `postgresql://` URLs are normalized to
      the installed psycopg 3 driver automatically).
    - `BOOTSTRAP_ADMIN_NAME` and `BOOTSTRAP_ADMIN_EMAIL`: the first administrator.
    - `BOOTSTRAP_ADMIN_PASSWORD`: a unique long password.
-5. Deploy, open the generated `onrender.com` URL and sign in with those bootstrap credentials.
-   The bootstrap values are used only while seeding an empty database.
+   - `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`: the R2 values
+     from step 3. `S3_REGION` defaults to `auto`. `S3_PUBLIC_BASE_URL` is optional.
+6. Deploy, open the generated `onrender.com` URL and sign in with those bootstrap credentials.
+   The bootstrap values are used only while seeding an empty database. `/api/health` reports
+   `"uploads": "s3"` when object storage is wired; `"local"` means files still die on sleep.
 
-The free Render filesystem is ephemeral. Database records persist in Neon, but uploaded images
-and 3D models disappear whenever the service restarts or redeploys. That is acceptable for a
-throwaway demo; durable uploads require object storage or a paid persistent disk. The free service
-also sleeps when idle, so the first request can take about a minute.
+Without the S3_* variables the free Render filesystem is ephemeral: Neon keeps the URL rows, but
+the bytes vanish on every idle wake and redeploy. The free service also sleeps when idle, so the
+first request can take about a minute.
 
-For production, use durable object storage, a production Postgres plan, SSO, and an always-on
+For production, keep object storage, use a production Postgres plan, SSO, and an always-on
 service. Set a custom domain and terminate HTTPS at the hosting platform.
+

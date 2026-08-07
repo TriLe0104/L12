@@ -23,7 +23,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "locked": "BOOLEAN NOT NULL DEFAULT 0",
         # the 3D model slot, alongside `thumbnail_url` rather than replacing it.
         # Plain nullable columns, so no enum-name caveat applies to these three.
-        "model_url": "VARCHAR(500)",
+        "model_url": "VARCHAR(1000)",
         "model_filename": "VARCHAR(255)",
         "model_size": "INTEGER",
         # Admin-defined attributes; JSON object keyed by custom field key.
@@ -32,9 +32,17 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "traveler_draft": "JSON",
     },
     "users": {
-        "avatar_url": "VARCHAR(500)",
+        "avatar_url": "VARCHAR(1000)",
     },
 }
+
+# Absolute object-storage URLs outgrow the original 500-char columns. Postgres
+# enforces the length; SQLite ignores it. Idempotent ALTER on every boot.
+WIDENED_COLUMNS: list[tuple[str, str, str]] = [
+    ("users", "avatar_url", "VARCHAR(1000)"),
+    ("purchase_orders", "thumbnail_url", "VARCHAR(1000)"),
+    ("purchase_orders", "model_url", "VARCHAR(1000)"),
+]
 
 # Idempotent data repairs applied after the column work.
 REPAIRS: list[str] = [
@@ -81,6 +89,23 @@ def run(engine: Engine) -> list[str]:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
                 applied.append(f"{table}.{column}")
+
+        if engine.dialect.name == "postgresql":
+            for table, column, ddl in WIDENED_COLUMNS:
+                if table not in existing_tables:
+                    continue
+                cols = {c["name"]: c for c in inspector.get_columns(table)}
+                col = cols.get(column)
+                if not col:
+                    continue
+                # SQLAlchemy reports VARCHAR length; skip when already wide enough.
+                length = getattr(col.get("type"), "length", None)
+                if isinstance(length, int) and length >= 1000:
+                    continue
+                conn.execute(
+                    text(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {ddl}")
+                )
+                applied.append(f"widened {table}.{column}")
 
         for statement in REPAIRS:
             result = conn.execute(text(statement))

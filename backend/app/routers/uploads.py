@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -10,10 +9,10 @@ from ..db import get_db
 from ..models import Activity, User
 from ..schemas import ModelUploadOut, UploadOut, UserOut
 from ..security import require_editor, require_self_photo
+from ..storage import store_bytes
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
-UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
 MAX_BYTES = 8 * 1024 * 1024
 ALLOWED = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 
@@ -72,11 +71,11 @@ def _sniff(extension: str, head: bytes) -> bool:
     return False
 
 
-async def _read_image(file: UploadFile) -> tuple[bytes, str]:
+async def _read_image(file: UploadFile) -> tuple[bytes, str, str]:
     """Type and size validation shared by every image route.
 
-    Returns the bytes and the extension to store them under, so no caller can
-    accept an image on looser terms than any other.
+    Returns the bytes, the extension to store them under, and the content type
+    so no caller can accept an image on looser terms than any other.
     """
     if file.content_type not in ALLOWED:
         raise HTTPException(
@@ -86,14 +85,7 @@ async def _read_image(file: UploadFile) -> tuple[bytes, str]:
     payload = await file.read(MAX_BYTES + 1)
     if len(payload) > MAX_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Image must be under 8 MB")
-    return payload, ALLOWED[file.content_type]
-
-
-def _store(payload: bytes, extension: str) -> str:
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}{extension}"
-    (UPLOAD_DIR / name).write_bytes(payload)
-    return name
+    return payload, ALLOWED[file.content_type], file.content_type
 
 
 @router.post("", response_model=UploadOut, status_code=status.HTTP_201_CREATED)
@@ -105,9 +97,10 @@ async def upload_image(
     Editor-floor, because the only things you can hang one on are purchase
     orders. Profile photos go through /avatar instead.
     """
-    payload, extension = await _read_image(file)
-    name = _store(payload, extension)
-    return UploadOut(url=f"/uploads/{name}", filename=file.filename or name)
+    payload, extension, content_type = await _read_image(file)
+    url = store_bytes(payload, extension, content_type)
+    name = url.rsplit("/", 1)[-1]
+    return UploadOut(url=url, filename=file.filename or name)
 
 
 @router.post("/avatar", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -124,8 +117,8 @@ async def upload_avatar(
     narrowness is what lets it sit open to every rank while the general image
     route above stays at EDITOR_FLOOR. Same type and size rules either way.
     """
-    payload, extension = await _read_image(file)
-    url = f"/uploads/{_store(payload, extension)}"
+    payload, extension, content_type = await _read_image(file)
+    url = store_bytes(payload, extension, content_type)
 
     actor.avatar_url = url
     db.add(
@@ -181,9 +174,10 @@ async def upload_model(
     # A UUID on disk, same as images: the original name may contain spaces and
     # anything else a filesystem or URL would have an opinion about, so it is
     # carried in the response (and the PO row) rather than in the path.
-    stored = _store(payload, extension)
+    url = store_bytes(payload, extension)
+    stored = url.rsplit("/", 1)[-1]
     return ModelUploadOut(
-        url=f"/uploads/{stored}",
+        url=url,
         filename=original or stored,
         size=len(payload),
         format=MODEL_FORMATS[extension],

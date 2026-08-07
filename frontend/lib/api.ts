@@ -26,7 +26,8 @@ export function setToken(token: string | null) {
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
-/** Uploaded images come back as API-relative paths like `/uploads/ab12.png`. */
+/** Uploaded assets are either API-relative (`/uploads/ab12.png`) or absolute
+ *  object-storage URLs when `S3_PUBLIC_BASE_URL` is set on the API. */
 export function assetUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   return path.startsWith("/") ? `${API_BASE}${path}` : path;

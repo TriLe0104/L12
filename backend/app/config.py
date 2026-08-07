@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "demo1234"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # S3-compatible object storage (Cloudflare R2, AWS S3, MinIO, …). When all
+    # of endpoint / bucket / keys are set, uploads survive container restarts.
+    # Leave unset for local disk under backend/uploads/.
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_bucket: str | None = None
+    s3_region: str = "auto"
+    # Optional public CDN / r2.dev base. When set, the API returns absolute
+    # URLs and /uploads/{name} redirects there. When unset, /uploads/{name}
+    # streams from the (private) bucket through this app.
+    s3_public_base_url: str | None = None
+
     @field_validator("database_url")
     @classmethod
     def use_psycopg_driver(cls, value: str) -> str:
