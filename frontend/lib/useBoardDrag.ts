@@ -12,6 +12,11 @@ import { EASE_OUT, prefersReducedMotion } from "./flip";
  * frame, so the motion is as smooth as the display allows. */
 
 const START_THRESHOLD = 6; // px of travel before a press counts as a drag
+/* A finger can't have movement mean both "drag this card" and "pan the board",
+   and the board is a sideways-scrolling track, so touch drags wait for a hold.
+   Wandering further than the slop during that hold is a swipe, not a grab. */
+const TOUCH_HOLD_MS = 300;
+const TOUCH_SLOP = 8;
 const EDGE_BAND = 90; // auto-scroll when the pointer gets this close to an edge
 const EDGE_SPEED = 18;
 const LAND_MS = 260;
@@ -31,6 +36,8 @@ interface DragState<S extends string> {
   frame: number;
   active: boolean;
   target: S | null;
+  /** pending touch hold; cleared the moment the press becomes a swipe */
+  hold: number | null;
 }
 
 interface Options<S extends string> {
@@ -57,6 +64,7 @@ export function useBoardDrag<S extends string>({
     const state = drag.current;
     drag.current = null;
     if (!state) return;
+    if (state.hold !== null) clearTimeout(state.hold);
     cancelAnimationFrame(state.frame);
     document.documentElement.classList.remove("is-dragging-card");
     if (removeGhost) state.ghost?.remove();
@@ -93,6 +101,17 @@ export function useBoardDrag<S extends string>({
     const overshootBottom = state.y - (window.innerHeight - EDGE_BAND);
     if (overshootTop > 0) window.scrollBy(0, -Math.min(EDGE_SPEED, overshootTop / 4));
     else if (overshootBottom > 0) window.scrollBy(0, Math.min(EDGE_SPEED, overshootBottom / 4));
+
+    // and sideways within the board itself, since the column a card is bound for
+    // may be scrolled off the edge of the track rather than merely off-screen
+    const board = boardRef.current;
+    if (board && board.scrollWidth > board.clientWidth + 1) {
+      const rect = board.getBoundingClientRect();
+      const overshootLeft = rect.left + EDGE_BAND - state.x;
+      const overshootRight = state.x - (rect.right - EDGE_BAND);
+      if (overshootLeft > 0) board.scrollLeft -= Math.min(EDGE_SPEED, overshootLeft / 4);
+      else if (overshootRight > 0) board.scrollLeft += Math.min(EDGE_SPEED, overshootRight / 4);
+    }
 
     const target = stageUnder(state.x, state.y);
     if (target !== state.target) {
@@ -199,6 +218,17 @@ export function useBoardDrag<S extends string>({
     return () => window.removeEventListener("keydown", onKey);
   }, [dragging]);
 
+  /* Pointer capture alone doesn't stop a touch from also scrolling, and the card
+     is only grabbed once the hold has elapsed -- too late for touch-action to
+     rule the gesture out. So while a card is genuinely in the air, the page and
+     the track hold still. */
+  useEffect(() => {
+    if (!dragging) return;
+    const hold = (e: TouchEvent) => e.preventDefault();
+    document.addEventListener("touchmove", hold, { passive: false });
+    return () => document.removeEventListener("touchmove", hold);
+  }, [dragging]);
+
   /** `movable` is the per-card veto — a locked order stays where it is. */
   const cardProps = (id: string, stage: S, movable = true) => ({
     "data-flip-id": id,
@@ -211,7 +241,7 @@ export function useBoardDrag<S extends string>({
       // let the card's own buttons, links and inputs behave normally
       if ((e.target as HTMLElement).closest("button, a, input, select, textarea")) return;
 
-      drag.current = {
+      const state: DragState<S> = {
         id,
         from: stage,
         pointerId: e.pointerId,
@@ -226,7 +256,19 @@ export function useBoardDrag<S extends string>({
         frame: 0,
         active: false,
         target: stage,
+        hold: null,
       };
+      drag.current = state;
+
+      if (e.pointerType !== "touch") return;
+      const node = e.currentTarget;
+      const pointerId = e.pointerId;
+      state.hold = window.setTimeout(() => {
+        if (drag.current !== state || state.active) return;
+        state.hold = null;
+        node.setPointerCapture(pointerId);
+        lift(state);
+      }, TOUCH_HOLD_MS);
     },
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
       const state = drag.current;
@@ -238,9 +280,10 @@ export function useBoardDrag<S extends string>({
 
       const dx = e.clientX - state.startX;
       const dy = e.clientY - state.startY;
-      // on touch, a mostly-vertical swipe belongs to the page, not to the card
-      if (e.pointerType === "touch" && Math.abs(dy) > Math.abs(dx)) {
-        drag.current = null;
+      // Before the hold has elapsed a finger still belongs to the browser: it is
+      // panning the board sideways or the page down, so give the press up.
+      if (e.pointerType === "touch") {
+        if (Math.hypot(dx, dy) > TOUCH_SLOP) teardown(true);
         return;
       }
       if (Math.hypot(dx, dy) < START_THRESHOLD) return;

@@ -272,7 +272,7 @@ export default function TasksPage() {
               : "in one grid"}{" "}
             · sorted by {SORTS.find((s) => s.value === sort)?.label.toLowerCase()} ·{" "}
             {view === "board"
-              ? "drag a card to move it"
+              ? "drag a card to move it · hold to grab on touch"
               : `${ZOOM_STEPS[zoom].label} card size`}
           </p>
         </div>

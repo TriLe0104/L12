@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "check:layout": "node scripts/check-layout.mjs"
+    "check:layout": "node scripts/check-layout.mjs",
+    "verify:mobile-board": "node scripts/verify-mobile-board.mjs"
   },
   "dependencies": {
     "@fullcalendar/daygrid": "^6.1.15",

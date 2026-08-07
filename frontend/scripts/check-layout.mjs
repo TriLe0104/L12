@@ -105,12 +105,28 @@ for (const width of WIDTHS) {
     const report = await page.evaluate(() => {
       const docWidth = document.documentElement.clientWidth;
       const spills = [];
+      /* Content held by a track that really is scrolling sideways -- the kanban's
+         columns, the dashboard table's safety net -- is off-screen on purpose.
+         A scroll container that isn't overflowing still answers for its children. */
+      const insideScroller = (el) => {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const overflowX = getComputedStyle(p).overflowX;
+          if (
+            (overflowX === "auto" || overflowX === "scroll") &&
+            p.scrollWidth > p.clientWidth + 1
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
       for (const el of document.querySelectorAll("body *")) {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
         if (r.right > docWidth + 1 || r.left < -1) {
           const cs = getComputedStyle(el);
           if (cs.position === "fixed") continue;
+          if (insideScroller(el)) continue;
           spills.push(
             `${el.tagName.toLowerCase()}.${String(el.className).split(" ")[0] || "-"} ` +
               `right=${Math.round(r.right)}`,

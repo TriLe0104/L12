@@ -783,6 +783,18 @@ button.jobcard-thumb:focus-visible {
   }
 }
 
+/* A phone's full-width card sits between the compact steps and a roomy one, and
+   the label track it inherits leaves INSPECTION and HARDWARE a glyph short — they
+   break mid-word rather than shrinking, because nothing here shrank them. The
+   values have room to spare at this width, so the track takes what it needs. */
+@media (max-width: 620px) {
+  @container (min-width: 21rem) and (max-width: 30rem) {
+    .spec {
+      grid-template-columns: minmax(3.4rem, 6.4rem) minmax(0, 1fr);
+    }
+  }
+}
+
 /* the drawer card is narrow enough to trip the compact rules above, but its
    values are short — buy the labels a track wide enough for INSPECTION.
    The settings preview draws the same card, so it takes the same metrics. */
@@ -1194,14 +1206,25 @@ button.jobcard-thumb:focus-visible {
 }
 
 /* ---------------- kanban ---------------- */
+/* The board is a sliding window rather than a grid that folds into rows: every
+   column keeps a width a job card can actually be read at, and the track scrolls
+   sideways once they stop fitting. Folding lost the left-to-right reading of
+   progress, which is the whole point of the columns, and it got worse the more
+   columns board settings defined. */
 .kanban {
+  --kcol-min: 15rem;
   display: grid;
   /* column count comes from board settings via --kanban-cols */
-  grid-template-columns: repeat(var(--kanban-cols, 4), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--kanban-cols, 4), minmax(var(--kcol-min), 1fr));
   gap: 0.875rem;
   align-items: start;
-  padding-bottom: 0.625rem;
+  /* room for the cards' lift shadow, which a scroll container would clip */
+  padding: 0.125rem 0.125rem 0.625rem;
   min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
 }
 
 .kcol {
@@ -1212,8 +1235,15 @@ button.jobcard-thumb:focus-visible {
   border-radius: var(--radius);
   min-height: 13.75rem;
   min-width: 0;
+  scroll-snap-align: start;
   transition: background var(--t-mid) var(--ease), box-shadow var(--t-mid) var(--ease),
     opacity var(--t-mid) var(--ease);
+}
+
+/* Snap points fight the edge auto-scroll that carries a card to an off-screen
+   column, so the track scrolls freely for as long as one is in the air. */
+.kanban[data-dragging="true"] {
+  scroll-snap-type: none;
 }
 
 /* columns recede a little while a card is in the air, so the target stands out */
@@ -1295,8 +1325,11 @@ button.jobcard-thumb:focus-visible {
 
 .kcard[data-grab="true"] {
   cursor: grab;
-  /* let a vertical swipe scroll the page; sideways movement starts a drag */
-  touch-action: pan-y;
+  /* Both axes stay with the browser: a card sits inside a sideways-scrolling
+     track now, so claiming horizontal movement for the drag would cost the
+     swipe that moves between columns. Touch drags start on a hold instead --
+     see TOUCH_HOLD_MS in lib/useBoardDrag.ts. */
+  touch-action: auto;
 }
 
 .jobcard[role="button"] {
@@ -1364,13 +1397,25 @@ button.jobcard-thumb:focus-visible {
 
 @media (max-width: 1240px) {
   .kanban {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    --kcol-min: 16rem;
   }
 }
 
+/* Phones: one column fills the screen with the next one peeking past its edge,
+   which is what says the board continues sideways. Full-bleed against .main's
+   padding so that peek is real width rather than gutter, and mandatory snapping
+   so a swipe lands on a column instead of between two. */
 @media (max-width: 620px) {
   .kanban {
-    grid-template-columns: minmax(0, 1fr);
+    /* vw leads so the column claims the screen a small phone actually has; the
+       rem ceiling stops it from outgrowing the type, which shrinks with the
+       window here (see the root font-size clamp). */
+    --kcol-min: min(88vw, 22rem);
+    gap: 0.625rem;
+    margin-inline: -0.875rem;
+    padding-inline: 0.875rem;
+    scroll-padding-inline: 0.875rem;
+    scroll-snap-type: x mandatory;
   }
 }
 
@@ -2947,6 +2992,33 @@ button.jobcard-thumb:focus-visible {
   }
 }
 
+/* Phone toolbars: the search box takes the row rather than sharing it with a
+   sort select neither can then be read at, and the header gives back some of the
+   vertical space the content wants. */
+@media (max-width: 620px) {
+  .page-head {
+    gap: 0.75rem;
+    margin-bottom: 0.875rem;
+  }
+  .head-tools {
+    gap: 0.4rem;
+  }
+  /* Search is what a phone reaches for first, so it takes the row. The controls
+     behind it stop growing and tighten up, which packs them into one or two rows
+     instead of a stack of one control per line above the content. */
+  .head-tools > .field {
+    flex-grow: 0;
+  }
+  .head-tools > .field:first-child {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .seg button {
+    padding: 0 0.5rem;
+    font-size: 0.68rem;
+  }
+}
+
 /* phone-width rail: shrink the logo and links so the account block still fits */
 @media (max-width: 560px) {
   .rail {
@@ -2968,12 +3040,16 @@ button.jobcard-thumb:focus-visible {
   }
 }
 
-/* very narrow: stack the card's image above the spec table */
+/* Very narrow: stack the card's image above the spec table, wherever the card has
+   the screen to itself -- the all-cards grid, the full-bleed drawer and the copy
+   of it the settings preview draws. Named contexts rather than every card,
+   because a kanban card is now as wide on a phone as it is on a desktop, and its
+   height belongs to the next card in the column, not to a hero image. */
 @media (max-width: 420px) {
-  .jobcard-body {
+  :is(.board-all, .drawer, .card-stage) .jobcard-body {
     flex-direction: column;
   }
-  .jobcard-thumb {
+  :is(.board-all, .drawer, .card-stage) .jobcard-thumb {
     width: 100%;
     flex-basis: auto;
     height: 6.5rem;
@@ -2986,6 +3062,30 @@ button.jobcard-thumb:focus-visible {
   }
   .card-wells .thumb-drop {
     height: 6.5rem;
+  }
+}
+
+/* Touch input, not narrow windows: the controls sized for a cursor are the ones
+   a thumb misses, and a phone-width browser on a desktop still has a cursor.
+   Heights move together so a toolbar row stays a row. */
+@media (hover: none) {
+  .field,
+  .btn,
+  .seg button,
+  .zoom button {
+    height: 2.5rem;
+  }
+  .zoom button {
+    width: 2.5rem;
+  }
+  .kadd {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1.05rem;
+  }
+  .icon-btn {
+    width: 2.25rem;
+    height: 2.25rem;
   }
 }
 

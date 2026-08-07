@@ -86,15 +86,23 @@ docker compose up --build
   every matching job out in one responsive grid, with a five-step zoom (XS to XL, `12rem` to `29rem`
   of minimum card width) that resizes the cards themselves rather than transform-scaling them, so
   the type stays sharp — seven cards per row at XS down to three at XL on a 1920px screen. Zoom is
-  hidden on the board, whose four columns set their own width. Sorting by due date (earliest or
+  hidden on the board, whose columns set their own width. Sorting by due date (earliest or
   latest) or by priority applies within each column on the board and across the whole set in the
   all-cards view; view, zoom and sort all stick per browser.
+- **Sliding board** — the columns are a track that scrolls sideways rather than a grid that folds
+  into rows, so however many columns board settings defines, each one keeps a width a job card can
+  be read at and progress still reads left to right. When they all fit they divide the width as
+  before, which is every desktop window. On a phone the track goes full-bleed and snaps: one column
+  fills the screen with the next peeking past its edge, which is what says the board carries on.
 - **Card dragging** — pointer-driven rather than HTML5 drag-and-drop, which only reports a few
   positions per second and hands the browser a frozen bitmap. `lib/useBoardDrag.ts` lifts the card
   into a fixed-position clone that tracks the pointer every frame, auto-scrolls near the window
-  edges, and flies to wherever the card lands. `Escape` abandons a drag; a press that never travels
-  6px stays a plain click and opens the drawer. `lib/flip.ts` slides the cards that shifted as a
-  result, so nothing teleports. On touch, a vertical swipe still scrolls the page.
+  edges and near the ends of the board's own track, and flies to wherever the card lands. `Escape`
+  abandons a drag; a press that never travels 6px stays a plain click and opens the drawer.
+  `lib/flip.ts` slides the cards that shifted as a result, so nothing teleports. On touch a swipe
+  belongs to the board — it pans the track or scrolls the page — so a drag starts on a 300ms hold
+  instead; wandering more than 8px before that gives the press back to the browser. A tap is still
+  a tap.
 - **Priority** — `HOT` / `HIGH` / `NORMAL` / `LOW`, set from the card editor. Anything above normal
   gets a coloured badge on the card and a dot on the calendar chip.
 - **Order lock** — any editor (`admin` / `manager`) can lock a purchase order from the card editor;
@@ -204,7 +212,15 @@ docker compose up --build
   it gets the extra room back when the rail folds away below 780px, showing more at 640px than at
   820px. The table also keeps its own horizontal scroll container as a safety net for scaled-up type,
   so the page itself never scrolls sideways; on a window tall enough for it, that same container is
-  what the pinned headings stick to.
+  what the pinned headings stick to. `check:layout` allows content that a track is genuinely
+  scrolling — the board's columns, that safety net — and holds every scroller itself to the viewport.
+- **Phone** — a card decides its layout from its own width, so the one that has the screen (the
+  all-cards grid, the full-bleed drawer) leads with a full-width image while a board card keeps the
+  compact thumbnail and gives its height to the next card. Toolbars put the search box on its own
+  row and pack the rest behind it rather than stacking one control per line, and every control sized
+  for a cursor grows for a thumb wherever the browser reports no hover.
+  `npm run verify:mobile-board` checks the phone board end to end: the track scrolls, a swipe pans
+  it, a hold moves a card between columns.
 - **Look and motion** — the page sits on soft, wide colour blooms rather than a pattern, so nothing
   competes with the cards. Everything that moves shares one decelerating curve and three durations
   (`--ease`, `--t-fast/mid/slow` in `globals.css`); only `transform` and `opacity` are animated, so
