@@ -239,11 +239,15 @@ def storage_diagnostics() -> dict[str, object]:
     payload = b"po-calendar storage check"
 
     def describe(exc: Exception) -> str:
-        code = ""
         response = getattr(exc, "response", None)
         if isinstance(response, dict):
-            code = response.get("Error", {}).get("Code", "")
-        return f"{type(exc).__name__}: {code or str(exc)[:200]}"
+            err = response.get("Error", {})
+            code = err.get("Code", "")
+            message = err.get("Message", "")
+            request_id = response.get("ResponseMetadata", {}).get("RequestId", "")
+            host_id = response.get("ResponseMetadata", {}).get("HostId", "")
+            return f"{type(exc).__name__}: code={code!r} message={message!r} request_id={request_id!r} host_id={host_id!r}"
+        return f"{type(exc).__name__}: {str(exc)[:300]}"
 
     try:
         client = _s3_client()
