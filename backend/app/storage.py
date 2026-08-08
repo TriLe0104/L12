@@ -217,6 +217,9 @@ def storage_diagnostics() -> dict[str, object]:
     host, and the precise boto3/botocore failure for each step. Admin-gated by
     the route that calls it.
     """
+    import io
+    import logging as _logging
+
     report: dict[str, object] = {
         "backend": "s3" if object_storage_configured() else "local",
         "endpoint_host": _endpoint_host(),
@@ -249,31 +252,48 @@ def storage_diagnostics() -> dict[str, object]:
             return f"{type(exc).__name__}: code={code!r} message={message!r} request_id={request_id!r} host_id={host_id!r}"
         return f"{type(exc).__name__}: {str(exc)[:300]}"
 
+    # Capture botocore's wire-level debug log so we can see the raw HTTP
+    # request/response even when botocore can't parse an error body.
+    log_capture = io.StringIO()
+    handler = _logging.StreamHandler(log_capture)
+    handler.setLevel(_logging.DEBUG)
+    botocore_logger = _logging.getLogger("botocore")
+    previous_level = botocore_logger.level
+    botocore_logger.addHandler(handler)
+    botocore_logger.setLevel(_logging.DEBUG)
+
     try:
-        client = _s3_client()
-    except Exception as exc:  # noqa: BLE001
-        steps["client"] = describe(exc)
-        report["ok"] = False
-        return report
-    steps["client"] = "ok"
-
-    for label, call in (
-        ("write", lambda: client.put_object(Bucket=bucket, Key=key, Body=payload)),
-        ("read", lambda: client.get_object(Bucket=bucket, Key=key)),
-        ("delete", lambda: client.delete_object(Bucket=bucket, Key=key)),
-    ):
         try:
-            call()
-            steps[label] = "ok"
+            client = _s3_client()
         except Exception as exc:  # noqa: BLE001
-            steps[label] = describe(exc)
+            steps["client"] = describe(exc)
             report["ok"] = False
-            report["hint"] = _diagnose_hint(label, steps[label])
             return report
+        steps["client"] = "ok"
 
-    report["ok"] = True
-    return report
+        for label, call in (
+            ("write", lambda: client.put_object(Bucket=bucket, Key=key, Body=payload)),
+            ("read", lambda: client.get_object(Bucket=bucket, Key=key)),
+            ("delete", lambda: client.delete_object(Bucket=bucket, Key=key)),
+        ):
+            try:
+                call()
+                steps[label] = "ok"
+            except Exception as exc:  # noqa: BLE001
+                steps[label] = describe(exc)
+                report["ok"] = False
+                report["hint"] = _diagnose_hint(label, steps[label])
+                return report
 
+        report["ok"] = True
+        return report
+    finally:
+        botocore_logger.removeHandler(handler)
+        botocore_logger.setLevel(previous_level)
+        raw_log = log_capture.getvalue()
+        # Keep only the tail — that's where the actual response status line
+        # and body live. Full debug log is huge and mostly signing internals.
+        report["raw_debug_tail"] = raw_log[-6000:]
 
 def _diagnose_hint(step: str, message: str) -> str:
     low = message.lower()
