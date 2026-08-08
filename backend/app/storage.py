@@ -81,7 +81,6 @@ def _enable_r2_sni_workaround() -> None:
 
 @lru_cache(maxsize=1)
 def _s3_client():
-    # Imported lazily so a laptop without boto3 still boots on the local path.
     import boto3
     from botocore.config import Config
 
@@ -90,7 +89,7 @@ def _s3_client():
     if host.endswith(".r2.cloudflarestorage.com"):
         _enable_r2_sni_workaround()
 
-    return boto3.client(
+    client = boto3.client(
         "s3",
         endpoint_url=endpoint,
         aws_access_key_id=(settings.s3_access_key_id or "").strip().strip("\"'"),
@@ -101,6 +100,15 @@ def _s3_client():
             s3={"addressing_style": "path"},
         ),
     )
+
+    def _strip_expect_header(request, **kwargs):
+        # Cloudflare's edge rejects requests carrying `Expect: 100-continue`
+        # with a bare HTML 403 before R2 ever sees them — remove it so the
+        # body ships on the same request instead of waiting for a 100.
+        request.headers.pop("Expect", None)
+
+    client.meta.events.register("before-send.s3.*", _strip_expect_header)
+    return client
 
 
 def _content_type_for(name: str, fallback: str | None = None) -> str:
