@@ -209,6 +209,68 @@ def serve_upload(name: str) -> Response:
     )
 
 
+def load_bytes(url_or_name: str | None) -> bytes | None:
+    """Read back the raw bytes for a previously stored upload.
+
+    Mirrors the lookup strategy `serve_upload` uses (local disk, then S3,
+    then a public-base redirect target) but returns bytes for internal use
+    — e.g. embedding a card's photo into a generated document — instead of
+    an HTTP response. Accepts a relative ``/uploads/{name}`` URL (the
+    common case), a bare stored name, or an absolute URL. Best-effort:
+    returns `None` rather than raising if the object can't be found.
+    """
+    if not url_or_name:
+        return None
+    raw = url_or_name.strip()
+    if not raw:
+        return None
+
+    name: str | None = None
+    if raw.startswith("/uploads/"):
+        name = raw[len("/uploads/") :]
+    elif "://" not in raw:
+        name = raw
+    else:
+        public = _clean_endpoint(settings.s3_public_base_url or "") if settings.s3_public_base_url else ""
+        if public and raw.startswith(f"{public}/"):
+            name = raw[len(public) + 1 :]
+
+    if name:
+        try:
+            name = _safe_name(name)
+        except HTTPException:
+            name = None
+
+    if name:
+        local = UPLOAD_DIR / name
+        if local.is_file():
+            try:
+                return local.read_bytes()
+            except OSError:
+                logger.exception("failed reading local upload %s", name)
+                return None
+        if object_storage_configured():
+            try:
+                obj = _s3_client().get_object(
+                    Bucket=(settings.s3_bucket or "").strip().strip("\"'"),
+                    Key=name,
+                )
+                return obj["Body"].read()
+            except Exception:
+                logger.exception("failed reading %s from object storage", name)
+        return None
+
+    # Fully external URL with no local/bucket mapping — best-effort fetch.
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(raw, timeout=10) as resp:  # noqa: S310 — admin-controlled asset URL
+            return resp.read()
+    except Exception:
+        logger.exception("failed fetching external upload URL")
+        return None
+
+
 def _cache_headers() -> dict[str, str]:
     # UUIDs never reuse a name, so browsers may keep them forever.
     return {"Cache-Control": "public, max-age=31536000, immutable"}

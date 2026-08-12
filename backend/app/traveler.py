@@ -31,6 +31,7 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from . import board_service
 from .models import Activity, PurchaseOrder, User
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "traveler"
@@ -261,6 +262,58 @@ def _inspection_label(value: object) -> str:
         "none": "None",
     }.get(raw, _s(value) or "Standard Inspection")
 
+_CERTIFICATES_KEY_ALIASES = frozenset({"certificates", "certificate", "certs", "cert"})
+
+
+def _certificates_from_card(db: Session, po: PurchaseOrder) -> str:
+    """Look up the card's admin-defined "Certificates" custom field.
+
+    Custom field keys are board-admin defined (Board Settings > Custom
+    Fields), so the wire key isn't guaranteed to literally be
+    ``"certificates"``. Match on key first, then fall back to a label that
+    contains "certificat" so a rename in Board Settings doesn't silently
+    break the traveler.
+    """
+    values = po.custom_fields if isinstance(po.custom_fields, dict) else {}
+    if not values:
+        return ""
+
+    try:
+        doc = board_service.get_document(db)
+    except Exception:  # pragma: no cover - defensive, board doc should exist
+        doc = {}
+    custom_fields = doc.get("customFields") if isinstance(doc.get("customFields"), list) else []
+
+    match_key: str | None = None
+    for cf in custom_fields:
+        if not isinstance(cf, dict):
+            continue
+        key = cf.get("key")
+        if not isinstance(key, str) or key not in values:
+            continue
+        if key.strip().lower() in _CERTIFICATES_KEY_ALIASES:
+            match_key = key
+            break
+        label = str(cf.get("label") or "")
+        if "certificat" in label.strip().lower():
+            match_key = key
+            break
+
+    if match_key is None:
+        # No board-settings match — fall back to a direct key lookup in case
+        # the custom field predates being listed in the document.
+        for key in values:
+            if key.strip().lower() in _CERTIFICATES_KEY_ALIASES:
+                match_key = key
+                break
+
+    if match_key is None:
+        return ""
+
+    raw = values.get(match_key)
+    return _s(raw)
+
+
 def draft_from_po(
     db: Session,
     po: PurchaseOrder,
@@ -289,7 +342,7 @@ def draft_from_po(
         "material_spec": "Per Drawing",
         "inspection": _inspection_label(po.inspection),
         "part_marking": "None",
-        "certificates": "",
+        "certificates": _certificates_from_card(db, po),
         "notes": po.note or "",
         "dims": po.dims or "",
         "part_of": "Part 1 of 1",
