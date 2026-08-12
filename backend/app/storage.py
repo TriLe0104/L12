@@ -258,6 +258,12 @@ def load_bytes(url_or_name: str | None) -> bytes | None:
                 return obj["Body"].read()
             except Exception:
                 logger.exception("failed reading %s from object storage", name)
+                return None
+        logger.warning(
+            "upload %s not found on local disk and object storage is not configured "
+            "(likely wiped by an ephemeral filesystem restart)",
+            name,
+        )
         return None
 
     # Fully external URL with no local/bucket mapping — best-effort fetch.
