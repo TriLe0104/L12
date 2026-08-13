@@ -107,38 +107,96 @@ export default function AddPartInline({
     } as any);
   }, [open, record]);
 
-  // Render CardEditor for the same new-order UI but hide the PO # field
-  return open && draft ? (
-    <div style={{ border: "1px solid var(--rule)", padding: 12, borderRadius: 6, background: "#fff", width: 560 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <strong style={{ flex: 0 }}>Add part</strong>
-        <div style={{ flex: 1 }} />
-      </div>
-      <div style={{ marginTop: 8 }}>
-        <CardEditor
-          value={draft}
-          onChange={(patch) => setDraft((d) => ({ ...(d ?? {}), ...patch }))}
-          statuses={statuses}
-          hideFields={["po_number"]}
-        />
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button type="button" className="btn" onClick={() => void submitFromDraft()}>Add</button>
-          <button type="button" className="btn" onClick={() => { setOpen(false); setDraft(null); setFile(null); }}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  ) : (
-    <button
-      type="button"
-      className="btn"
-      onClick={(e) => {
-        e.stopPropagation();
-        setOpen(true);
-      }}
-      style={{ marginLeft: 8 }}
-      title="Add a new part to this PO"
-    >
-      + Part
-    </button>
+  // Render CardEditor for the same new-order UI but hide the PO # field.
+  // Show it inside a centered modal (portal) instead of inline.
+  if (!open || !draft) {
+    return (
+      <button
+        type="button"
+        className="btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        style={{ marginLeft: 8 }}
+        title="Add a new part to this PO"
+      >
+        + Part
+      </button>
+    );
+  }
+
+  return (
+    // portal to document.body for modal
+    (typeof document !== "undefined")
+      ? (window.document ? (
+          // Using a minimal portal pattern without importing createPortal here
+          // to keep the change small — render a fixed overlay at the document root
+          <div
+            className="scrim"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (event.target === event.currentTarget) {
+                setOpen(false);
+                setDraft(null);
+                setFile(null);
+              }
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1200,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Add part"
+              style={{
+                background: "#fff",
+                borderRadius: 8,
+                padding: 16,
+                width: 640,
+                maxWidth: "calc(100% - 32px)",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <strong style={{ flex: 0 }}>Add part</strong>
+                <div style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setOpen(false);
+                    setDraft(null);
+                    setFile(null);
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <CardEditor
+                  value={draft}
+                  onChange={(patch) => setDraft((d) => ({ ...(d ?? {}), ...patch }))}
+                  statuses={statuses}
+                  hideFields={["po_number"]}
+                />
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button type="button" className="btn" onClick={() => void submitFromDraft()}>Add</button>
+                  <button type="button" className="btn" onClick={() => { setOpen(false); setDraft(null); setFile(null); }}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null)
+      : null
   );
 }
