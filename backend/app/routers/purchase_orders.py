@@ -35,6 +35,7 @@ from ..schemas import (
     POCreate,
     POOut,
     POUpdate,
+    PartCreate,
     TravelerDraftOut,
     TravelerDraftUpdate,
     TravelerGenerateBody,
@@ -487,7 +488,7 @@ def get_po(
 @router.post("/{po_id}/parts", response_model=POOut, status_code=status.HTTP_201_CREATED)
 def add_part(
     po_id: str,
-    payload: "PartCreate",
+    payload: PartCreate,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> PurchaseOrder:
