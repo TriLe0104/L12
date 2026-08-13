@@ -98,6 +98,21 @@ class PartCreate(BaseModel):
     thumbnail_url: str | None = None
 
 
+class PartUpdate(BaseModel):
+    part_number: str | None = None
+    part_name: str | None = None
+    qty: int | None = None
+    dims: str | None = None
+    mat_dim: str | None = None
+    material: str | None = None
+    finish: str | None = None
+    inspection: str | None = None
+    hardware: bool | None = None
+    priority: str | None = None
+    certificates: str | None = None
+    thumbnail_url: str | None = None
+
+
 class POUpdate(BaseModel):
     job_no: str | None = None
     po_number: str | None = None

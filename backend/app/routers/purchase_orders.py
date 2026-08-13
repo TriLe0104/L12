@@ -552,6 +552,76 @@ def add_part(
     return po
 
 
+@router.patch("/{po_id}/parts/{index}", response_model=POOut)
+def update_part(
+    po_id: str,
+    index: int,
+    payload: PartUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> PurchaseOrder:
+    """Update a specific part within a PO.parts list.
+
+    Index is zero-based. Only the provided fields are changed.
+    """
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _guard_locked(po, actor)
+
+    parts = po.parts if isinstance(getattr(po, "parts", None), list) else []
+    if index < 0 or index >= len(parts):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
+
+    part = dict(parts[index] or {})
+    # Apply provided updates only
+    if payload.part_number is not None:
+        part["part_number"] = payload.part_number.strip()
+    if payload.part_name is not None:
+        part["part_name"] = payload.part_name
+    if payload.qty is not None:
+        part["qty"] = int(payload.qty)
+    if payload.dims is not None:
+        part["dims"] = payload.dims
+    if payload.mat_dim is not None:
+        part["mat_dim"] = payload.mat_dim
+    if payload.material is not None:
+        part["material"] = payload.material
+    if payload.finish is not None:
+        part["finish"] = payload.finish
+    if payload.inspection is not None:
+        part["inspection"] = payload.inspection
+    if payload.hardware is not None:
+        part["hardware"] = bool(payload.hardware)
+    if payload.priority is not None:
+        part["priority"] = payload.priority
+    if payload.certificates is not None:
+        part["certificates"] = payload.certificates
+    if payload.thumbnail_url is not None:
+        part["thumbnail_url"] = payload.thumbnail_url
+
+    parts[index] = part
+    po.parts = parts
+
+    # Optionally adopt thumbnail at PO level if none exists
+    if not po.thumbnail_url and part.get("thumbnail_url"):
+        po.thumbnail_url = part.get("thumbnail_url")
+
+    db.add(
+        Activity(
+            actor_id=actor.id,
+            action="Part updated",
+            entity_type="purchase_order",
+            entity_id=po.id,
+            detail=f"Updated part {index + 1} on {po.job_no} · {po.po_number}",
+        )
+    )
+    db.commit()
+    db.refresh(po)
+    _enrich(db, [po])
+    return po
+
+
 # Fields a STATUS_FLOOR actor may actually move. `stage` is accepted on the
 # wire (kanban drag) but resolves to a status change above, so it never appears
 # in `changed` itself.
