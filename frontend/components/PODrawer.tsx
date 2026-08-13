@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
-import { useCallback } from "react";
 import AddPartInline from "./AddPartInline";
 import {
   canEdit,
