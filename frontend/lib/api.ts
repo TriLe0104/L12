@@ -139,6 +139,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  patchPart: (poId: string, index: number, payload: Record<string, any>) =>
+    request<PurchaseOrder>(`/api/purchase-orders/${poId}/parts/${index}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 
   /** Your own profile photo, stored and applied in one call. Open to every rank,
    *  because it can only ever write the caller's own avatar; returns the updated

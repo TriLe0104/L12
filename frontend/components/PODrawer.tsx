@@ -200,7 +200,29 @@ export function PODrawer({
         ? await api.createPO({ ...draft, qty: Number(draft.qty) || 1 })
         : statusOnly
           ? await api.updatePO(record!.id, { status: draft.status })
-          : await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
+            : (async () => {
+                // If a part is selected, persist part-specific fields to the parts list
+                if (record && selectedPartIndex != null) {
+                  const partPayload: Record<string, any> = {
+                    part_number: draft.part_number,
+                    part_name: (draft as any).part_name ?? draft.part_number,
+                    qty: Number(draft.qty) || 1,
+                    dims: draft.dims || undefined,
+                    mat_dim: draft.mat_dim || undefined,
+                    material: draft.material || undefined,
+                    finish: draft.finish || undefined,
+                    inspection: draft.inspection || undefined,
+                    hardware: !!draft.hardware,
+                    priority: draft.priority || undefined,
+                    certificates: (draft as any).certificates || undefined,
+                    thumbnail_url: draft.thumbnail_url || undefined,
+                  };
+                  // PATCH the part first
+                  await api.patchPart(record.id, selectedPartIndex, partPayload);
+                }
+                // Then update the PO-level fields
+                return await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
+              })();
       // stay open on the saved record: server-derived fields (stage, labels) come back here
       setRecord(saved);
       setDraft(saved);
