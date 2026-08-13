@@ -373,6 +373,11 @@ def draft_from_po(
         "created_by": created_by,
         "generated_by": generated_by,
         "generated_at": generated_at,
+        # Thumbnail selection: prefer the selected part's thumbnail, otherwise the PO-level one
+        "thumbnail_url": (
+            (first_part.get("thumbnail_url") if isinstance(first_part, dict) and first_part.get("thumbnail_url") else None)
+            or getattr(po, "thumbnail_url", None)
+        ),
         "status": getattr(po, "status_label", None) or _s(po.status),
     }
 
