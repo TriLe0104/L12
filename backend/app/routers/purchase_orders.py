@@ -395,6 +395,13 @@ def create_po(
     data = payload.model_dump()
     if data.get("custom_fields") is None:
         data["custom_fields"] = {}
+    # Normalize textual fields that affect identity/matching so creating a new
+    # part with the same PO number but extra whitespace still appends rather
+    # than creating a separate top-level PO.
+    if isinstance(data.get("po_number"), str):
+        data["po_number"] = data["po_number"].strip()
+    if isinstance(data.get("part_number"), str):
+        data["part_number"] = data["part_number"].strip()
     if isinstance(data.get("inspection"), str):
         data["inspection"] = data["inspection"].strip().casefold()
     if isinstance(data.get("priority"), str):
