@@ -217,8 +217,8 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
                {parts.slice(0, 4).map((p, i) => (
                  <img
                    key={i}
-                   src={assetUrl((p && (p.thumbnail_url as string)) || "")}
-                   alt={p && (p.part_number as string)}
+                   src={assetUrl(p?.thumbnail_url ?? undefined) ?? undefined}
+                   alt={p?.part_number ?? ""}
                    className={`stack-item stack-${i}`}
                  />
                ))}
@@ -252,7 +252,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
               <li key={i} className="part-item">
                 <div className="part-thumb">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={assetUrl((p && (p.thumbnail_url as string)) || "")} alt={p.part_number ?? p.part_name} />
+                  <img src={assetUrl(p?.thumbnail_url ?? undefined) ?? undefined} alt={p.part_number ?? p.part_name} />
                 </div>
                 <div className="part-meta">
                   <div className="part-name">{p.part_name ?? p.part_number}</div>
