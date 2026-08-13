@@ -36,20 +36,21 @@ export default function AddPartInline({
         thumbnail_url = upload.url;
       }
 
+      const d: any = draft as any;
       const payload: any = {
-        part_number: pn,
-        part_name: draft.part_name || pn,
-        qty: Number(draft.qty) || 1,
-        dims: draft.dims || undefined,
-        mat_dim: draft.mat_dim || undefined,
-        material: draft.material || undefined,
-        finish: draft.finish || undefined,
-        inspection: draft.inspection || undefined,
-        hardware: draft.hardware || false,
-        priority: draft.priority || "normal",
-        certificates: draft.certificates || undefined,
-        thumbnail_url: thumbnail_url || undefined,
-      };
+          part_number: pn,
+          part_name: d.part_name || pn,
+          qty: Number(d.qty) || 1,
+          dims: d.dims || undefined,
+          mat_dim: d.mat_dim || undefined,
+          material: d.material || undefined,
+          finish: d.finish || undefined,
+          inspection: d.inspection || undefined,
+          hardware: d.hardware || false,
+          priority: d.priority || "normal",
+          certificates: d.certificates || undefined,
+          thumbnail_url: thumbnail_url || undefined,
+        };
 
       let saved: PurchaseOrder;
       if (record && (record as any).id) {
