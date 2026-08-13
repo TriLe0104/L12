@@ -1027,6 +1027,16 @@ button.jobcard-thumb:focus-visible {
   flex: 1 1 auto;
   min-width: 2.6rem;
   margin: 0;
+  padding: 0.14rem 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--prio, var(--tone-slate)) 55%, transparent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--prio, var(--tone-slate));
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 /* Small chip thumbnail and parts badge for compact calendar chips */
@@ -1050,18 +1060,6 @@ button.jobcard-thumb:focus-visible {
   padding: 0.08rem 0.25rem;
   border-radius: 6px;
   font-size: 0.58rem;
-}
-
-  padding: 0.14rem 0.28rem;
-  border: 1px solid color-mix(in srgb, var(--prio, var(--tone-slate)) 55%, transparent);
-  border-radius: 2px;
-  background: transparent;
-  color: var(--prio, var(--tone-slate));
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  line-height: 1.2;
-  cursor: pointer;
 }
 
 .prio-seg-btn:hover:not(:disabled) {
