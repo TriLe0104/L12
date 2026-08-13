@@ -114,13 +114,42 @@ export function PODrawer({
   const loadActivity = (id: string) =>
     api.poActivity(id).then(setActivity).catch(() => setActivity([]));
 
+  const [selectedPartIndex, setSelectedPartIndex] = useState<number | null>(null);
+
+  function mergePartIntoDraft(rec: PODraft | PurchaseOrder | null, idx: number | null) {
+    if (!rec || idx == null) return rec ?? newDraft();
+    const parts = (rec as any).parts ?? [];
+    if (!Array.isArray(parts) || parts.length === 0) return rec as PODraft;
+    const p = parts[idx] ?? {};
+    return {
+      ...(rec as any),
+      part_number: p.part_number ?? (rec as any).part_number,
+      // part_name is not part of PO top-level but CardEditor / traveler may use it
+      part_name: p.part_name ?? p.part_number ?? (rec as any).part_name,
+      qty: p.qty ?? (rec as any).qty,
+      dims: p.dims ?? (rec as any).dims,
+      mat_dim: p.mat_dim ?? (rec as any).mat_dim,
+      material: p.material ?? (rec as any).material,
+      finish: p.finish ?? (rec as any).finish,
+      inspection: p.inspection ?? (rec as any).inspection,
+      hardware: p.hardware ?? (rec as any).hardware,
+      priority: p.priority ?? (rec as any).priority,
+      thumbnail_url: p.thumbnail_url ?? (rec as any).thumbnail_url,
+    } as PODraft;
+  }
+
   useEffect(() => {
     const opened = po ?? newDraft();
     setRecord(po);
-    setDraft(opened);
+    // default selected part to first part if present
+    const partsCount = Array.isArray(po?.parts) ? po!.parts!.length : 0;
+    const defaultIdx = partsCount > 0 ? 0 : null;
+    setSelectedPartIndex(defaultIdx);
+    const draftValue = mergePartIntoDraft(opened, defaultIdx);
+    setDraft(draftValue);
     // one object for both, so a freshly opened form is never dirty against a
     // second blank built a millisecond later
-    setBaseline(opened);
+    setBaseline(draftValue);
     setError(null);
     setSavedNote(null);
     setConfirming(false);
@@ -217,26 +246,53 @@ export function PODrawer({
           <strong style={{ letterSpacing: "-0.02em" }}>
             {creating ? "New purchase order" : `${record?.job_no} · ${record?.po_number}`}
           </strong>
-          {record && editable && (
-            <AddPartInline
-              record={record}
-              statuses={statuses}
-              onStart={() => setBusy(true)}
-              onDone={async (saved, note) => {
-                setBusy(false);
-                setRecord(saved);
-                setDraft(saved);
-                setBaseline(saved);
-                setSavedNote(note ?? "Part added.");
-                onSaved(saved);
-                await loadActivity(saved.id);
-              }}
-              onError={(msg) => {
-                setBusy(false);
-                setError(msg);
-              }}
-            />
-          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {record && Array.isArray(record.parts) && record.parts.length > 0 && (
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                Part
+                <select
+                  value={selectedPartIndex ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    setSelectedPartIndex(v);
+                    const merged = mergePartIntoDraft(record, v);
+                    setDraft(merged);
+                    setBaseline(merged);
+                  }}
+                >
+                  {record.parts.map((p: any, i: number) => (
+                    <option key={i} value={i}>{`Part ${i + 1} of ${record.parts.length} · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {record && editable && (
+              <AddPartInline
+                record={record}
+                statuses={statuses}
+                onStart={() => setBusy(true)}
+                onDone={async (saved, note) => {
+                  setBusy(false);
+                  setRecord(saved);
+                  // if new part added, select the last part
+                  const partsCount = Array.isArray(saved.parts) ? saved.parts.length : 0;
+                  const idx = partsCount > 0 ? partsCount - 1 : null;
+                  setSelectedPartIndex(idx);
+                  const merged = mergePartIntoDraft(saved, idx);
+                  setDraft(merged);
+                  setBaseline(merged);
+                  setSavedNote(note ?? "Part added.");
+                  onSaved(saved);
+                  await loadActivity(saved.id);
+                }}
+                onError={(msg) => {
+                  setBusy(false);
+                  setError(msg);
+                }}
+              />
+            )}
+          </div>
           <button className="btn" style={{ marginLeft: record && editable ? 8 : "auto" }} onClick={requestClose}>
             Close
           </button>
