@@ -154,7 +154,8 @@ def _traveler_date(value: object | None) -> str:
     parsed = _parse_date(value)
     if parsed is None:
         return _s(value)
-    return f"{parsed.day:02d}{_MONTH_ABBR[parsed.month - 1]}{parsed.year % 100:02d}"
+    # Use mm/dd/yy format per user preference (e.g., 08/13/26)
+    return f"{parsed.month:02d}/{parsed.day:02d}/{parsed.year % 100:02d}"
 
 def _filename_part(value: object | None, fallback: str) -> str:
     safe = re.sub(r'[\/\\:*?"<>|\s]+', "_", _s(value)).strip("._")
@@ -436,12 +437,11 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     due = _traveler_date(fields.get("due_date"))
     _set_cell_text(t1.rows[1].cells[1], due)
     material_dims = _s(fields.get("mat_dim"))
-    sign = _s(fields.get("sign") or fields.get("created_by"))
+    # Per user preference, do not render a sign/name on the Material sheet.
+    # Leave the material dims visible in the merged cell if present.
+    sign = ""
     if t1.rows[1].cells[2]._tc is t1.rows[1].cells[3]._tc:
-        # The template intentionally merges the input area below Material Dims
-        # and Sign. Keep both values visible instead of letting Sign overwrite
-        # the dimensions in the shared XML cell.
-        shared_value = f"{material_dims}    {sign}".strip()
+        shared_value = f"{material_dims}".strip()
         _set_cell_text(t1.rows[1].cells[2], shared_value)
     else:
         _set_cell_text(t1.rows[1].cells[2], material_dims)
@@ -522,9 +522,10 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
         _xlsx_set(part, "AE3", _s(qty))
     _xlsx_set(part, "W5", _s(fields.get("material")))
     _xlsx_set(part, "W6", _s(fields.get("material_spec")) or "Per Drawing")
-    # Order release BY + date. AC13 ships as =TODAY(); a live formula would bake
-    # the render day into the cached background forever, so it is replaced.
-    _xlsx_set(part, "Z13", _s(fields.get("created_by") or fields.get("sign")))
+    # Order release BY + date. User prefers no name sign on release — leave blank.
+    # AC13 ships as =TODAY(); a live formula would bake the render day into the
+    # cached background forever, so it is replaced.
+    # Intentionally omit Z13 (Order release BY) to avoid printing a name.
     _xlsx_set(
         part,
         "AC13",
@@ -535,7 +536,9 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
 
     prog = wb[PROGRAM_SHEET]
     # Labels live in A4 / E4; values go beside them.
-    _xlsx_set(prog, "B4", _s(fields.get("programmer") or fields.get("generated_by")))
+    # Only render the explicit programmer name. Do not fall back to generated_by
+    # which would surface account names on the program sheet.
+    _xlsx_set(prog, "B4", _s(fields.get("programmer")))
     _xlsx_set(
         prog,
         "F4",
@@ -641,7 +644,6 @@ def _build_reportlab_pdf(fields: dict[str, Any]) -> bytes:
                 ("Work Order #", _s(fields.get("work_order"))),
                 ("Due Date", _traveler_date(fields.get("due_date"))),
                 ("Material Dims", _s(fields.get("mat_dim"))),
-                ("Sign / Created by", _s(fields.get("sign") or fields.get("created_by"))),
                 ("Customer PO #", _s(fields.get("po_number"))),
                 ("Part Name", _s(fields.get("part_name"))),
                 ("Quantity", _s(fields.get("qty"))),
@@ -674,7 +676,6 @@ def _build_reportlab_pdf(fields: dict[str, Any]) -> bytes:
                 ("QTY", _s(fields.get("qty"))),
                 ("Material Type", _s(fields.get("material"))),
                 ("Material Specification", _s(fields.get("material_spec"))),
-                ("Order release BY", _s(fields.get("created_by"))),
                 ("Finishing", _s(fields.get("finish"))),
             ]
         )
@@ -1036,13 +1037,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("work_order"), col_left, 258.25, width=165)
     center(_traveler_date(fields.get("due_date")), col_mid, 258.25, width=170)
     center(fields.get("mat_dim"), col_mat_dims, 259.48, size=12, width=110)
-    center(
-        fields.get("sign") or fields.get("created_by"),
-        col_sign,
-        259.48,
-        size=12,
-        width=60,
-    )
+    # Per user preference, do not draw a name/sign in the material area or the
+    # small Order release box — intentionally omitted here.
     center(fields.get("po_number"), col_left, 335.68, width=165)
     center(fields.get("part_name") or fields.get("part_number"), col_mid, 335.68, width=175)
     center(fields.get("qty"), col_right, 335.68, width=160)
@@ -1075,7 +1071,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("qty"), 532.4, 99.50, font=bold, size=11.52, width=28)
     center(fields.get("material"), 456.0, 120.74, font=bold, size=10.56, width=176)
     center(fields.get("material_spec") or "Per Drawing", 456.0, 146.54, size=10.56, width=176)
-    center(fields.get("created_by") or fields.get("sign"), 447.2, 205.34, size=10.56, width=50)
+    # Do not render Order release name on the Excel/overlay part page per user request.
     center(
         _traveler_date(fields.get("program_date") or fields.get("generated_at")),
         516.4,
@@ -1093,7 +1089,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     left(fields.get("part_number"), 242.7, 125.99, font=bold, size=10.92, width=120)
     center(fields.get("qty"), 491.4, 126.47, font=bold, size=10.92, width=110)
     center(
-        fields.get("programmer") or fields.get("generated_by"),
+        fields.get("programmer"),
         279.4,
         156.71,
         size=10.92,
