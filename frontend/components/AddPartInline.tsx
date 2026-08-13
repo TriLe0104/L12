@@ -55,6 +55,12 @@ export default function AddPartInline({
       let saved: PurchaseOrder;
       if (record && (record as any).id) {
         saved = await api.addPart((record as any).id, payload);
+        // ensure freshest representation (including derived overlays/parts)
+        try {
+          saved = await api.getPO(saved.id);
+        } catch {
+          /* ignore: use what we already have */
+        }
       } else {
         const createPayload = {
           job_no: draft.job_no ?? record?.job_no ?? "",
