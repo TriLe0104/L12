@@ -622,6 +622,113 @@ def update_part(
     return po
 
 
+@router.patch("/{po_id}/with-part", response_model=POOut)
+def update_po_with_part(
+    po_id: str,
+    payload: POWithPartUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> PurchaseOrder:
+    """Atomically update a PO and optionally a specific part in its parts list.
+
+    The provided `fields` are treated like POUpdate (only set keys apply). If
+    `part_index` and `part` are given, the part update is applied first. Both
+    changes are committed together and a single PO is returned.
+    """
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _guard_locked(po, actor)
+
+    # Apply part update if requested
+    if payload.part_index is not None and payload.part is not None:
+        idx = payload.part_index
+        parts = po.parts if isinstance(getattr(po, "parts", None), list) else []
+        if idx < 0 or idx >= len(parts):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
+        part = dict(parts[idx] or {})
+        p = payload.part
+        if p.part_number is not None:
+            part["part_number"] = p.part_number.strip()
+        if p.part_name is not None:
+            part["part_name"] = p.part_name
+        if p.qty is not None:
+            part["qty"] = int(p.qty)
+        if p.dims is not None:
+            part["dims"] = p.dims
+        if p.mat_dim is not None:
+            part["mat_dim"] = p.mat_dim
+        if p.material is not None:
+            part["material"] = p.material
+        if p.finish is not None:
+            part["finish"] = p.finish
+        if p.inspection is not None:
+            part["inspection"] = p.inspection
+        if p.hardware is not None:
+            part["hardware"] = bool(p.hardware)
+        if p.priority is not None:
+            part["priority"] = p.priority
+        if p.certificates is not None:
+            part["certificates"] = p.certificates
+        if p.thumbnail_url is not None:
+            part["thumbnail_url"] = p.thumbnail_url
+        parts[idx] = part
+        po.parts = parts
+        if not po.thumbnail_url and part.get("thumbnail_url"):
+            po.thumbnail_url = part.get("thumbnail_url")
+        db.add(
+            Activity(
+                actor_id=actor.id,
+                action="Part updated",
+                entity_type="purchase_order",
+                entity_id=po.id,
+                detail=f"Updated part {idx + 1} on {po.job_no} · {po.po_number}",
+            )
+        )
+
+    # Apply PO-level changes if provided
+    if payload.fields is not None:
+        changes = payload.fields.model_dump(exclude_unset=True) if hasattr(payload.fields, 'model_dump') else {}
+        # Handle stage -> status mapping similar to update_po
+        moved_to = changes.pop("stage", None)
+        if moved_to:
+            _assert_known_column(db, moved_to)
+            doc = board_service.get_document(db)
+            current_col = board_service.column_for_status(doc, _status_key(po.status))
+            if current_col != moved_to:
+                default = board_service.default_status_for_column(doc, moved_to)
+                if not default:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        f"Kanban column {moved_to!r} has no default status",
+                    )
+                changes.setdefault("status", default)
+
+        if "status" in changes:
+            _assert_known_status(db, _status_key(changes["status"]))
+
+        # Apply simple attribute updates
+        for key, val in changes.items():
+            if hasattr(po, key):
+                setattr(po, key, val)
+
+        if changes:
+            db.add(
+                Activity(
+                    actor_id=actor.id,
+                    action="PO updated",
+                    entity_type="purchase_order",
+                    entity_id=po.id,
+                    detail=f"Updated fields: {', '.join(changes.keys())}",
+                )
+            )
+
+    db.commit()
+    db.refresh(po)
+    _enrich(db, [po])
+    return po
+
+
 # Fields a STATUS_FLOOR actor may actually move. `stage` is accepted on the
 # wire (kanban drag) but resolves to a status change above, so it never appears
 # in `changed` itself.

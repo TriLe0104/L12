@@ -234,6 +234,18 @@ class TravelerGenerateBody(BaseModel):
     persist: bool = False
 
 
+class POWithPartUpdate(BaseModel):
+    """Combined update for PO and optionally a selected part.
+
+    `fields` follows POUpdate (only present keys are applied). `part_index` is
+    zero-based. `part` follows PartUpdate and is applied only when provided.
+    """
+
+    fields: POUpdate | None = None
+    part_index: int | None = None
+    part: PartUpdate | None = None
+
+
 # ---------- comments ----------
 COMMENT_MAX_LEN = 2000
 
