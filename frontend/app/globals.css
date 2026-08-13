@@ -809,7 +809,6 @@ button.jobcard-thumb:focus-visible {
   .jobcard-due {
     font-size: 0.72rem;
   }
-}
 
 /* the smallest zoom step of the all-cards view: below this the label track was
    claiming more room than the values it labels, so give the values the width */
