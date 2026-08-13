@@ -245,10 +245,11 @@ export function CardEditor({
   const configured = visibleCardFields(document);
   const fieldsBase = configured.length > 0 ? configured : FALLBACK_EDITOR_FIELDS;
   // allow callers to hide builtin fields when embedding the editor (e.g. add-part)
-  const fields = (props.hideFields && props.hideFields.length > 0)
-    ? fieldsBase.filter((f) => !props.hideFields!.includes(f.key))
+  const fields = (hideFields && hideFields.length > 0)
+    ? fieldsBase.filter((f) => !hideFields.includes(f.key))
     : fieldsBase;
-  const customs = customFieldMap(document);  const statusTone = statusByKey.get(value.status ?? "need_material_size")?.tone;
+  const customs = customFieldMap(document);
+  const statusTone = statusByKey.get(value.status ?? "need_material_size")?.tone;
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
