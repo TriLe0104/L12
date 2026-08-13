@@ -219,6 +219,7 @@ export function CardEditor({
   lockable = false,
   minDue,
   flipPrefix,
+  hideFields,
 }: {
   value: PODraft;
   onChange: (patch: PODraft) => void;
@@ -236,13 +237,18 @@ export function CardEditor({
    *  above can slide field rows to their new places. Only the settings preview
    *  needs it — the drawer's field order does not change under the reader. */
   flipPrefix?: string;
+  /** Optional list of field keys to hide from the editor (e.g. ['po_number']) */
+  hideFields?: string[];
 }) {
   const statusLocked = statusDisabled ?? disabled;
   const { document, statusByKey } = useBoardSettings();
   const configured = visibleCardFields(document);
-  const fields = configured.length > 0 ? configured : FALLBACK_EDITOR_FIELDS;
-  const customs = customFieldMap(document);
-  const statusTone = statusByKey.get(value.status ?? "need_material_size")?.tone;
+  const fieldsBase = configured.length > 0 ? configured : FALLBACK_EDITOR_FIELDS;
+  // allow callers to hide builtin fields when embedding the editor (e.g. add-part)
+  const fields = (props.hideFields && props.hideFields.length > 0)
+    ? fieldsBase.filter((f) => !props.hideFields!.includes(f.key))
+    : fieldsBase;
+  const customs = customFieldMap(document);  const statusTone = statusByKey.get(value.status ?? "need_material_size")?.tone;
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

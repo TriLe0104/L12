@@ -220,6 +220,7 @@ export function PODrawer({
           {record && editable && (
             <AddPartInline
               record={record}
+              statuses={statuses}
               onStart={() => setBusy(true)}
               onDone={async (saved, note) => {
                 setBusy(false);
