@@ -366,7 +366,7 @@ def draft_from_po(
         "certificates": _certificates_from_card(db, po),
         "notes": po.note or "",
         "dims": po.dims or "",
-        "part_of": (f"Part 1 of {total_parts}" if total_parts > 0 else "Part 1 of 1"),
+        "part_of": (f"Part { (selected_part_index + 1) if isinstance(selected_part_index, int) else 1 } of {total_parts}" if total_parts > 0 else "Part 1 of 1"),
         "customer": po.customer or "",
         "programmer": generated_by,
         "program_date": stamp.strftime("%Y-%m-%d"),
