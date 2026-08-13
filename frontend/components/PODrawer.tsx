@@ -196,33 +196,35 @@ export function PODrawer({
     try {
       // Status-only actors send just status — never the whole draft — so a stray
       // disabled-field echo cannot widen the PATCH past what the server allows.
-      const saved = creating
-        ? await api.createPO({ ...draft, qty: Number(draft.qty) || 1 })
-        : statusOnly
-          ? await api.updatePO(record!.id, { status: draft.status })
-            : (async () => {
-                // If a part is selected, persist part-specific fields to the parts list
-                if (record && selectedPartIndex != null) {
-                  const partPayload: Record<string, any> = {
-                    part_number: draft.part_number,
-                    part_name: (draft as any).part_name ?? draft.part_number,
-                    qty: Number(draft.qty) || 1,
-                    dims: draft.dims || undefined,
-                    mat_dim: draft.mat_dim || undefined,
-                    material: draft.material || undefined,
-                    finish: draft.finish || undefined,
-                    inspection: draft.inspection || undefined,
-                    hardware: !!draft.hardware,
-                    priority: draft.priority || undefined,
-                    certificates: (draft as any).certificates || undefined,
-                    thumbnail_url: draft.thumbnail_url || undefined,
-                  };
-                  // PATCH the part first
-                  await api.patchPart(record.id, selectedPartIndex, partPayload);
-                }
-                // Then update the PO-level fields
-                return await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
-              })();
+      let saved: PurchaseOrder;
+      if (creating) {
+        saved = await api.createPO({ ...draft, qty: Number(draft.qty) || 1 });
+      } else if (statusOnly) {
+        saved = await api.updatePO(record!.id, { status: draft.status });
+      } else {
+        // If a part is selected, persist part-specific fields together with PO
+        if (record && selectedPartIndex != null) {
+            const partPayload: Record<string, any> = {
+              part_number: draft.part_number,
+              part_name: (draft as any).part_name ?? draft.part_number,
+              qty: Number(draft.qty) || 1,
+              dims: draft.dims || undefined,
+              mat_dim: draft.mat_dim || undefined,
+              material: draft.material || undefined,
+              finish: draft.finish || undefined,
+              inspection: draft.inspection || undefined,
+              hardware: !!draft.hardware,
+              priority: draft.priority || undefined,
+              certificates: (draft as any).certificates || undefined,
+              thumbnail_url: draft.thumbnail_url || undefined,
+            };
+            // Call the combined atomic endpoint
+            saved = await api.updatePOWithPart(record.id, { ...draft, qty: Number(draft.qty) || 1 }, selectedPartIndex, partPayload);
+        } else {
+            saved = await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
+        }
+      }
+
       // stay open on the saved record: server-derived fields (stage, labels) come back here
       setRecord(saved);
       setDraft(saved);
