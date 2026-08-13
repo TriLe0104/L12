@@ -107,9 +107,6 @@ export default function AddPartInline({
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <strong style={{ flex: 0 }}>Add part</strong>
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: "0.9rem", color: "var(--steel)" }}>
-          PO: <strong>{record?.po_number ?? "(new)"}</strong>
-        </div>
       </div>
       <div style={{ marginTop: 8 }}>
         <CardEditor
