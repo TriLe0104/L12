@@ -260,8 +260,8 @@ export function PODrawer({
                     setBaseline(merged);
                   }}
                 >
-                  {record.parts.map((p: any, i: number) => (
-                    <option key={i} value={i}>{`Part ${i + 1} of ${record.parts.length} · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}</option>
+                  {(record.parts ?? []).map((p: any, i: number) => (
+                    <option key={i} value={i}>{`Part ${i + 1} of ${ (record.parts?.length ?? (record.parts ? record.parts.length : 0)) } · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}</option>
                   ))}
                 </select>
               </label>
