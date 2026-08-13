@@ -30,6 +30,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "custom_fields": "JSON",
         # Editable traveler packet field overrides (nullable JSON object).
         "traveler_draft": "JSON",
+        "parts": "JSON",
     },
     "users": {
         "avatar_url": "VARCHAR(1000)",

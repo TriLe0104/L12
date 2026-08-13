@@ -399,6 +399,40 @@ def create_po(
         data["inspection"] = data["inspection"].strip().casefold()
     if isinstance(data.get("priority"), str):
         data["priority"] = data["priority"].strip().casefold()
+
+    # If a PO with the same po_number already exists, treat this create as
+    # adding another part/component to that order rather than making a new top
+    # level PO row. This keeps the dashboard grouped by PO and enables
+    # multi-part orders without a migration to a parts table.
+    existing = db.scalars(select(PurchaseOrder).where(PurchaseOrder.po_number == data.get("po_number"))).first()
+    if existing is not None:
+        part_entry = {
+            "part_number": data.get("part_number"),
+            "part_name": data.get("model_filename") or data.get("part_number"),
+            "qty": data.get("qty"),
+            "thumbnail_url": data.get("thumbnail_url"),
+        }
+        parts = existing.parts if isinstance(getattr(existing, "parts", None), list) else []
+        parts.append(part_entry)
+        existing.parts = parts
+        # If the PO had no top-level thumbnail, adopt the new part's thumbnail so
+        # the dashboard shows a photo at the order level.
+        if not existing.thumbnail_url and part_entry.get("thumbnail_url"):
+            existing.thumbnail_url = part_entry.get("thumbnail_url")
+        db.add(
+            Activity(
+                actor_id=actor.id,
+                action="Part added",
+                entity_type="purchase_order",
+                entity_id=existing.id,
+                detail=f"Added part {part_entry.get('part_number')} to {existing.job_no} · {existing.po_number}",
+            )
+        )
+        db.commit()
+        db.refresh(existing)
+        _enrich(db, [existing])
+        return existing
+
     po = PurchaseOrder(**data)
     # No owner field at all means "mine", the old behaviour. An explicit null is
     # the picker saying Unassigned, and has to survive rather than snap back to
@@ -666,8 +700,12 @@ def _merged_traveler_fields(
     po: PurchaseOrder,
     actor: User,
     overrides: dict[str, Any] | None = None,
+    selected_part_index: int | None = None,
 ) -> dict[str, Any]:
-    base = traveler_svc.draft_from_po(db, po, actor=actor)
+    base = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_part_index)
+    # Include any stored PO thumbnail so the traveler generator can embed it.
+    if getattr(po, "thumbnail_url", None):
+        base["thumbnail_url"] = po.thumbnail_url
     return traveler_svc.apply_draft_overrides(base, overrides)
 
 
@@ -743,6 +781,7 @@ def preview_traveler(
     fmt: str,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
+    part: int | None = Query(None, ge=1),
 ) -> Response:
     """Preview / silent file fetch — no activity row (use POST to record generate).
 
@@ -751,7 +790,8 @@ def preview_traveler(
     if fmt.lower() not in _TRAVELER_FORMATS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown format {fmt!r}")
     po = _load_po_for_traveler(db, po_id)
-    fields = _merged_traveler_fields(db, po, actor)
+    selected_idx = (part - 1) if isinstance(part, int) and part > 0 else None
+    fields = _merged_traveler_fields(db, po, actor, None, selected_part_index=selected_idx)
     if fmt.lower() == "pdf":
         t0 = time.perf_counter()
         try:
@@ -783,6 +823,7 @@ def generate_traveler(
     payload: TravelerGenerateBody | None = None,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
+    part: int | None = Query(None, ge=1),
 ) -> Response:
     """Download a filled traveler packet and record ``Traveler generated``.
 
@@ -801,7 +842,8 @@ def generate_traveler(
             )
         _guard_locked(po, actor)
         po.traveler_draft = traveler_svc.normalize_draft(body.fields) or None
-    fields = _merged_traveler_fields(db, po, actor, body.fields)
+    selected_idx = (part - 1) if isinstance(part, int) and part > 0 else None
+    fields = _merged_traveler_fields(db, po, actor, body.fields, selected_part_index=selected_idx)
     _log(
         db,
         actor,

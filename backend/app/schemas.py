@@ -71,6 +71,10 @@ class POBase(BaseModel):
     model_filename: str | None = None
     model_size: int | None = None
     owner_id: str | None = None
+    # Optional list of parts/components for multipart orders. Each part is an
+    # arbitrary small object; clients may include part_number, part_name, qty,
+    # and thumbnail_url.
+    parts: list[dict[str, str | int | None]] | None = None
     # Admin-defined attributes; keys match board settings customFields.
     custom_fields: dict[str, str | int | float | None] | None = None
 
@@ -164,6 +168,9 @@ class POOut(ORMModel):
     model_size: int | None
     owner: OwnerBrief | None
     custom_fields: dict[str, str | int | float | None] | None = None
+    # Optional list of parts/components for multipart orders. Kept optional to
+    # preserve single-part PO compatibility.
+    parts: list[dict[str, str | int | None]] | None = None
     # Editable traveler packet overrides; merged over live PO values on generate.
     traveler_draft: dict[str, str | int | float | None] | None = None
     created_at: datetime

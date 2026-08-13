@@ -154,6 +154,8 @@ export const api = {
       fields: Record<string, string | number | null>;
       saved: Record<string, string | number | null> | null;
     }>(`/api/purchase-orders/${poId}/traveler`),
+  /** Get a single PO by id. */
+  getPO: (poId: string) => request<PurchaseOrder>(`/api/purchase-orders/${poId}`),
 
   /** Persist traveler_draft JSON on the PO (editor floor). */
   saveTraveler: (poId: string, fields: Record<string, string | number | null>) =>
@@ -166,11 +168,13 @@ export const api = {
     }),
 
   /** Silent preview fetch (no activity). */
-  previewTraveler: (poId: string, fmt: PacketFmt, init?: { signal?: AbortSignal }) =>
-    fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}`, fmt, {
+  previewTraveler: (poId: string, fmt: PacketFmt, opts?: { part?: number; signal?: AbortSignal }) => {
+    const qs = opts?.part ? `?part=${opts.part}` : "";
+    return fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}${qs}`, fmt, {
       method: "GET",
-      signal: init?.signal,
-    }),
+      signal: opts?.signal,
+    });
+  },
 
   /** Download packet and record “Traveler generated”. */
   generateTraveler: (
@@ -180,14 +184,16 @@ export const api = {
       fields?: Record<string, string | number | null>;
       persist?: boolean;
     },
-    init?: { signal?: AbortSignal },
-  ) =>
-    fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}`, fmt, {
+    opts?: { part?: number; signal?: AbortSignal },
+  ) => {
+    const qs = opts?.part ? `?part=${opts.part}` : "";
+    return fetchBinary(`/api/purchase-orders/${poId}/traveler/${fmt}${qs}`, fmt, {
       method: "POST",
       body: JSON.stringify(body ?? {}),
       headers: { "Content-Type": "application/json" },
-      signal: init?.signal,
-    }),
+      signal: opts?.signal,
+    });
+  },
 };
 
 /** Multipart upload. Deliberately not routed through `request`, which forces a

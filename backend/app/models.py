@@ -140,6 +140,10 @@ class PurchaseOrder(Base):
     # Merged over live PO values when generating PDF/DOCX/XLSX. Does not move
     # Modified — traveler generate activity is excluded from that derivation.
     traveler_draft: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Support multiple parts/components per PO. Each part is a small dict with
+    # keys like part_number, part_name, qty, thumbnail_url. Kept as JSON to avoid
+    # an extra table migration for a first pass.
+    parts: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates

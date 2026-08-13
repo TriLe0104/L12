@@ -610,6 +610,18 @@ textarea {
   white-space: nowrap;
 }
 
+.parts-toggle {
+  margin-left: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--rule);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.parts-toggle:hover { background: rgba(0,0,0,0.03); }
+
 .jobcard-due[data-late="true"] {
   color: var(--stop);
 }
@@ -622,9 +634,9 @@ textarea {
 }
 
 .jobcard-thumb {
-  width: 4.5rem;
-  flex: 0 0 4.5rem;
-  height: 4.5rem;
+  width: 6rem;
+  flex: 0 0 6rem;
+  height: 6rem;
   border: 1px solid var(--rule-soft);
   border-radius: 3px;
   background:
@@ -637,7 +649,33 @@ textarea {
   letter-spacing: 0.1em;
   align-self: flex-start;
   object-fit: cover;
+  position: relative;
 }
+
+.jobcard-thumb.stacked {
+  padding-left: 0;
+}
+
+.jobcard-thumb .parts-stack {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.jobcard-thumb .parts-stack .stack-item {
+  width: 2rem;
+  height: 2rem;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+
+.jobcard-thumb .parts-stack .stack-0 { z-index: 4; }
+.jobcard-thumb .parts-stack .stack-1 { z-index: 3; transform: translateX(-6px); }
+.jobcard-thumb .parts-stack .stack-2 { z-index: 2; transform: translateX(-12px); }
+.jobcard-thumb .parts-stack .stack-3 { z-index: 1; transform: translateX(-18px); }
 
 /* with a photo the slot is a button, so it can be tabbed to and opened without
    dragging the card or opening the drawer */
@@ -706,6 +744,34 @@ button.jobcard-thumb:focus-visible {
   .spec {
     grid-template-columns: minmax(2.6rem, 4.7rem) minmax(0, 1fr);
   }
+
+  .parts-list { display: none; }
+}
+
+.parts-list {
+  list-style: none;
+  margin: 0.5rem 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.part-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.part-thumb {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.part-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.part-meta { font-size: 0.78rem; font-weight: 600; }
+.part-name { color: var(--ink-soft); }
+.part-qty { color: var(--steel-soft); font-size: 0.72rem; }
   .spec dt,
   .spec dd {
     padding: 0.2rem 0.35rem;

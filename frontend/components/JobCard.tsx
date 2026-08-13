@@ -120,6 +120,9 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
 
   const photo = assetUrl(po.thumbnail_url);
   const [viewing, setViewing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const parts = po.parts ?? [];
 
   const model = assetUrl(po.model_url);
   const modelFormat = detectModelFormat(po.model_filename ?? po.model_url);
@@ -149,23 +152,37 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
             button: at a glance the order has a model, and one click opens it.
             The click is stopped here or the card would open the drawer too. */}
         {model && modelFormat && (
-          <button
-            type="button"
-            className="model-tag model-tag-button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setViewingModel(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-            }}
-            aria-label={`View the 3D model of part ${po.part_number}`}
-            title={`3D model: ${po.model_filename ?? MODEL_FORMAT_LABEL[modelFormat]}${
-              modelSize ? ` · ${modelSize}` : ""
-            }`}
-          >
-            3D {MODEL_FORMAT_LABEL[modelFormat]}
-          </button>
+         <button
+           type="button"
+           className="model-tag model-tag-button"
+           onClick={(e) => {
+             e.stopPropagation();
+             setViewingModel(true);
+           }}
+           onKeyDown={(e) => {
+             if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+           }}
+           aria-label={`View the 3D model of part ${po.part_number}`}
+           title={`3D model: ${po.model_filename ?? MODEL_FORMAT_LABEL[modelFormat]}${
+             modelSize ? ` · ${modelSize}` : ""
+           }`}
+         >
+           3D {MODEL_FORMAT_LABEL[modelFormat]}
+         </button>
+        )}
+        {parts.length > 1 && (
+         <button
+           type="button"
+           className="parts-toggle"
+           onClick={(e) => {
+             e.stopPropagation();
+             setExpanded((s) => !s);
+           }}
+           aria-expanded={expanded}
+           title={`${parts.length} parts`}
+         >
+           {expanded ? "▾" : "▸"} {parts.length}
+         </button>
         )}
         {po.priority !== "normal" && (
           <PriorityTag priority={po.priority} label={po.priority_label} />
@@ -177,27 +194,39 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
 
       <div className="jobcard-body">
         {photo ? (
-          /* A real button, so the photo is tabbable; both the click and the
-             Enter/Space that produced it are stopped here, otherwise the card
-             around it would open the detail drawer as well. */
-          <button
-            type="button"
-            className="jobcard-thumb"
-            onClick={(e) => {
-              e.stopPropagation();
-              setViewing(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-            }}
-            aria-label={`View photo of part ${po.part_number} full size`}
-            title="View photo full size"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo} alt={`${po.part_number} part`} />
-          </button>
+         /* A real button, so the photo is tabbable; both the click and the
+            Enter/Space that produced it are stopped here, otherwise the card
+            around it would open the detail drawer as well. */
+         <button
+           type="button"
+           className={`jobcard-thumb ${parts.length > 1 ? "stacked" : ""}`}
+           onClick={(e) => {
+             e.stopPropagation();
+             setViewing(true);
+           }}
+           onKeyDown={(e) => {
+             if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+           }}
+           aria-label={`View photo of part ${po.part_number} full size`}
+           title="View photo full size"
+         >
+           {/* eslint-disable-next-line @next/next/no-img-element */}
+           <img src={photo} alt={`${po.part_number} part`} />
+           {parts.length > 1 && (
+             <div className="parts-stack">
+               {parts.slice(0, 4).map((p, i) => (
+                 <img
+                   key={i}
+                   src={assetUrl((p && (p.thumbnail_url as string)) || "")}
+                   alt={p && (p.part_number as string)}
+                   className={`stack-item stack-${i}`}
+                 />
+               ))}
+             </div>
+           )}
+         </button>
         ) : (
-          <div className="jobcard-thumb">NO IMG</div>
+         <div className="jobcard-thumb">NO IMG</div>
         )}
 
         {viewing && photo && (
@@ -215,6 +244,23 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
             format={modelFormat}
             onClose={() => setViewingModel(false)}
           />
+        )}
+
+        {expanded && parts.length > 0 && (
+          <ul className="parts-list">
+            {parts.map((p, i) => (
+              <li key={i} className="part-item">
+                <div className="part-thumb">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={assetUrl((p && (p.thumbnail_url as string)) || "")} alt={p.part_number ?? p.part_name} />
+                </div>
+                <div className="part-meta">
+                  <div className="part-name">{p.part_name ?? p.part_number}</div>
+                  <div className="part-qty">×{p.qty ?? 1}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
 
         <dl className="spec">

@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from . import board_service
+from .storage import load_bytes
 from .models import Activity, PurchaseOrder, User
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "traveler"
@@ -320,6 +321,7 @@ def draft_from_po(
     *,
     actor: User | None = None,
     now: datetime | None = None,
+    selected_part_index: int | None = None,
 ) -> dict[str, Any]:
     """Build the editable traveler field map from PO + saved draft overrides."""
     stamp = now or datetime.now().astimezone()
@@ -327,15 +329,33 @@ def draft_from_po(
     generated_by = actor.name if actor else ""
     generated_at = stamp.strftime("%Y-%m-%d %H:%M %Z").strip() or stamp.isoformat(timespec="minutes")
 
+    # If this PO carries a parts list, prefer the first part for the packet
+    # defaults but expose the parts count via part_of (e.g. "Part 1 of X").
+    first_part = None
+    total_parts = 0
+    if isinstance(getattr(po, "parts", None), list) and po.parts:
+        total_parts = len(po.parts)
+        # selected_part_index is zero-based here; if provided and valid, pick it.
+        if isinstance(selected_part_index, int) and 0 <= selected_part_index < total_parts:
+            first_part = po.parts[selected_part_index]
+        else:
+            first_part = po.parts[0]
+
     base: dict[str, Any] = {
         "work_order": po.job_no,
         "due_date": po.due_date.isoformat() if po.due_date else "",
         "mat_dim": po.mat_dim or "",
         "sign": created_by,
         "po_number": po.po_number,
-        "part_name": _part_name_from_model(po.model_filename) or po.part_number,
-        "part_number": po.part_number,
-        "qty": po.qty,
+        "part_name": (
+            _s(first_part.get("part_name")) if first_part and isinstance(first_part, dict) and first_part.get("part_name")
+            else _part_name_from_model(po.model_filename) or po.part_number
+        ),
+        "part_number": (
+            _s(first_part.get("part_number")) if first_part and isinstance(first_part, dict) and first_part.get("part_number")
+            else po.part_number
+        ),
+        "qty": (first_part.get("qty") if first_part and isinstance(first_part, dict) and first_part.get("qty") is not None else po.qty),
         "finish": po.finish or "",
         "inserts": "Yes" if po.hardware else "No",
         "material": po.material or "",
@@ -345,7 +365,7 @@ def draft_from_po(
         "certificates": _certificates_from_card(db, po),
         "notes": po.note or "",
         "dims": po.dims or "",
-        "part_of": "Part 1 of 1",
+        "part_of": (f"Part 1 of {total_parts}" if total_parts > 0 else "Part 1 of 1"),
         "customer": po.customer or "",
         "programmer": generated_by,
         "program_date": stamp.strftime("%Y-%m-%d"),
@@ -921,6 +941,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         c.setFont(font, actual)
         c.drawCentredString(x, 792 - y1 + actual * 0.25, text)
 
+    # Notes overflow collector (may be appended to the final PDF as extra pages)
+    notes_overflow_text: str | None = None
+
     def wrapped(
         value: object,
         x: float,
@@ -930,25 +953,44 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         width: float,
         lines: int = 2,
         leading: float = 13.44,
-    ) -> None:
-        words = _s(value).split()
-        rows: list[str] = []
-        current = ""
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            if (
-                current
-                and pdfmetrics.stringWidth(candidate, regular, size) > width
-                and len(rows) < lines - 1
-            ):
+    ) -> str | None:
+        """Draw up to `lines` wrapped lines, reducing font size if necessary.
+        Returns any leftover text (as a single string) if the content does not fit.
+        """
+        text = _s(value)
+        if not text:
+            return None
+        # Try progressively smaller sizes until the wrapped lines fit or we hit min size
+        size_try = size
+        min_size = 6.5
+        while True:
+            words = text.split()
+            rows: list[str] = []
+            current = ""
+            for word in words:
+                candidate = f"{current} {word}".strip()
+                if (
+                    current
+                    and pdfmetrics.stringWidth(candidate, regular, size_try) > width
+                    and len(rows) < lines - 1
+                ):
+                    rows.append(current)
+                    current = word
+                else:
+                    current = candidate
+            if current:
                 rows.append(current)
-                current = word
-            else:
-                current = candidate
-        if current:
-            rows.append(current)
+            if len(rows) <= lines or size_try <= min_size:
+                break
+            size_try = max(min_size, size_try * 0.9)
+        # Draw the visible lines
         for index, row in enumerate(rows[:lines]):
-            center(row, x, y1 + leading * index, size=size, width=width)
+            center(row, x, y1 + leading * index, size=size_try, width=width)
+        # Return leftover as a single string (or None)
+        if len(rows) > lines:
+            leftover = " ".join(rows[lines:])
+            return leftover
+        return None
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
     # column centres are taken from the rendered headings and every data value
@@ -958,6 +1000,32 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     col_mat_dims, col_sign = 450.4, 540.3
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
+
+    # Draw PO thumbnail image if present. Uses internal storage loader which
+    # transparently reads local disk or object storage. The image is scaled to
+    # fit within a bounded box and placed near the drawing area.
+    try:
+        thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
+        if thumb_url:
+            img_bytes = load_bytes(thumb_url)
+            if img_bytes:
+                try:
+                    from reportlab.lib.utils import ImageReader
+
+                    img = ImageReader(io.BytesIO(img_bytes))
+                    iw, ih = img.getSize()
+                    max_w, max_h = 170, 140
+                    ratio = min(max_w / iw, max_h / ih, 1.0)
+                    draw_w, draw_h = iw * ratio, ih * ratio
+                    img_x = 36
+                    img_y_top = 170
+                    img_y = 792 - img_y_top - draw_h
+                    c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask='auto')
+                except Exception:
+                    # Best-effort: if image handling fails, continue without it.
+                    pass
+    except Exception:
+        pass
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
@@ -983,8 +1051,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("material"), col_right, 406.48, width=160)
     wrapped(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165)
     center(fields.get("part_marking") or "None", col_mid, 496.74, width=165)
-    wrapped(fields.get("certificates"), col_right, 496.74, width=155)
-    wrapped(
+    # Certificates: allow the wrapper to reduce font size if needed
+    wrapped(fields.get("certificates"), col_right, 496.74, width=155, lines=2)
+    # Notes: draw up to three lines here, capture any leftover for extra pages
+    notes_overflow_text = wrapped(
         fields.get("notes") or "None",
         col_mid,
         642.15,
@@ -993,6 +1063,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         lines=3,
         leading=12.2,
     )
+
     c.showPage()
 
     # Excel Part 555. Every input cell here is centre-aligned in the workbook,
@@ -1042,6 +1113,55 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     for index, page in enumerate(base_reader.pages):
         page.merge_page(overlay_reader.pages[index])
         writer.add_page(page)
+
+    # If notes overflowed the available lines on page 1, append the remainder
+    # as one or more simple text pages at the end of the packet.
+    if notes_overflow_text:
+        try:
+            from reportlab.lib.utils import simpleSplit
+        except Exception:
+            simpleSplit = None
+        extra_buf = io.BytesIO()
+        ext_c = canvas.Canvas(extra_buf, pagesize=(612, 792))
+        font_size = 10
+        left_margin = 36
+        usable_width = 612 - left_margin * 2
+        if simpleSplit:
+            wrapped_lines = simpleSplit(notes_overflow_text, regular, font_size, usable_width)
+        else:
+            # Fallback naive split if simpleSplit is unavailable
+            wrapped_lines = []
+            for paragraph in (notes_overflow_text or "").split("\n"):
+                words = paragraph.split()
+                line = ""
+                for w in words:
+                    candidate = (line + " " + w).strip()
+                    if pdfmetrics.stringWidth(candidate, regular, font_size) > usable_width and line:
+                        wrapped_lines.append(line)
+                        line = w
+                    else:
+                        line = candidate
+                if line:
+                    wrapped_lines.append(line)
+        leading = 12
+        lines_per_page = max(1, int((792 - 72) / leading))
+        idx = 0
+        while idx < len(wrapped_lines):
+            text_obj = ext_c.beginText(left_margin, 792 - 36)
+            text_obj.setFont(regular, font_size)
+            text_obj.setLeading(leading)
+            for _ in range(lines_per_page):
+                if idx >= len(wrapped_lines):
+                    break
+                text_obj.textLine(wrapped_lines[idx])
+                idx += 1
+            ext_c.drawText(text_obj)
+            ext_c.showPage()
+        ext_c.save()
+        extra_reader = PdfReader(io.BytesIO(extra_buf.getvalue()))
+        for p in extra_reader.pages:
+            writer.add_page(p)
+
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()

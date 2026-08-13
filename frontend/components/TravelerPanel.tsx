@@ -87,6 +87,8 @@ export function TravelerPanel({
   const downloadStartedRef = useRef<number | null>(null);
   const { document: boardDocument } = useBoardSettings();
   const materialOptions = selectionOptions(boardDocument, MATERIAL_FIELD_KEY);
+  const [poData, setPoData] = useState<any | null>(null);
+  const [selectedPart, setSelectedPart] = useState<number | null>(null); // 1-based
 
   const dirty = useMemo(
     () => JSON.stringify(fields) !== JSON.stringify(baseline),
@@ -100,9 +102,12 @@ export function TravelerPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await api.getTraveler(poId);
-      setFields(res.fields);
-      setBaseline(res.fields);
+      const [trav, po] = await Promise.all([api.getTraveler(poId), api.getPO(poId)]);
+      setFields(trav.fields);
+      setBaseline(trav.fields);
+      setPoData(po);
+      const parts = (po?.parts && Array.isArray(po.parts) && po.parts.length) || 0;
+      setSelectedPart(parts > 0 ? 1 : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load traveler");
     } finally {
@@ -236,7 +241,7 @@ export function TravelerPanel({
         setBaseline(res.fields);
       }
       // GET /traveler/pdf → same template-overlay PDF as Download.
-      const { blob } = await api.previewTraveler(poId, "pdf", { signal: ac.signal });
+      const { blob } = await api.previewTraveler(poId, "pdf", { part: selectedPart ?? undefined, signal: ac.signal });
       if (ac.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
@@ -271,7 +276,7 @@ export function TravelerPanel({
         poId,
         fmt,
         { fields, persist: canEditDraft },
-        { signal: ac.signal },
+        { part: selectedPart ?? undefined, signal: ac.signal },
       );
       if (ac.signal.aborted) return;
       triggerDownload(blob, filename);
@@ -323,6 +328,25 @@ export function TravelerPanel({
           Order created by <strong>{String(fields.created_by || "—")}</strong>
         </span>
       </div>
+
+      {poData?.parts && Array.isArray(poData.parts) && poData.parts.length > 0 && (
+        <div style={{ margin: "0.5rem 0" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span style={{ whiteSpace: "nowrap" }}>Part:</span>
+            <select
+              className="cell-input"
+              value={String(selectedPart ?? "")}
+              onChange={(e) => setSelectedPart(e.target.value ? Number(e.target.value) : null)}
+            >
+              {poData.parts.map((p: any, idx: number) => (
+                <option key={idx} value={idx + 1}>
+                  {`Part ${idx + 1} of ${poData.parts.length}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       <div className="traveler-actions">
         <button
