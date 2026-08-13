@@ -305,6 +305,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
 export function JobChip({ po }: { po: PurchaseOrder }) {
   const { statusByKey } = useBoardSettings();
   const tone = statusByKey.get(po.status)?.tone;
+  const parts = po.parts ?? [];
   return (
     <div
       className="chip"
@@ -313,6 +314,10 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
       title={`${po.job_no} · ${po.po_number}${po.locked ? " · locked" : ""}`}
     >
       <div className="chip-top">
+        <div className="chip-thumb">
+          <img src={assetUrl(po.thumbnail_url ?? parts[0]?.thumbnail_url ?? undefined) ?? undefined} alt={po.po_number} />
+          {parts.length > 1 && <span className="chip-parts-count">{parts.length}</span>}
+        </div>
         <span className="chip-job">{po.job_no}</span>
         {po.locked && (
           <span className="chip-lock" title="Locked">

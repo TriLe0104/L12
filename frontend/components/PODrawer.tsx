@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useCallback } from "react";
+import AddPartInline from "./AddPartInline";
 import {
   canEdit,
   canEditStatus,
@@ -217,46 +219,23 @@ export function PODrawer({
             {creating ? "New purchase order" : `${record?.job_no} · ${record?.po_number}`}
           </strong>
           {record && editable && (
-            <button
-              type="button"
-              className="btn"
-              onClick={async (e) => {
-                e.stopPropagation();
-                const part = window.prompt("Part number to add to this PO:");
-                if (!part) return;
-                const qtyStr = window.prompt("Quantity (leave blank for 1):", "1");
-                const qty = qtyStr ? Number(qtyStr) || 1 : 1;
-                setBusy(true);
-                setError(null);
-                try {
-                  const payload = {
-                    job_no: record.job_no,
-                    po_number: record.po_number,
-                    part_number: part,
-                    qty,
-                    due_date: record.due_date,
-                    material: record.material,
-                    finish: record.finish,
-                    inspection: record.inspection,
-                    priority: record.priority,
-                  };
-                  const saved = await api.createPO(payload);
-                  setRecord(saved);
-                  setDraft(saved);
-                  setBaseline(saved);
-                  setSavedNote("Part added.");
-                  onSaved(saved);
-                  await loadActivity(saved.id);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Add part failed");
-                } finally {
-                  setBusy(false);
-                }
+            <AddPartInline
+              record={record}
+              onStart={() => setBusy(true)}
+              onDone={async (saved, note) => {
+                setBusy(false);
+                setRecord(saved);
+                setDraft(saved);
+                setBaseline(saved);
+                setSavedNote(note ?? "Part added.");
+                onSaved(saved);
+                await loadActivity(saved.id);
               }}
-              title="Add a new part to this PO"
-            >
-              + Part
-            </button>
+              onError={(msg) => {
+                setBusy(false);
+                setError(msg);
+              }}
+            />
           )}
           <button className="btn" style={{ marginLeft: record && editable ? 8 : "auto" }} onClick={requestClose}>
             Close
