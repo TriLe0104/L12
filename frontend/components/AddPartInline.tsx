@@ -98,7 +98,7 @@ export default function AddPartInline({
       model_filename: null,
       model_size: null,
       custom_fields: {},
-    });
+    } as any);
   }, [open, record]);
 
   // Render CardEditor for the same new-order UI but hide the PO # field
