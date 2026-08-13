@@ -419,7 +419,23 @@ def create_po(
             "qty": data.get("qty"),
             "thumbnail_url": data.get("thumbnail_url"),
         }
-        parts = existing.parts if isinstance(getattr(existing, "parts", None), list) else []
+        # If the existing PO has no `parts` array yet, promote the current
+        # top-level part into the parts list so both the original and the new
+        # part are preserved on the PO.
+        if isinstance(getattr(existing, "parts", None), list) and existing.parts:
+            parts = existing.parts
+        else:
+            parts = []
+            # Promote the current primary part into the parts list if it looks valid.
+            if existing.part_number or existing.part_number is not None:
+                parts.append(
+                    {
+                        "part_number": existing.part_number,
+                        "part_name": existing.part_number,
+                        "qty": existing.qty,
+                        "thumbnail_url": existing.thumbnail_url,
+                    }
+                )
         parts.append(part_entry)
         existing.parts = parts
         # If the PO had no top-level thumbnail, adopt the new part's thumbnail so
