@@ -484,6 +484,73 @@ def get_po(
     return po
 
 
+@router.post("/{po_id}/parts", response_model=POOut, status_code=status.HTTP_201_CREATED)
+def add_part(
+    po_id: str,
+    payload: "PartCreate",
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> PurchaseOrder:
+    """Append a part to an existing PO's parts list.
+
+    This endpoint makes appending parts explicit and robust for clients that
+    are editing an existing order in-place.
+    """
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    _guard_locked(po, actor)
+
+    # Build the part entry from the supplied payload while keeping only the
+    # fields we want to persist.
+    part_entry = {
+        "part_number": payload.part_number.strip() if isinstance(payload.part_number, str) else payload.part_number,
+        "part_name": payload.part_name or payload.part_number,
+        "qty": int(payload.qty) if payload.qty is not None else 1,
+        "dims": payload.dims,
+        "mat_dim": payload.mat_dim,
+        "material": payload.material,
+        "finish": payload.finish,
+        "inspection": payload.inspection,
+        "hardware": bool(payload.hardware) if payload.hardware is not None else False,
+        "priority": payload.priority,
+        "certificates": payload.certificates,
+        "thumbnail_url": payload.thumbnail_url,
+    }
+
+    if isinstance(getattr(po, "parts", None), list) and po.parts:
+        parts = po.parts
+    else:
+        parts = []
+        if po.part_number or po.part_number is not None:
+            parts.append(
+                {
+                    "part_number": po.part_number,
+                    "part_name": po.part_number,
+                    "qty": po.qty,
+                    "thumbnail_url": po.thumbnail_url,
+                }
+            )
+    parts.append(part_entry)
+    po.parts = parts
+    if not po.thumbnail_url and part_entry.get("thumbnail_url"):
+        po.thumbnail_url = part_entry.get("thumbnail_url")
+
+    db.add(
+        Activity(
+            actor_id=actor.id,
+            action="Part added",
+            entity_type="purchase_order",
+            entity_id=po.id,
+            detail=f"Added part {part_entry.get('part_number')} to {po.job_no} · {po.po_number}",
+        )
+    )
+    db.commit()
+    db.refresh(po)
+    _enrich(db, [po])
+    return po
+
+
 # Fields a STATUS_FLOOR actor may actually move. `stage` is accepted on the
 # wire (kanban drag) but resolves to a status change above, so it never appears
 # in `changed` itself.

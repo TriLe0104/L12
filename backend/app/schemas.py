@@ -83,6 +83,21 @@ class POCreate(POBase):
     pass
 
 
+class PartCreate(BaseModel):
+    part_number: str
+    part_name: str | None = None
+    qty: int | None = 1
+    dims: str | None = None
+    mat_dim: str | None = None
+    material: str | None = None
+    finish: str | None = None
+    inspection: str | None = "standard"
+    hardware: bool | None = False
+    priority: str | None = "normal"
+    certificates: str | None = None
+    thumbnail_url: str | None = None
+
+
 class POUpdate(BaseModel):
     job_no: str | None = None
     po_number: str | None = None
