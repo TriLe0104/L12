@@ -78,6 +78,7 @@ const FALLBACK_STAGES: StageMeta[] = [
 const FILTER_STORAGE_KEY = "po_calendar_dashboard_filter";
 const FILTERS_STORAGE_KEY = "po_calendar_dashboard_filters_v2";
 const SORT_STORAGE_KEY = "po_calendar_dashboard_sort";
+const EXPAND_ALL_STORAGE_KEY = "po_calendar_dashboard_expand_all";
 const WIDTHS_STORAGE_KEY = "po_calendar_dashboard_col_widths";
 const MIN_COL_REM = 2.4;
 
@@ -284,6 +285,8 @@ export default function DashboardPage() {
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
   const colWidthsRef = useRef<Record<string, number>>({});
   const [resizingCol, setResizingCol] = useState<string | null>(null);
+  const [expandAll, setExpandAll] = useState(true);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
@@ -398,6 +401,10 @@ export default function DashboardPage() {
     const savedSort = window.localStorage.getItem(SORT_STORAGE_KEY);
     const [key, dir] = savedSort?.split(":") ?? [];
     if (key && (dir === "asc" || dir === "desc")) setSort({ key, dir });
+
+    const savedExpand = window.localStorage.getItem(EXPAND_ALL_STORAGE_KEY);
+    if (savedExpand === "0" || savedExpand === "false") setExpandAll(false);
+    else setExpandAll(true);
   }, [STAGE_FILTERS]);
 
   useEffect(() => {
@@ -476,13 +483,31 @@ export default function DashboardPage() {
     window.addEventListener("pointerup", onUp);
   };
 
+  const persistExpandAll = (next: boolean) => {
+    setExpandAll(next);
+    setCollapsedIds(new Set());
+    setExpandedIds(new Set());
+    window.localStorage.setItem(EXPAND_ALL_STORAGE_KEY, next ? "1" : "0");
+  };
+
   const toggleParts = (poId: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(poId)) next.delete(poId);
-      else next.add(poId);
-      return next;
-    });
+    const partsCount = (pos.find((p) => p.id === poId)?.parts?.length ?? 0);
+    const open = partsCount > 1 && (expandAll ? !collapsedIds.has(poId) : expandedIds.has(poId));
+    if (expandAll) {
+      setCollapsedIds((prev) => {
+        const next = new Set(prev);
+        if (open) next.add(poId);
+        else next.delete(poId);
+        return next;
+      });
+    } else {
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (open) next.delete(poId);
+        else next.add(poId);
+        return next;
+      });
+    }
   };
 
   const statusRank = useMemo(() => {
@@ -746,6 +771,16 @@ export default function DashboardPage() {
           }
           return null;
         })}
+        <button
+          type="button"
+          className="dash-pill"
+          data-active={expandAll}
+          aria-pressed={expandAll}
+          title={expandAll ? "Collapse all parts" : "Expand all parts"}
+          onClick={() => persistExpandAll(!expandAll)}
+        >
+          {expandAll ? "Collapse all" : "Expand all"}
+        </button>
         <input
           className="field dash-search"
           placeholder="Search job, PO, part, material…"
@@ -810,7 +845,9 @@ export default function DashboardPage() {
                 const stage = stageMeta.get(po.stage);
                 const parts = po.parts ?? [];
                 const partsCount = parts.length;
-                const isOpen = expandedIds.has(po.id) && partsCount > 1;
+                const isOpen =
+                  partsCount > 1 &&
+                  (expandAll ? !collapsedIds.has(po.id) : expandedIds.has(po.id));
                 const entries: Array<{
                   key: string;
                   face: PurchaseOrder;
