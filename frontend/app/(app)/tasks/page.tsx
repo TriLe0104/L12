@@ -9,6 +9,7 @@ import { canEdit, canEditStatus, canModifyStatus, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
 import { PRIORITY_FIELD_KEY, resolveToneColor, selectionOptions } from "@/lib/boardTypes";
 import { captureRects, playFlip, type RectMap } from "@/lib/flip";
+import { displayPartIndex, poShowingPart } from "@/lib/parts";
 import { useBoardDrag } from "@/lib/useBoardDrag";
 import {
   PRIORITY_ORDER,
@@ -125,8 +126,10 @@ export default function TasksPage() {
   }, [priorityOrder]);
 
   const boardRef = useRef<HTMLDivElement>(null);
+  const posRef = useRef<PurchaseOrder[]>([]);
   const pendingFlip = useRef<RectMap | null>(null);
   const flipSkip = useRef<string | null>(null);
+  posRef.current = pos;
 
   /** snapshot card positions so the next render can animate the difference */
   const rememberLayout = useCallback((skip?: string) => {
@@ -230,19 +233,25 @@ export default function TasksPage() {
 
   const moveTo = useCallback(
     async (stage: Stage, id: string) => {
+      const current = posRef.current.find((p) => p.id === id);
+      const status = defaultStatusFor(stage);
       let previous: PurchaseOrder[] = [];
       setPOs((prev) => {
         previous = prev;
         return prev.map((p) => (p.id === id ? { ...p, stage } : p));
       });
       try {
-        const saved = await api.updatePO(id, { stage });
+        const parts = current?.parts ?? [];
+        const saved =
+          parts.length > 1
+            ? await api.updatePOWithPart(id, null, displayPartIndex(current!), { status })
+            : await api.updatePO(id, { stage });
         setPOs((prev) => prev.map((p) => (p.id === id ? saved : p)));
       } catch {
         setPOs(previous);
       }
     },
-    [],
+    [stages],
   );
 
   /** a locked card holds its column for everyone but an admin; Users may move
@@ -277,6 +286,9 @@ export default function TasksPage() {
           </p>
         </div>
         <div className="head-tools">
+          <button type="button" className="btn" onClick={() => window.print()}>
+            Print cards
+          </button>
           <input
             className="field"
             placeholder="Search job, PO, part, material…"
@@ -416,8 +428,8 @@ export default function TasksPage() {
                       <JobCard
                         po={po}
                         onUpdated={upsert}
-                        onClick={() => {
-                          setSelected(po);
+                        onClick={(face) => {
+                          setSelected(face ?? po);
                           setDrawerMode("view");
                         }}
                       />
@@ -442,8 +454,8 @@ export default function TasksPage() {
                 <JobCard
                   po={po}
                   onUpdated={upsert}
-                  onClick={() => {
-                    setSelected(po);
+                  onClick={(face) => {
+                    setSelected(face ?? po);
                     setDrawerMode("view");
                   }}
                 />
@@ -453,6 +465,16 @@ export default function TasksPage() {
           {allCards.length === 0 && <div className="empty">No purchase orders match.</div>}
         </>
       )}
+
+      <div className="print-card-sheet" aria-hidden="true">
+        {allCards.flatMap((po) => {
+          const n = po.parts?.length ?? 0;
+          const faces = n > 1 ? po.parts!.map((_, i) => poShowingPart(po, i)) : [po];
+          return faces.map((face, i) => (
+            <JobCard key={`${po.id}:${i}`} po={face} hideParts />
+          ));
+        })}
+      </div>
 
       {drawerMode && (
         <PODrawer

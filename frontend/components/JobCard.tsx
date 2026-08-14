@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { Avatar } from "@/components/Avatar";
 import { ImageViewer } from "@/components/ImageViewer";
 import { ModelViewer } from "@/components/ModelViewer";
-import { assetUrl } from "@/lib/api";
+import { api, assetUrl } from "@/lib/api";
+import { canEditStatus, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
 import {
   builtinClass,
@@ -20,9 +21,8 @@ import {
   MODEL_FORMAT_LABEL,
 } from "@/lib/model-format";
 import { resolveToneColor } from "@/lib/boardTypes";
-import { poShowingPart } from "@/lib/parts";
+import { displayPartIndex, poShowingPart } from "@/lib/parts";
 import type { PurchaseOrder } from "@/lib/types";
-import { PartsCarousel } from "./PartsCarousel";
 
 /** Legacy status → named tone (pre-settings). Mapped to hex via resolveToneColor. */
 export const TONE_BY_STATUS: Record<string, string> = {
@@ -97,15 +97,16 @@ export function JobCard({
   hideParts = false,
 }: {
   po: PurchaseOrder;
-  onClick?: () => void;
+  onClick?: (face?: PurchaseOrder) => void;
   onUpdated?: (saved: PurchaseOrder) => void;
-  /** Hide the parts-count control (used inside the parts carousel). */
+  /** Hide the parts deck chrome (used inside print sheets and the old picker). */
   hideParts?: boolean;
 }) {
+  const { user } = useAuth();
+  const canShuffle = canEditStatus(user);
   const { document, statusByKey } = useBoardSettings();
   const fields = visibleCardFields(document);
   const customs = customFieldMap(document);
-  const tone = statusByKey.get(po.status)?.tone;
   const completedStatuses = new Set<string>();
   for (const col of document?.kanbanColumns ?? []) {
     if (col.isCompleted) {
@@ -133,187 +134,257 @@ export function JobCard({
         ];
 
   const parts = po.parts ?? [];
-  const isSummary = !hideParts && parts.length > 1;
-  const shown = hideParts ? po : poShowingPart(po);
-  const photo = assetUrl(shown.thumbnail_url);
-  const [viewing, setViewing] = useState(false);
-  const [pickingParts, setPickingParts] = useState(false);
+  const isDeck = !hideParts && parts.length > 1;
+  const serverIndex = displayPartIndex(po);
+  const [faceIndex, setFaceIndex] = useState(serverIndex);
+  const [expanded, setExpanded] = useState(false);
+  const [shuffleBusy, setShuffleBusy] = useState(false);
+  useEffect(() => {
+    setFaceIndex(serverIndex);
+  }, [po.id, serverIndex]);
 
-  const model = assetUrl(shown.model_url);
-  const modelFormat = detectModelFormat(shown.model_filename ?? shown.model_url);
-  const modelSize = formatModelSize(shown.model_size);
+  const shown = hideParts ? po : poShowingPart(po, isDeck ? faceIndex : serverIndex);
+  const [viewing, setViewing] = useState(false);
   const [viewingModel, setViewingModel] = useState(false);
 
-  return (
-    <article
-      className={isSummary ? "jobcard jobcard-summary" : "jobcard"}
-      data-locked={po.locked}
-      data-has-model={!isSummary && !!model}
-      style={toneStyle(po.status, tone)}
-      onClick={onClick}
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={(e) => {
-        if (onClick && (e.key === "Enter" || e.key === " ")) {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-    >
-      <header className="jobcard-head">
-        <div className="jobcard-job">{po.job_no}</div>
-        {po.locked && <LockTag />}
-        {/* A badge in the same family as LOCKED and the priority tag, but a real
-            button: at a glance the order has a model, and one click opens it.
-            The click is stopped here or the card would open the drawer too. */}
-        {model && modelFormat && (
-         <button
-           type="button"
-           className="model-tag model-tag-button"
-           onClick={(e) => {
-             e.stopPropagation();
-             setViewingModel(true);
-           }}
-           onKeyDown={(e) => {
-             if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-           }}
-           aria-label={`View the 3D model of part ${shown.part_number}`}
-           title={`3D model: ${shown.model_filename ?? MODEL_FORMAT_LABEL[modelFormat]}${
-             modelSize ? ` · ${modelSize}` : ""
-           }`}
-         >
-           3D {MODEL_FORMAT_LABEL[modelFormat]}
-         </button>
-        )}
-        {!hideParts && parts.length > 1 && (
-         <button
-           type="button"
-           className="parts-toggle"
-           onClick={(e) => {
-             e.stopPropagation();
-             setPickingParts(true);
-           }}
-           aria-haspopup="dialog"
-           title={`${parts.length} parts — browse and set the board card`}
-         >
-           ▸ {parts.length}
-         </button>
-        )}
-        {shown.priority !== "normal" && (
-          <PriorityTag priority={shown.priority} label={shown.priority_label || shown.priority.toUpperCase()} />
-        )}
-        <div className="jobcard-due" data-late={isLate(po, completedStatuses)}>
-          DUE {formatDue(po.due_date)}
+  async function chooseFace(next: number, collapse = false) {
+    if (!isDeck || shuffleBusy) return;
+    setFaceIndex(next);
+    if (collapse) setExpanded(false);
+    if (!canShuffle || next === serverIndex) return;
+    setShuffleBusy(true);
+    try {
+      const saved = await api.setDisplayPart(po.id, next);
+      onUpdated?.(saved);
+    } catch {
+      setFaceIndex(faceIndex);
+    } finally {
+      setShuffleBusy(false);
+    }
+  }
+
+  function renderFace(
+    face: PurchaseOrder,
+    opts: { openDrawer?: boolean; current?: boolean } = {},
+  ) {
+    const facePhoto = assetUrl(face.thumbnail_url);
+    const faceTone = statusByKey.get(face.status ?? po.status)?.tone;
+    const faceModel = assetUrl(face.model_url);
+    const faceFormat = detectModelFormat(face.model_filename ?? face.model_url);
+    const faceSize = formatModelSize(face.model_size);
+    return (
+      <article
+        className="jobcard"
+        data-locked={po.locked}
+        data-current={opts.current ? "true" : undefined}
+        data-has-model={!!faceModel}
+        style={toneStyle(face.status ?? po.status, faceTone)}
+        onClick={() => {
+          if (opts.openDrawer) onClick?.(face);
+        }}
+        role={opts.openDrawer && onClick ? "button" : undefined}
+        tabIndex={opts.openDrawer && onClick ? 0 : undefined}
+        onKeyDown={(e) => {
+          if (opts.openDrawer && onClick && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onClick(face);
+          }
+        }}
+      >
+        <header className="jobcard-head">
+          <div className="jobcard-job">{po.job_no}</div>
+          {po.locked && <LockTag />}
+          {faceModel && faceFormat && (
+            <button
+              type="button"
+              className="model-tag model-tag-button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewingModel(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+              }}
+              aria-label={`View the 3D model of part ${face.part_number}`}
+              title={`3D model: ${face.model_filename ?? MODEL_FORMAT_LABEL[faceFormat]}${
+                faceSize ? ` · ${faceSize}` : ""
+              }`}
+            >
+              3D {MODEL_FORMAT_LABEL[faceFormat]}
+            </button>
+          )}
+          {isDeck && (
+            <button
+              type="button"
+              className="jobcard-deck-toggle"
+              aria-expanded={expanded}
+              title={
+                expanded
+                  ? "Stack the parts back into a deck"
+                  : `Deal all ${parts.length} part cards`
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {expanded ? "Stack" : `${parts.length} parts`}
+            </button>
+          )}
+          {face.priority !== "normal" && (
+            <PriorityTag
+              priority={face.priority}
+              label={face.priority_label || face.priority.toUpperCase()}
+            />
+          )}
+          <div className="jobcard-due" data-late={isLate(po, completedStatuses)}>
+            DUE {formatDue(po.due_date)}
+          </div>
+        </header>
+
+        <div className="jobcard-body">
+          {facePhoto ? (
+            <button
+              type="button"
+              className="jobcard-thumb"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewing(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+              }}
+              aria-label={`View photo of part ${face.part_number} full size`}
+              title="View photo full size"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={facePhoto} alt={`${face.part_number} part`} />
+            </button>
+          ) : (
+            <div className="jobcard-thumb">NO IMG</div>
+          )}
+
+          {viewing && facePhoto && opts.current && (
+            <ImageViewer
+              src={facePhoto}
+              alt={`${face.part_number} part`}
+              onClose={() => setViewing(false)}
+            />
+          )}
+
+          {viewingModel && faceModel && faceFormat && opts.current && (
+            <ModelViewer
+              src={faceModel}
+              filename={face.model_filename ?? `${face.part_number}.${faceFormat}`}
+              format={faceFormat}
+              onClose={() => setViewingModel(false)}
+            />
+          )}
+
+          <dl className="spec">
+            {displayFields.map((f) => (
+              <div key={f.key} className="spec-pair">
+                <dt>{f.label}</dt>
+                <dd className={f.kind === "builtin" ? builtinClass(f.key, face) : ""}>
+                  {f.kind === "builtin" && f.key === "priority" ? (
+                    <PriorityTag
+                      priority={face.priority}
+                      label={face.priority_label || face.priority.toUpperCase()}
+                    />
+                  ) : f.kind === "builtin" ? (
+                    builtinValue(face, f.key)
+                  ) : (
+                    customValue(face, f.key, customs.get(f.key))
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
-      </header>
 
-      <div className="jobcard-body">
-        {isSummary ? (
-          <ul className="jobcard-part-summary">
-            {parts.map((p, i) => {
-              const face = poShowingPart(po, i);
-              const st = face.status ?? po.status;
-              return (
-                <li key={i}>
-                  <span className="jobcard-part-id">{face.part_number || p.part_name || `Part ${i + 1}`}</span>
-                  <span className="jobcard-part-st">
-                    {statusByKey.get(st)?.label ?? st.replaceAll("_", " ")}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        ) : photo ? (
-         /* A real button, so the photo is tabbable; both the click and the
-            Enter/Space that produced it are stopped here, otherwise the card
-            around it would open the detail drawer as well. */
-         <button
-           type="button"
-           className="jobcard-thumb"
-           onClick={(e) => {
-             e.stopPropagation();
-             setViewing(true);
-           }}
-           onKeyDown={(e) => {
-             if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-           }}
-           aria-label={`View photo of part ${shown.part_number} full size`}
-           title="View photo full size"
-         >
-           {/* eslint-disable-next-line @next/next/no-img-element */}
-           <img src={photo} alt={`${shown.part_number} part`} />
-         </button>
-        ) : (
-         <div className="jobcard-thumb">NO IMG</div>
-        )}
+        {face.note && <div className="jobcard-note">{face.note}</div>}
 
-        {viewing && photo && (
-          <ImageViewer
-            src={photo}
-            alt={`${shown.part_number} part`}
-            onClose={() => setViewing(false)}
-          />
-        )}
+        <footer className="jobcard-status">
+          <span>Status:</span>
+          <b>{statusByKey.get(face.status ?? po.status)?.label ?? po.status_label}</b>
+          {po.owner && (
+            <Avatar
+              initials={po.owner.initials}
+              avatarUrl={po.owner.avatar_url}
+              title={po.owner.name}
+            />
+          )}
+        </footer>
+      </article>
+    );
+  }
 
-        {viewingModel && model && modelFormat && (
-          <ModelViewer
-            src={model}
-            filename={shown.model_filename ?? `${shown.part_number}.${modelFormat}`}
-            format={modelFormat}
-            onClose={() => setViewingModel(false)}
-          />
-        )}
+  if (!isDeck) return renderFace(shown, { openDrawer: true, current: true });
 
-        {pickingParts && parts.length > 1 && (
-          <PartsCarousel
-            po={po}
-            onClose={() => setPickingParts(false)}
-            onUpdated={onUpdated}
-          />
-        )}
-
-        {!isSummary && (
-        <dl className="spec">
-          {displayFields.map((f) => (
-            <div key={f.key} className="spec-pair">
-              <dt>{f.label}</dt>
-              <dd className={f.kind === "builtin" ? builtinClass(f.key, shown) : ""}>
-                {f.kind === "builtin" && f.key === "priority" ? (
-                  <PriorityTag
-                    priority={shown.priority}
-                    label={shown.priority_label || shown.priority.toUpperCase()}
-                  />
-                ) : f.kind === "builtin" ? (
-                  builtinValue(shown, f.key)
-                ) : (
-                  customValue(shown, f.key, customs.get(f.key))
-                )}
-              </dd>
+  if (expanded) {
+    return (
+      <div className="jobcard-deal" data-count={parts.length}>
+        {parts.map((_, i) => {
+          const face = poShowingPart(po, i);
+          const isCurrent = i === faceIndex;
+          return (
+            <div
+              key={i}
+              className="jobcard-deal-item"
+              data-current={isCurrent}
+              style={{ ["--deal-i" as string]: i } as CSSProperties}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isCurrent) {
+                  onClick?.(face);
+                  return;
+                }
+                void chooseFace(i, true);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {isCurrent && <span className="jobcard-deal-badge">Current</span>}
+              {renderFace(face, { current: isCurrent })}
             </div>
-          ))}
-        </dl>
-        )}
+          );
+        })}
       </div>
+    );
+  }
 
-      {!isSummary && shown.note && <div className="jobcard-note">{shown.note}</div>}
+  const peek = parts
+    .map((_, i) => i)
+    .filter((i) => i !== faceIndex)
+    .slice(0, 2);
 
-      <footer className="jobcard-status">
-        <span>Status:</span>
-        <b>
-          {isSummary
-            ? po.status_label ||
-              `${po.parts_completed ?? 0} of ${po.parts_total ?? parts.length} Completed`
-            : statusByKey.get(shown.status ?? po.status)?.label ?? po.status_label}
-        </b>
-        {po.owner && (
-          <Avatar
-            initials={po.owner.initials}
-            avatarUrl={po.owner.avatar_url}
-            title={po.owner.name}
-          />
-        )}
-      </footer>
-    </article>
+  return (
+    <div className="jobcard-deck" data-count={parts.length}>
+      {peek.map((i, depth) => {
+        const face = poShowingPart(po, i);
+        return (
+          <button
+            key={i}
+            type="button"
+            className="jobcard-deck-back"
+            data-depth={peek.length - depth}
+            aria-label={`Deal all ${parts.length} part cards`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <span className="jobcard-deck-back-job">{po.job_no}</span>
+            <span className="jobcard-deck-back-part">
+              Part {i + 1}
+              {face.part_number ? ` · ${face.part_number}` : ""}
+            </span>
+          </button>
+        );
+      })}
+      {renderFace(shown, { openDrawer: true, current: true })}
+    </div>
   );
 }
 
@@ -323,6 +394,7 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
   const tone = statusByKey.get(po.status)?.tone;
   const parts = po.parts ?? [];
   const shown = poShowingPart(po);
+  const photo = assetUrl(shown.thumbnail_url);
   return (
     <div
       className="chip"
@@ -331,10 +403,14 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
       title={`${po.job_no} · ${po.po_number}${po.locked ? " · locked" : ""}`}
     >
       <div className="chip-top">
-        <div className="chip-thumb">
-          <img src={assetUrl(shown.thumbnail_url ?? undefined) ?? undefined} alt={shown.po_number} />
-          {parts.length > 1 && <span className="chip-parts-count">{parts.length}</span>}
-        </div>
+        {photo ? (
+          <div className="chip-thumb">
+            <img src={photo} alt="" />
+            {parts.length > 1 && <span className="chip-parts-count">{parts.length}</span>}
+          </div>
+        ) : (
+          parts.length > 1 && <span className="chip-parts-inline">{parts.length}</span>
+        )}
         <span className="chip-job">{po.job_no}</span>
         {po.locked && (
           <span className="chip-lock" title="Locked">

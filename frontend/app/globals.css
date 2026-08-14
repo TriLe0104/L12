@@ -628,6 +628,11 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  animation: fade 280ms var(--ease) both;
+}
+
+.scrim.parts-carousel-scrim[data-phase="out"] {
+  animation: fade-out 280ms var(--ease) both;
 }
 
 .parts-carousel {
@@ -640,6 +645,11 @@ textarea {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: parts-picker-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scrim.parts-carousel-scrim[data-phase="out"] .parts-carousel {
+  animation: parts-picker-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 .parts-carousel-head {
@@ -686,15 +696,45 @@ textarea {
   flex: 0 0 min(28rem, 86vw);
   scroll-snap-align: center;
   cursor: pointer;
+  transform-origin: center bottom;
+  animation: parts-slide-in 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(50ms + var(--slide-i, 0) * 48ms);
+  transition: transform 280ms var(--ease);
+}
+
+.scrim.parts-carousel-scrim[data-phase="out"] .parts-carousel-slide {
+  animation: none;
 }
 
 .parts-carousel-slide .jobcard {
   pointer-events: none;
+  transition:
+    outline-color 280ms var(--ease),
+    transform 320ms var(--ease),
+    box-shadow 320ms var(--ease);
 }
 
 .parts-carousel-slide[data-current="true"] .jobcard {
   outline: 2px solid var(--go, #2f7d4a);
   outline-offset: 2px;
+  transform: scale(1.02);
+  box-shadow: 0 14px 28px -16px rgba(9, 12, 16, 0.42);
+}
+
+.parts-carousel-slide[data-active="true"] .jobcard {
+  transform: translateY(-6px);
+}
+
+.parts-carousel-slide[data-current="true"][data-active="true"] .jobcard {
+  transform: scale(1.02) translateY(-6px);
+}
+
+.parts-carousel-slide:hover .jobcard {
+  transform: translateY(-6px);
+}
+
+.parts-carousel-slide[data-current="true"]:hover .jobcard {
+  transform: scale(1.02) translateY(-6px);
 }
 
 .parts-carousel-badge {
@@ -731,9 +771,13 @@ textarea {
 }
 
 .jobcard-thumb {
-  width: 8rem;
-  flex: 0 0 8rem;
-  height: 8rem;
+  width: 42%;
+  flex: 0 0 42%;
+  max-width: 13.5rem;
+  min-width: 7.25rem;
+  aspect-ratio: 1;
+  height: auto;
+  min-height: 7.25rem;
   border: 1px solid var(--rule-soft);
   border-radius: 3px;
   background:
@@ -903,9 +947,10 @@ button.jobcard-thumb:focus-visible {
     padding-right: 0.5rem;
   }
   .jobcard-thumb {
-    width: 3.4rem;
-    flex-basis: 3.4rem;
-    height: 3.4rem;
+    width: 6.75rem;
+    flex: 0 0 6.75rem;
+    min-width: 6.75rem;
+    height: 6.75rem;
   }
   .card-wells {
     --well: 3.4rem;
@@ -939,9 +984,10 @@ button.jobcard-thumb:focus-visible {
     padding-right: 0.28rem;
   }
   .jobcard-thumb {
-    width: 2.8rem;
-    flex-basis: 2.8rem;
-    height: 2.8rem;
+    width: 5.5rem;
+    flex: 0 0 5.5rem;
+    min-width: 5.5rem;
+    height: 5.5rem;
   }
   .card-wells {
     --well: 2.8rem;
@@ -1022,6 +1068,8 @@ button.jobcard-thumb:focus-visible {
   padding: 0.22rem 0.15rem;
   border-bottom: 1px solid var(--rule-soft);
   font-size: 0.78rem;
+  animation: rise 320ms var(--ease) both;
+  animation-delay: calc(var(--part-i, 0) * 45ms);
 }
 
 .jobcard-part-summary li:last-child {
@@ -1188,6 +1236,16 @@ button.jobcard-thumb:focus-visible {
   overflow: hidden;
 }
 .chip-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chip-parts-inline {
+  flex: none;
+  margin-right: 0.35rem;
+  background: var(--tone);
+  color: #fff;
+  font-weight: 700;
+  padding: 0.08rem 0.28rem;
+  border-radius: 6px;
+  font-size: 0.58rem;
+}
 .chip-parts-count {
   position: absolute;
   right: -6px;
@@ -1557,6 +1615,140 @@ button.jobcard-thumb:focus-visible {
 
 .kcol-body > * {
   min-width: 0;
+}
+
+.kcard {
+  overflow: visible;
+}
+
+.jobcard-deck {
+  position: relative;
+  padding: 0.85rem 1rem 0 0;
+}
+
+.jobcard-deck-back {
+  position: absolute;
+  left: 0;
+  right: 1rem;
+  top: 0.85rem;
+  height: 3.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f4f7f9, #e4eaef);
+  box-shadow: 0 2px 0 rgba(13, 17, 23, 0.06);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.jobcard-deck-back[data-depth="1"] {
+  transform: translate(8px, -8px) rotate(1.4deg);
+  z-index: 1;
+}
+
+.jobcard-deck-back[data-depth="2"] {
+  transform: translate(16px, -16px) rotate(2.8deg);
+  z-index: 0;
+  opacity: 0.92;
+}
+
+.jobcard-deck-back-job {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.jobcard-deck-back-part {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--steel);
+  font-family: var(--font-mono), monospace;
+}
+
+.jobcard-deck > .jobcard {
+  position: relative;
+  z-index: 2;
+}
+
+.jobcard-deck-toggle {
+  height: 1.4rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.jobcard-deck-toggle:hover {
+  border-color: rgba(13, 17, 23, 0.32);
+  background: #fff;
+}
+
+.jobcard-deal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.jobcard-deal-item {
+  position: relative;
+  animation: card-deal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--deal-i, 0) * 58ms);
+}
+
+.jobcard-deal-item[data-current="true"] .jobcard {
+  outline: 2px solid var(--go, #2f7d4a);
+  outline-offset: 2px;
+}
+
+.jobcard-deal-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--go, #2f7d4a);
+  color: #fff;
+  padding: 0.18rem 0.35rem;
+  border-radius: 3px;
+}
+
+@keyframes card-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-22px) rotate(-5deg) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.jobcard-deck-nav {
+  display: none;
+}
+
+.jobcard-deck-btn {
+  display: none;
+}
+
+.jobcard-deck-count {
+  display: none;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono), monospace;
 }
 
 .kcard[data-grab="true"] {
@@ -2243,6 +2435,48 @@ button.jobcard-thumb:focus-visible {
   }
 }
 
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes parts-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parts-picker-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+@keyframes parts-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .drawer {
   position: fixed;
   top: 0;
@@ -2306,6 +2540,17 @@ button.jobcard-thumb:focus-visible {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes viewer-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98) translateY(6px);
   }
 }
 
@@ -3344,7 +3589,9 @@ button.jobcard-thumb:focus-visible {
   :is(.board-all, .drawer, .card-stage) .jobcard-thumb {
     width: 100%;
     flex-basis: auto;
-    height: 6.5rem;
+    max-width: none;
+    min-width: 0;
+    height: 9.5rem;
   }
   /* stacked, the media column spans the card — and its basis is now a height,
      so it has to go back to auto */
@@ -4425,5 +4672,75 @@ button.jobcard-thumb:focus-visible {
   * {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+.print-card-sheet {
+  display: none;
+}
+
+@media print {
+  .rail,
+  .head-tools,
+  .dash-filters,
+  .page-sub,
+  .scrim,
+  .drawer,
+  .comment-thread,
+  .comment-thread-scrim {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+  }
+
+  .main {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .page-head {
+    margin-bottom: 0.75rem;
+  }
+
+  .kanban,
+  .board-all {
+    display: none !important;
+  }
+
+  .print-card-sheet {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.7rem;
+  }
+
+  .print-card-sheet .jobcard {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+
+  .jobcard-deck-back,
+  .jobcard-deck-nav,
+  .jobcard-deck-toggle,
+  .jobcard-deal-badge {
+    display: none !important;
+  }
+
+  .jobcard-deck {
+    padding: 0;
+  }
+
+  .dash-panel {
+    box-shadow: none;
+    border-color: #bbb;
+  }
+
+  .dash-scroll {
+    overflow: visible;
+  }
+
+  .dash-table {
+    min-width: 0 !important;
   }
 }

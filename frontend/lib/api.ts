@@ -95,16 +95,18 @@ export const api = {
   deletePO: (id: string) =>
     request<void>(`/api/purchase-orders/${id}`, { method: "DELETE" }),
   poActivity: (id: string) => request<ActivityItem[]>(`/api/purchase-orders/${id}/activity`),
-  listComments: (id: string, part?: number | null) =>
+  listComments: (id: string, part?: number | null | "all") =>
     request<POComment[]>(
-      `/api/purchase-orders/${id}/comments${part ? `?part=${part}` : ""}`,
+      `/api/purchase-orders/${id}/comments${
+        part === "all" ? "?all=1" : part ? `?part=${part}` : ""
+      }`,
     ),
-  addComment: (id: string, body: string, part?: number | null) =>
+  addComment: (id: string, body: string, part?: number | null | "all") =>
     request<POComment>(`/api/purchase-orders/${id}/comments`, {
       method: "POST",
       body: JSON.stringify({
         body,
-        part_index: part != null ? part - 1 : null,
+        part_index: part === "all" || part == null ? null : part - 1,
       }),
     }),
   deleteComment: (poId: string, commentId: string) =>

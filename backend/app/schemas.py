@@ -230,6 +230,8 @@ class POOut(ORMModel):
     # the dashboard badge never N+1s. Comments are not activity and never move
     # `last_modified`.
     comment_count: int = 0
+    # Per-part note counts, keyed by 0-based part index as a string.
+    part_comment_counts: dict[str, int] = Field(default_factory=dict)
     # Multi-part rollup; null on single-part orders.
     parts_completed: int | None = None
     parts_total: int | None = None

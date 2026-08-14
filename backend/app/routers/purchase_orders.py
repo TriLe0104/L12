@@ -168,6 +168,37 @@ def _copy_status_to_parts(po: PurchaseOrder, status: str) -> None:
     _set_parts(po, parts)
 
 
+def _freeze_part_statuses(po: PurchaseOrder) -> None:
+    """Write the current PO status onto any part that never stored its own.
+
+    After that, a later rollup of `po.status` cannot make sibling parts appear
+    to change. Only missing values are filled.
+    """
+    parts = _as_parts_list(po)
+    if len(parts) < 2:
+        return
+    current = _status_key(po.status)
+    changed = False
+    for part in parts:
+        if isinstance(part, dict) and not part.get("status"):
+            part["status"] = current
+            changed = True
+    if changed:
+        _set_parts(po, parts)
+
+
+def _set_part_status(po: PurchaseOrder, index: int, status: str) -> None:
+    """Change one part's status and leave the others alone."""
+    _freeze_part_statuses(po)
+    parts = _as_parts_list(po)
+    if not parts:
+        return
+    idx = min(max(index, 0), len(parts) - 1)
+    if isinstance(parts[idx], dict):
+        parts[idx]["status"] = status
+        _set_parts(po, parts)
+
+
 def _persist_rollup_status(db: Session, po: PurchaseOrder) -> None:
     doc = board_service.get_document(db)
     rollup = board_service.rollup_status(po, doc)
@@ -284,19 +315,23 @@ def _attach_comment_counts(db: Session, pos: Sequence[PurchaseOrder]) -> None:
     ids = [po.id for po in pos]
     for po in pos:
         po.comment_count = 0
+        po.part_comment_counts = {}
     if not ids:
         return
     stmt = (
-        select(POComment.purchase_order_id, func.count())
-        .where(
-            POComment.purchase_order_id.in_(ids),
-            POComment.part_index.is_(None),
-        )
-        .group_by(POComment.purchase_order_id)
+        select(POComment.purchase_order_id, POComment.part_index, func.count())
+        .where(POComment.purchase_order_id.in_(ids))
+        .group_by(POComment.purchase_order_id, POComment.part_index)
     )
-    counts = dict(db.execute(stmt).all())
+    totals: dict[str, int] = {}
+    by_part: dict[str, dict[str, int]] = {}
+    for po_id, part_index, n in db.execute(stmt):
+        totals[po_id] = totals.get(po_id, 0) + int(n)
+        if part_index is not None:
+            by_part.setdefault(po_id, {})[str(int(part_index))] = int(n)
     for po in pos:
-        po.comment_count = counts.get(po.id, 0)
+        po.comment_count = totals.get(po.id, 0)
+        po.part_comment_counts = by_part.get(po.id, {})
 
 
 def _enrich(db: Session, pos: Sequence[PurchaseOrder]) -> None:
@@ -621,6 +656,7 @@ def add_part(
 
     part_entry = _part_entry_from_create(payload)
 
+    _freeze_part_statuses(po)
     parts = _as_parts_list(po)
     if not parts and po.part_number is not None:
         parts.append(_top_level_as_part(po))
@@ -665,6 +701,8 @@ def update_part(
     if index < 0 or index >= len(parts):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
 
+    _freeze_part_statuses(po)
+    parts = _as_parts_list(po)
     part = _apply_part_update(dict(parts[index] or {}), payload)
     parts[index] = part
     _set_parts(po, parts)
@@ -749,16 +787,21 @@ def update_po_with_part(
     _guard_locked(po, actor)
 
     # Apply part update if requested
+    part_status_applied = False
     if payload.part_index is not None and payload.part is not None:
         idx = payload.part_index
         parts = _as_parts_list(po)
         if idx < 0 or idx >= len(parts):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
+        _freeze_part_statuses(po)
+        parts = _as_parts_list(po)
         part = _apply_part_update(dict(parts[idx] or {}), payload.part)
         parts[idx] = part
         _set_parts(po, parts)
         _adopt_part_media(po, part)
         _persist_rollup_status(db, po)
+        part_dump = payload.part.model_dump(exclude_unset=True)
+        part_status_applied = "status" in part_dump
         db.add(
             Activity(
                 actor_id=actor.id,
@@ -772,6 +815,9 @@ def update_po_with_part(
     # Apply PO-level changes if provided
     if payload.fields is not None:
         changes = payload.fields.model_dump(exclude_unset=True) if hasattr(payload.fields, 'model_dump') else {}
+        if part_status_applied:
+            changes.pop("status", None)
+            changes.pop("stage", None)
         # Handle stage -> status mapping similar to update_po
         moved_to = changes.pop("stage", None)
         if moved_to:
@@ -893,7 +939,14 @@ def update_po(
         before = _status_key(po.status)
         after = _status_key(changed["status"])
         _log(db, actor, "Status changed", po, f"{before} -> {after}")
-        _copy_status_to_parts(po, after)
+        parts = _as_parts_list(po)
+        if len(parts) > 1:
+            idx = getattr(po, "display_part_index", 0) or 0
+            _set_part_status(po, int(idx), after)
+            _persist_rollup_status(db, po)
+            changed.pop("status", None)
+        else:
+            _copy_status_to_parts(po, after)
     if "due_date" in changed:
         _log(db, actor, "Due date moved", po, f"{po.due_date} -> {changed['due_date']}")
     if "locked" in changed:
@@ -964,14 +1017,18 @@ def list_comments(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
     part: int | None = Query(None, ge=1),
+    all_threads: bool = Query(False, alias="all"),
 ) -> list[POComment]:
     """Oldest first — chat order. Any signed-in rank; lock does not apply.
 
     Omit ``part`` for the project-wide thread. ``part=1`` is the first part.
+    ``all=1`` returns every thread on the order for the dashboard overview.
     """
     _require_po(db, po_id)
     cond = [POComment.purchase_order_id == po_id]
-    if part is None:
+    if all_threads:
+        pass
+    elif part is None:
         cond.append(POComment.part_index.is_(None))
     else:
         cond.append(POComment.part_index == part - 1)

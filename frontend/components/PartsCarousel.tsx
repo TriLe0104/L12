@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
 import { api } from "@/lib/api";
@@ -8,6 +8,8 @@ import { canEditStatus, useAuth } from "@/lib/auth";
 import { displayPartIndex, poShowingPart } from "@/lib/parts";
 import type { PurchaseOrder } from "@/lib/types";
 import { JobCard } from "./JobCard";
+
+const CLOSE_MS = 280;
 
 export function PartsCarousel({
   po,
@@ -23,9 +25,19 @@ export function PartsCarousel({
   const parts = po.parts ?? [];
   const current = displayPartIndex(po);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const phaseRef = useRef<"in" | "out">("in");
+  const activeRef = useRef(current);
   const [active, setActive] = useState(current);
+  activeRef.current = active;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"in" | "out">("in");
+  phaseRef.current = phase;
+
+  const requestClose = useCallback(() => {
+    if (phaseRef.current === "out") return;
+    setPhase("out");
+  }, []);
 
   useEffect(() => {
     const node = scrollerRef.current?.querySelector<HTMLElement>(`[data-slide="${current}"]`);
@@ -40,7 +52,7 @@ export function PartsCarousel({
       if (event.key === "Escape") {
         event.stopPropagation();
         event.preventDefault();
-        onClose();
+        requestClose();
       }
       if (event.key === "ArrowRight") scrollBy(1);
       if (event.key === "ArrowLeft") scrollBy(-1);
@@ -50,10 +62,19 @@ export function PartsCarousel({
       root.style.overflow = previous;
       window.removeEventListener("keydown", onKey, true);
     };
-  }, [onClose, parts.length]);
+  }, [parts.length, requestClose]);
+
+  useEffect(() => {
+    if (phase !== "out") return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const id = window.setTimeout(onClose, reduce ? 0 : CLOSE_MS);
+    return () => window.clearTimeout(id);
+  }, [phase, onClose]);
 
   function scrollBy(delta: number) {
-    const next = Math.min(Math.max(active + delta, 0), Math.max(parts.length - 1, 0));
+    const next = Math.min(Math.max(activeRef.current + delta, 0), Math.max(parts.length - 1, 0));
     const node = scrollerRef.current?.querySelector<HTMLElement>(`[data-slide="${next}"]`);
     node?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
     setActive(next);
@@ -81,7 +102,7 @@ export function PartsCarousel({
   async function choose(index: number) {
     if (!canPick || busy) return;
     if (index === current) {
-      onClose();
+      requestClose();
       return;
     }
     setBusy(true);
@@ -89,7 +110,7 @@ export function PartsCarousel({
     try {
       const saved = await api.setDisplayPart(po.id, index);
       onUpdated?.(saved);
-      onClose();
+      requestClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not set current part");
     } finally {
@@ -100,9 +121,10 @@ export function PartsCarousel({
   return createPortal(
     <div
       className="scrim parts-carousel-scrim"
+      data-phase={phase}
       onClick={(event) => {
         event.stopPropagation();
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) requestClose();
       }}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -114,7 +136,7 @@ export function PartsCarousel({
           <span className="parts-carousel-count">
             Part {active + 1} of {parts.length}
           </span>
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={requestClose}>
             Close
           </button>
         </header>
@@ -137,6 +159,8 @@ export function PartsCarousel({
                 className="parts-carousel-slide"
                 data-slide={i}
                 data-current={isCurrent}
+                data-active={i === active}
+                style={{ ["--slide-i" as string]: i } as CSSProperties}
                 onClick={() => void choose(i)}
               >
                 {isCurrent && <span className="parts-carousel-badge">Current</span>}

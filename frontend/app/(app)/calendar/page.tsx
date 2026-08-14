@@ -255,8 +255,8 @@ export default function CalendarPage() {
                     <JobCard
                       po={po}
                       onUpdated={upsert}
-                      onClick={() => {
-                        setSelected(po);
+                      onClick={(face) => {
+                        setSelected(face ?? po);
                         setDrawerMode("view");
                       }}
                     />

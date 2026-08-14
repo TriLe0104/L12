@@ -93,6 +93,17 @@
   min-width: 0;
 }
 
+.comment-bubble-part {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--steel);
+  background: rgba(13, 17, 23, 0.06);
+  border-radius: 2px;
+  padding: 0.08rem 0.28rem;
+}
+
 .comment-bubble-name {
   font-size: 0.72rem;
   font-weight: 700;
@@ -135,6 +146,23 @@
 .comment-thread-error {
   margin: 0 0.65rem;
   font-size: 0.72rem;
+}
+
+.comment-part-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--steel);
+}
+
+.comment-part-pick .field {
+  flex: 1;
+  min-width: 0;
+  height: 1.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .comment-composer {

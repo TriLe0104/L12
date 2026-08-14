@@ -211,8 +211,9 @@ export function PODrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [requestClose]);
 
-  async function save(): Promise<boolean> {
-    if (!draft.job_no?.trim() || !draft.po_number?.trim() || !draft.part_number?.trim()) {
+  async function save(nextDraft?: PODraft): Promise<boolean> {
+    const d = nextDraft ?? draft;
+    if (!d.job_no?.trim() || !d.po_number?.trim() || !d.part_number?.trim()) {
       setError("Job #, PO # and Part # are required");
       return false;
     }
@@ -220,11 +221,11 @@ export function PODrawer({
     // still has to be caught here. Creates only: overdue POs stay saveable.
     if (creating) {
       const today = todayLocal();
-      if (!draft.due_date) {
+      if (!d.due_date) {
         setError("A due date is required");
         return false;
       }
-      if (draft.due_date < today) {
+      if (d.due_date < today) {
         setError(`Due date can't be in the past — pick ${today} or later`);
         return false;
       }
@@ -237,54 +238,53 @@ export function PODrawer({
       // disabled-field echo cannot widen the PATCH past what the server allows.
       let saved: PurchaseOrder;
       if (creating) {
-        saved = await api.createPO({ ...draft, qty: Number(draft.qty) || 1 });
+        saved = await api.createPO({ ...d, qty: Number(d.qty) || 1 });
       } else if (statusOnly) {
         if (record && selectedPartIndex != null && (record.parts?.length ?? 0) > 1) {
           saved = await api.updatePOWithPart(
             record.id,
             null,
             selectedPartIndex,
-            { status: draft.status },
+            { status: d.status },
           );
         } else {
-          saved = await api.updatePO(record!.id, { status: draft.status });
+          saved = await api.updatePO(record!.id, { status: d.status });
         }
       } else {
         // If a part is selected, persist part-specific fields together with PO
         if (record && selectedPartIndex != null) {
             const partPayload: Record<string, any> = {
-              part_number: draft.part_number,
-              part_name: (draft as any).part_name ?? draft.part_number,
-              qty: Number(draft.qty) || 1,
-              dims: draft.dims || undefined,
-              mat_dim: draft.mat_dim || undefined,
-              material: draft.material || undefined,
-              finish: draft.finish || undefined,
-              inspection: draft.inspection || undefined,
-              hardware: !!draft.hardware,
-              priority: draft.priority || undefined,
-              certificates: (draft as any).certificates ?? null,
-              custom_fields: draft.custom_fields ?? {},
-              status: draft.status,
-              note: draft.note ?? "",
-              thumbnail_url: draft.thumbnail_url ?? null,
-              model_url: draft.model_url ?? null,
-              model_filename: draft.model_filename ?? null,
-              model_size: draft.model_size ?? null,
+              part_number: d.part_number,
+              part_name: (d as any).part_name ?? d.part_number,
+              qty: Number(d.qty) || 1,
+              dims: d.dims || undefined,
+              mat_dim: d.mat_dim || undefined,
+              material: d.material || undefined,
+              finish: d.finish || undefined,
+              inspection: d.inspection || undefined,
+              hardware: !!d.hardware,
+              priority: d.priority || undefined,
+              certificates: (d as any).certificates ?? null,
+              custom_fields: d.custom_fields ?? {},
+              status: d.status,
+              note: d.note ?? "",
+              thumbnail_url: d.thumbnail_url ?? null,
+              model_url: d.model_url ?? null,
+              model_filename: d.model_filename ?? null,
+              model_size: d.model_size ?? null,
             };
             const poFields = {
-              job_no: draft.job_no,
-              po_number: draft.po_number,
-              due_date: draft.due_date,
-              status: draft.status,
-              locked: draft.locked,
-              customer: draft.customer,
-              note: draft.note,
-              owner_id: draft.owner_id,
+              job_no: d.job_no,
+              po_number: d.po_number,
+              due_date: d.due_date,
+              locked: d.locked,
+              customer: d.customer,
+              note: d.note,
+              owner_id: d.owner_id,
             };
             saved = await api.updatePOWithPart(record.id, poFields, selectedPartIndex, partPayload);
         } else {
-            saved = await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
+            saved = await api.updatePO(record!.id, { ...d, qty: Number(d.qty) || 1 });
         }
       }
 
@@ -392,7 +392,19 @@ export function PODrawer({
             value={draft}
             onChange={(patch) => {
               setSavedNote(null);
-              setDraft((d) => ({ ...d, ...patch }));
+              const next = { ...draft, ...patch };
+              setDraft(next);
+              if (
+                !creating &&
+                record &&
+                modifiable &&
+                typeof patch.thumbnail_url === "string" &&
+                patch.thumbnail_url
+              ) {
+                void save(next).then((ok) => {
+                  if (ok) setSavedNote("Photo saved.");
+                });
+              }
             }}
             statuses={statuses}
             disabled={!modifiable}
@@ -447,25 +459,28 @@ export function PODrawer({
                 canEditDraft={modifiable}
                 onGenerated={() => void loadActivity(record.id)}
               />
-              {(record.parts?.length ?? 0) > 1 && selectedPartIndex != null && (
-                <>
-                  <div className="section-label">Part comments</div>
-                  <CommentThread
-                    key={`${record.id}:part:${selectedPartIndex}`}
-                    poId={record.id}
-                    part={selectedPartIndex + 1}
-                    title="Part comments"
-                    variant="embedded"
-                  />
-                </>
-              )}
               <div className="section-label">
-                {(record.parts?.length ?? 0) > 1 ? "Project comments" : "Comments"}
+                {(record.parts?.length ?? 0) > 1 && selectedPartIndex != null
+                  ? `Part ${selectedPartIndex + 1} comments`
+                  : "Comments"}
               </div>
               <CommentThread
-                key={`${record.id}:project`}
+                key={`${record.id}:comments:${selectedPartIndex ?? "all"}`}
                 poId={record.id}
-                title={(record.parts?.length ?? 0) > 1 ? "Project comments" : "Comments"}
+                part={
+                  (record.parts?.length ?? 0) > 1
+                    ? selectedPartIndex != null
+                      ? selectedPartIndex + 1
+                      : "all"
+                    : null
+                }
+                parts={record.parts}
+                defaultPart={(record.display_part_index ?? 0) + 1}
+                title={
+                  (record.parts?.length ?? 0) > 1 && selectedPartIndex != null
+                    ? `Part ${selectedPartIndex + 1} comments`
+                    : "Comments"
+                }
                 variant="embedded"
                 onCountChange={(count) => {
                   setRecord((r) => (r ? { ...r, comment_count: count } : r));

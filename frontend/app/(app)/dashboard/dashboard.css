@@ -288,10 +288,106 @@
 
 .dash-row-part {
   background: rgba(13, 17, 23, 0.018);
+  border-top-color: transparent;
+  border-top-width: 0;
+  transition: background var(--t-fast) var(--ease), border-color 320ms var(--ease);
+}
+
+.dash-row-part[data-open="true"] {
+  border-top-width: 1px;
+  border-top-color: var(--rule-soft);
 }
 
 .dash-row-part:hover {
   background: rgba(13, 17, 23, 0.04);
+}
+
+/* Height is animated on an inner grid (0fr → 1fr) so the row settles
+   on the real content size instead of a guessed max-height. */
+.dash-row-part td {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 0;
+  vertical-align: top;
+  overflow: hidden;
+  border-top-color: transparent;
+  pointer-events: none;
+  transition:
+    padding 420ms var(--ease),
+    border-color 320ms var(--ease);
+  transition-delay: calc(var(--part-i, 0) * 36ms);
+}
+
+.dash-row-part[data-open="true"] td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  line-height: inherit;
+  pointer-events: auto;
+  border-top-color: var(--rule-soft);
+}
+
+.dash-part-clip {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    grid-template-rows 420ms var(--ease),
+    opacity 320ms var(--ease),
+    transform 420ms var(--ease);
+  transition-delay: calc(var(--part-i, 0) * 36ms);
+}
+
+.dash-row-part[data-open="true"] .dash-part-clip {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+}
+
+.dash-part-inner {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  line-height: normal;
+}
+
+.dash-row-part[data-open="false"] td,
+.dash-row-part[data-open="false"] .dash-part-clip {
+  transition-delay: calc((var(--part-n, 6) - var(--part-i, 0)) * 22ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-row-part,
+  .dash-row-part td,
+  .dash-part-clip,
+  .dash-parts-caret {
+    transition: none;
+    transform: none;
+  }
+
+  .dash-parts-caret[data-open="true"] {
+    transform: rotate(45deg);
+  }
+}
+
+@media print {
+  .dash-row-part {
+    border-top-width: 1px;
+    border-top-color: var(--rule-soft);
+  }
+
+  .dash-row-part td {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    line-height: inherit;
+    pointer-events: none;
+  }
+
+  .dash-part-clip {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .dash-po-cell {
@@ -311,7 +407,7 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.22rem;
   height: 1.35rem;
   padding: 0 0.32rem;
   border: 1px solid var(--rule);
@@ -322,6 +418,22 @@
   font-weight: 800;
   letter-spacing: 0.02em;
   cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.dash-parts-caret {
+  width: 0.34rem;
+  height: 0.34rem;
+  flex: none;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: 60% 60%;
+  transition: transform 360ms var(--ease);
+}
+
+.dash-parts-caret[data-open="true"] {
+  transform: rotate(45deg);
 }
 
 .dash-parts-toggle:hover {

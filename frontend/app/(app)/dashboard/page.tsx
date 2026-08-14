@@ -1,11 +1,14 @@
 "use client";
 
 import {
+  cloneElement,
+  isValidElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -35,6 +38,18 @@ function priorityRank(priority: string, order: string[]): number {
   const key = priority.toLowerCase();
   const idx = order.findIndex((o) => o.toLowerCase() === key);
   return idx < 0 ? order.length + 1 : idx;
+}
+
+/** Clip wrapper so part rows can animate height with grid 0fr → 1fr. */
+function clipPartCell(node: ReactNode, clip: boolean): ReactNode {
+  if (!clip || !isValidElement<{ children?: ReactNode }>(node)) return node;
+  return cloneElement(
+    node,
+    undefined,
+    <div className="dash-part-clip">
+      <div className="dash-part-inner">{node.props.children}</div>
+    </div>,
+  );
 }
 
 type Dir = "asc" | "desc";
@@ -290,7 +305,10 @@ export default function DashboardPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
-  const [commentPoId, setCommentPoId] = useState<string | null>(null);
+  const [commentTarget, setCommentTarget] = useState<{
+    poId: string;
+    part: number | "all" | null;
+  } | null>(null);
   const commentAnchorRef = useRef<HTMLButtonElement | null>(null);
 
   const stages = boardStages.length ? boardStages : FALLBACK_STAGES;
@@ -657,6 +675,21 @@ export default function DashboardPage() {
     );
   }, []);
 
+  const setPartCommentCount = useCallback((poId: string, partIndex: number, count: number) => {
+    setPOs((prev) =>
+      prev.map((p) => {
+        if (p.id !== poId) return p;
+        const key = String(partIndex);
+        const prevCount = p.part_comment_counts?.[key] ?? 0;
+        return {
+          ...p,
+          part_comment_counts: { ...(p.part_comment_counts ?? {}), [key]: count },
+          comment_count: Math.max(0, (p.comment_count ?? 0) + (count - prevCount)),
+        };
+      }),
+    );
+  }, []);
+
   const sortColumn = visibleColumns.find((c) => c.key === sort.key) ?? visibleColumns[0] ?? FALLBACK_COLUMNS[0];
 
   const priorityLabel = (value: string) =>
@@ -672,8 +705,11 @@ export default function DashboardPage() {
             {sortColumn.noun}, {sort.dir === "asc" ? "ascending" : "descending"}
           </p>
         </div>
-        {editable && (
-          <div className="head-tools">
+        <div className="head-tools">
+          <button type="button" className="btn" onClick={() => window.print()}>
+            Print
+          </button>
+          {editable && (
             <button
               className="btn btn-primary"
               onClick={() => {
@@ -683,8 +719,8 @@ export default function DashboardPage() {
             >
               + New PO
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="dash-filters">
@@ -863,7 +899,7 @@ export default function DashboardPage() {
                     last: false,
                   },
                 ];
-                if (isOpen) {
+                if (partsCount > 1) {
                   parts.forEach((_, i) => {
                     entries.push({
                       key: `${po.id}:${i}`,
@@ -880,15 +916,26 @@ export default function DashboardPage() {
                     className={entry.kind === "child" ? "dash-row dash-row-part" : "dash-row"}
                     data-job={po.job_no}
                     data-locked={po.locked}
-                    tabIndex={0}
+                    data-open={entry.kind === "child" ? (isOpen ? "true" : "false") : undefined}
+                    style={
+                      entry.kind === "child"
+                        ? ({
+                            ["--part-i" as string]: entry.partIndex ?? 0,
+                            ["--part-n" as string]: partsCount,
+                          } as CSSProperties)
+                        : undefined
+                    }
+                    tabIndex={entry.kind === "child" && !isOpen ? -1 : 0}
+                    aria-hidden={entry.kind === "child" && !isOpen ? true : undefined}
                     aria-label={
                       entry.kind === "child"
                         ? `Open ${po.job_no} part ${entry.partIndex! + 1} · ${entry.face.part_number}`
                         : `Open ${po.job_no} · ${po.po_number}`
                     }
-                    onClick={() =>
-                      open(po, entry.kind === "child" ? entry.partIndex ?? undefined : undefined)
-                    }
+                    onClick={() => {
+                      if (entry.kind === "child" && !isOpen) return;
+                      open(po, entry.kind === "child" ? entry.partIndex ?? undefined : undefined);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
@@ -899,6 +946,7 @@ export default function DashboardPage() {
                     {visibleColumns.map((col) => {
                       const widthStyle = widthOf(col);
                       const face = entry.face;
+                      return clipPartCell((() => {
                       if (col.key === "job") {
                         if (entry.kind === "child") {
                           return (
@@ -958,7 +1006,12 @@ export default function DashboardPage() {
                                     toggleParts(po.id);
                                   }}
                                 >
-                                  {isOpen ? "▾" : "▸"} {partsCount}
+                                  <span
+                                    className="dash-parts-caret"
+                                    data-open={isOpen}
+                                    aria-hidden="true"
+                                  />
+                                  {partsCount}
                                 </button>
                               )}
                             </div>
@@ -985,14 +1038,27 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "stage") {
+                        if (entry.kind === "parent" && partsCount > 1) {
+                          return (
+                            <td key="stage" data-col="stage" style={widthStyle}>
+                              {EMPTY}
+                            </td>
+                          );
+                        }
+                        const rowStage =
+                          entry.kind === "child"
+                            ? stages.find((s) =>
+                                s.statuses.includes(face.status ?? ""),
+                              )
+                            : stage;
                         return (
                           <td key="stage" data-col="stage" style={widthStyle}>
-                            {stage ? (
+                            {rowStage ? (
                               <span
                                 className="dash-stage"
-                                style={{ ["--tone" as string]: resolveToneColor(stage.tone) }}
+                                style={{ ["--tone" as string]: resolveToneColor(rowStage.tone) }}
                               >
-                                {stage.label}
+                                {rowStage.label}
                               </span>
                             ) : (
                               EMPTY
@@ -1001,11 +1067,15 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "status") {
+                        if (entry.kind === "parent" && partsCount > 1) {
+                          return (
+                            <td key="status" data-col="status" style={widthStyle}>
+                              {EMPTY}
+                            </td>
+                          );
+                        }
                         const partStatus = face.status ?? po.status;
-                        const label =
-                          entry.kind === "child"
-                            ? statusByKey.get(partStatus)?.label ?? partStatus
-                            : po.status_label;
+                        const label = statusByKey.get(partStatus)?.label ?? partStatus;
                         return (
                           <td
                             key="status"
@@ -1131,29 +1201,53 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "comments") {
+                        const threadPart: number | "all" | null =
+                          entry.kind === "child"
+                            ? (entry.partIndex ?? 0) + 1
+                            : partsCount > 1
+                              ? "all"
+                              : null;
+                        const count =
+                          entry.kind === "child"
+                            ? (po.part_comment_counts?.[String(entry.partIndex)] ?? 0)
+                            : (po.comment_count ?? 0);
+                        const open =
+                          commentTarget?.poId === po.id && commentTarget.part === threadPart;
                         return (
                           <td key="comments" data-col="comments" style={widthStyle}>
                             <button
                               type="button"
                               className="dash-comment-btn"
-                              data-has={(po.comment_count ?? 0) > 0 ? "true" : "false"}
+                              data-has={count > 0 ? "true" : "false"}
                               aria-label={
-                                (po.comment_count ?? 0) > 0
-                                  ? `${po.comment_count} comments on ${po.job_no}`
+                                count > 0
+                                  ? `${count} comments on ${po.job_no}${
+                                      entry.kind === "child" ? ` part ${entry.partIndex! + 1}` : ""
+                                    }`
                                   : `Comments on ${po.job_no}`
                               }
-                              aria-expanded={commentPoId === po.id}
-                              title="Comments"
+                              aria-expanded={open}
+                              title={
+                                entry.kind === "child"
+                                  ? "Part comments"
+                                  : partsCount > 1
+                                    ? "All comments"
+                                    : "Comments"
+                              }
                               onClick={(e) => {
                                 e.stopPropagation();
                                 commentAnchorRef.current = e.currentTarget;
-                                setCommentPoId((cur) => (cur === po.id ? null : po.id));
+                                setCommentTarget((cur) =>
+                                  cur?.poId === po.id && cur.part === threadPart
+                                    ? null
+                                    : { poId: po.id, part: threadPart },
+                                );
                               }}
                             >
-                              <CommentBubbleIcon filled={(po.comment_count ?? 0) > 0} />
-                              {(po.comment_count ?? 0) > 0 && (
+                              <CommentBubbleIcon filled={count > 0} />
+                              {count > 0 && (
                                 <span className="dash-comment-badge">
-                                  {po.comment_count > 99 ? "99+" : po.comment_count}
+                                  {count > 99 ? "99+" : count}
                                 </span>
                               )}
                             </button>
@@ -1233,6 +1327,7 @@ export default function DashboardPage() {
                             : wrapped(display)}
                         </td>
                       );
+                      })(), entry.kind === "child");
                     })}
                   </tr>
                 ));
@@ -1243,13 +1338,31 @@ export default function DashboardPage() {
         {rows.length === 0 && <div className="empty">No purchase orders match.</div>}
       </div>
 
-      {commentPoId && (
+      {commentTarget && (
         <CommentThread
-          poId={commentPoId}
+          poId={commentTarget.poId}
+          part={commentTarget.part}
+          parts={pos.find((p) => p.id === commentTarget.poId)?.parts}
+          defaultPart={
+            (pos.find((p) => p.id === commentTarget.poId)?.display_part_index ?? 0) + 1
+          }
+          title={
+            commentTarget.part === "all"
+              ? "All comments"
+              : commentTarget.part
+                ? `Part ${commentTarget.part} comments`
+                : "Comments"
+          }
           variant="panel"
           anchorEl={commentAnchorRef.current}
-          onClose={() => setCommentPoId(null)}
-          onCountChange={(count) => setCommentCount(commentPoId, count)}
+          onClose={() => setCommentTarget(null)}
+          onCountChange={(count) => {
+            if (commentTarget.part === "all" || commentTarget.part == null) {
+              setCommentCount(commentTarget.poId, count);
+            } else {
+              setPartCommentCount(commentTarget.poId, commentTarget.part - 1, count);
+            }
+          }}
         />
       )}
 
@@ -1271,7 +1384,6 @@ export default function DashboardPage() {
             setDrawerMode(null);
             setSelected(null);
           }}
-          onCommentCountChange={(poId, count) => setCommentCount(poId, count)}
         />
       )}
     </>

@@ -14,9 +14,18 @@ import { createPortal } from "react-dom";
 import { Avatar } from "@/components/Avatar";
 import { api } from "@/lib/api";
 import { canAdministerPeople, useAuth } from "@/lib/auth";
-import type { POComment } from "@/lib/types";
+import type { POComment, PurchaseOrder } from "@/lib/types";
 
 import "./CommentThread.css";
+
+function partTag(
+  partIndex: number | null | undefined,
+  parts?: PurchaseOrder["parts"],
+) {
+  if (partIndex == null) return "Project";
+  const number = parts?.[partIndex]?.part_number;
+  return number ? `Part ${partIndex + 1} · ${number}` : `Part ${partIndex + 1}`;
+}
 
 function when(iso: string) {
   const then = new Date(iso);
@@ -31,6 +40,8 @@ function when(iso: string) {
 export function CommentThread({
   poId,
   part,
+  parts,
+  defaultPart,
   title = "Comments",
   variant = "embedded",
   onCountChange,
@@ -38,8 +49,11 @@ export function CommentThread({
   anchorEl,
 }: {
   poId: string;
-  /** 1-based part number. Omit for the project-wide thread. */
-  part?: number | null;
+  /** 1-based part number. `"all"` is the dashboard overview. Omit for project chat. */
+  part?: number | null | "all";
+  parts?: PurchaseOrder["parts"];
+  /** 1-based part to tag when posting from the overview. */
+  defaultPart?: number;
   title?: string;
   /** Drawer section vs dashboard popover panel. */
   variant?: "embedded" | "panel";
@@ -61,6 +75,11 @@ export function CommentThread({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pos, setPos] = useState<CSSProperties>({});
+  const [postPart, setPostPart] = useState(defaultPart ?? 1);
+
+  useEffect(() => {
+    if (defaultPart != null) setPostPart(defaultPart);
+  }, [defaultPart]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -145,7 +164,11 @@ export function CommentThread({
     setBusy(true);
     setError(null);
     try {
-      const created = await api.addComment(poId, trimmed, part);
+      const created = await api.addComment(
+        poId,
+        trimmed,
+        part === "all" ? postPart : part,
+      );
       setComments((prev) => {
         const next = [...prev, created];
         onCountChange?.(next.length);
@@ -220,6 +243,11 @@ export function CommentThread({
                   <span className="comment-bubble-name">
                     {c.actor?.name ?? "Former teammate"}
                   </span>
+                  {(part === "all" || c.part_index != null) && (
+                    <span className="comment-bubble-part">
+                      {partTag(c.part_index, parts)}
+                    </span>
+                  )}
                   <time
                     className="comment-bubble-when"
                     dateTime={c.created_at}
@@ -250,12 +278,33 @@ export function CommentThread({
       {error && <p className="error comment-thread-error">{error}</p>}
 
       <div className="comment-composer">
+        {part === "all" && (parts?.length ?? 0) > 1 && (
+          <label className="comment-part-pick">
+            <span>Discussing</span>
+            <select
+              className="field"
+              value={postPart}
+              aria-label="Part this comment is about"
+              onChange={(e) => setPostPart(Number(e.target.value))}
+            >
+              {parts!.map((p, i) => (
+                <option key={i} value={i + 1}>
+                  {partTag(i, parts)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <textarea
           ref={textareaRef}
           className="field comment-composer-input"
           rows={2}
           maxLength={2000}
-          placeholder="Write a comment…"
+          placeholder={
+            part === "all"
+              ? `Comment on ${partTag(postPart - 1, parts)}…`
+              : "Write a comment…"
+          }
           aria-label="Comment"
           value={body}
           disabled={busy}

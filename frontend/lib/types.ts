@@ -119,6 +119,8 @@ export interface PurchaseOrder {
   last_modified: LastModified | null;
   /** Notes on this order; derived server-side so the dashboard badge never N+1s. */
   comment_count: number;
+  /** Per-part note counts, keyed by 0-based part index. */
+  part_comment_counts?: Record<string, number>;
 }
 
 /** An order as the editor holds it. Reads carry the owner expanded; writes carry
@@ -155,6 +157,7 @@ export interface POComment {
   id: string;
   body: string;
   created_at: string;
+  part_index?: number | null;
   actor: OwnerBrief | null;
 }
 

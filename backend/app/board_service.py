@@ -317,19 +317,14 @@ def apply_parts_progress(
     if doc is None:
         doc = get_document(db)
     completed: set[str] = set()
-    sequence: list[str] = []
     for col in doc.get("kanbanColumns") or []:
         if not isinstance(col, dict):
             continue
         keys = [k for k in (col.get("statusKeys") or []) if isinstance(k, str)]
-        for key in keys:
-            if key not in sequence:
-                sequence.append(key)
         if col.get("isCompleted"):
             completed.update(keys)
     if not completed:
         completed.add("ready_to_ship")
-    rank = {key: i for i, key in enumerate(sequence)}
 
     for po in pos:
         raw = getattr(po, "parts", None)
@@ -348,10 +343,18 @@ def apply_parts_progress(
         done = sum(1 for status in statuses if status in completed)
         po.parts_completed = done
         po.parts_total = len(parts)
-        po._status_label = f"{done} of {len(parts)} Completed"  # type: ignore[attr-defined]
-        incomplete = [s for s in statuses if s not in completed]
-        rollup = min(incomplete, key=lambda s: rank.get(s, 999)) if incomplete else statuses[-1]
-        col = column_for_status(doc, rollup)
+        # Keep the PO status label as the displayed part's own status.
+        # Parent dashboard rows leave stage/status empty; children show theirs.
+        shown_i = getattr(po, "display_part_index", 0) or 0
+        try:
+            shown_i = int(shown_i)
+        except (TypeError, ValueError):
+            shown_i = 0
+        shown_i = min(max(shown_i, 0), len(parts) - 1)
+        shown = parts[shown_i] if isinstance(parts[shown_i], dict) else {}
+        shown_status = str(shown.get("status") or po.status)
+        po._status_label = status_label(doc, shown_status)  # type: ignore[attr-defined]
+        col = column_for_status(doc, shown_status)
         if col:
             po._stage = col  # type: ignore[attr-defined]
 
