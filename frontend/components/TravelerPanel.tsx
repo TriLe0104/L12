@@ -58,11 +58,16 @@ function formatElapsed(ms: number): string {
 export function TravelerPanel({
   poId,
   jobNo,
+  part,
+  partCount = 0,
   canEditDraft,
   onGenerated,
 }: {
   poId: string;
   jobNo: string;
+  /** 1-based part number. Omit for a single-part order. */
+  part?: number;
+  partCount?: number;
   /** Manager+ on an unlocked order — may persist traveler_draft. */
   canEditDraft: boolean;
   /** Refresh activity after a logged generate. */
@@ -87,13 +92,15 @@ export function TravelerPanel({
   const downloadStartedRef = useRef<number | null>(null);
   const { document: boardDocument } = useBoardSettings();
   const materialOptions = selectionOptions(boardDocument, MATERIAL_FIELD_KEY);
-  const [poData, setPoData] = useState<any | null>(null);
-  const [selectedPart, setSelectedPart] = useState<number | null>(null); // 1-based
+  const fieldsRef = useRef<FieldMap>({});
+  const dirtyRef = useRef(false);
 
   const dirty = useMemo(
     () => JSON.stringify(fields) !== JSON.stringify(baseline),
     [fields, baseline],
   );
+  fieldsRef.current = fields;
+  dirtyRef.current = dirty;
 
   const downloading = downloadFmt != null;
   const actionsLocked = downloading || saving || previewing;
@@ -102,22 +109,29 @@ export function TravelerPanel({
     setLoading(true);
     setError(null);
     try {
-      const [trav, po] = await Promise.all([api.getTraveler(poId), api.getPO(poId)]);
+      const trav = await api.getTraveler(poId, part);
       setFields(trav.fields);
       setBaseline(trav.fields);
-      setPoData(po);
-      const parts = (po?.parts && Array.isArray(po.parts) && po.parts.length) || 0;
-      setSelectedPart(parts > 0 ? 1 : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load traveler");
     } finally {
       setLoading(false);
     }
-  }, [poId]);
+  }, [poId, part]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && canEditDraft) {
+        void api.saveTraveler(poId, fieldsRef.current, part).catch(() => {
+          /* unmount flush — the next load is the source of truth */
+        });
+      }
+    };
+  }, [poId, part, canEditDraft]);
 
   useEffect(() => {
     return () => {
@@ -206,7 +220,7 @@ export function TravelerPanel({
     setSaving(true);
     setError(null);
     try {
-      const res = await api.saveTraveler(poId, fields);
+      const res = await api.saveTraveler(poId, fields, part);
       setFields(res.fields);
       setBaseline(res.fields);
       setNote("Traveler draft saved.");
@@ -235,13 +249,13 @@ export function TravelerPanel({
 
     try {
       if (canEditDraft && dirty) {
-        const res = await api.saveTraveler(poId, fields);
+        const res = await api.saveTraveler(poId, fields, part);
         if (ac.signal.aborted) return;
         setFields(res.fields);
         setBaseline(res.fields);
       }
       // GET /traveler/pdf → same template-overlay PDF as Download.
-      const { blob } = await api.previewTraveler(poId, "pdf", { part: selectedPart ?? undefined, signal: ac.signal });
+      const { blob } = await api.previewTraveler(poId, "pdf", { part, signal: ac.signal });
       if (ac.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
@@ -276,12 +290,12 @@ export function TravelerPanel({
         poId,
         fmt,
         { fields, persist: canEditDraft },
-        { part: selectedPart ?? undefined, signal: ac.signal },
+        { part, signal: ac.signal },
       );
       if (ac.signal.aborted) return;
       triggerDownload(blob, filename);
       if (canEditDraft) {
-        const res = await api.getTraveler(poId);
+        const res = await api.getTraveler(poId, part);
         if (ac.signal.aborted) return;
         setFields(res.fields);
         setBaseline(res.fields);
@@ -315,7 +329,10 @@ export function TravelerPanel({
 
   return (
     <section className="traveler-panel">
-      <div className="section-label">Traveler packet</div>
+      <div className="section-label">
+        Traveler packet
+        {part && partCount > 0 ? ` · Part ${part} of ${partCount}` : ""}
+      </div>
 
       <div className="traveler-meta">
         <span>
@@ -328,25 +345,6 @@ export function TravelerPanel({
           Order created by <strong>{String(fields.created_by || "—")}</strong>
         </span>
       </div>
-
-      {poData?.parts && Array.isArray(poData.parts) && poData.parts.length > 0 && (
-        <div style={{ margin: "0.5rem 0" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ whiteSpace: "nowrap" }}>Part:</span>
-            <select
-              className="cell-input"
-              value={String(selectedPart ?? "")}
-              onChange={(e) => setSelectedPart(e.target.value ? Number(e.target.value) : null)}
-            >
-              {poData.parts.map((p: any, idx: number) => (
-                <option key={idx} value={idx + 1}>
-                  {`Part ${idx + 1} of ${poData.parts.length}`}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
 
       <div className="traveler-actions">
         <button

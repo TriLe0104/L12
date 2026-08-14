@@ -316,6 +316,76 @@ def _certificates_from_card(db: Session, po: PurchaseOrder) -> str:
     return _s(raw)
 
 
+def _parts_list(po: PurchaseOrder) -> list[Any]:
+    raw = getattr(po, "parts", None)
+    return list(raw) if isinstance(raw, list) else []
+
+
+def _pick_part(po: PurchaseOrder, selected_part_index: int | None) -> tuple[dict[str, Any] | None, int]:
+    """Return (selected part dict or None, total parts). Index is zero-based."""
+    parts = _parts_list(po)
+    total = len(parts)
+    if total == 0:
+        return None, 0
+    idx = selected_part_index if isinstance(selected_part_index, int) else 0
+    if idx < 0 or idx >= total:
+        idx = 0
+    chosen = parts[idx]
+    return (chosen if isinstance(chosen, dict) else None), total
+
+
+def _part_field(part: dict[str, Any] | None, key: str, fallback: Any) -> Any:
+    if not isinstance(part, dict) or key not in part:
+        return fallback
+    value = part.get(key)
+    if value is None or value == "":
+        return fallback
+    return value
+
+
+def read_part_drafts(raw: Any) -> dict[int, dict[str, Any]]:
+    """Normalize traveler_draft to {part_index: field map}.
+
+    Legacy rows stored a flat field map on the PO. New rows store one map per
+    part, keyed by decimal index, so each part keeps its own traveler.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    keys = list(raw.keys())
+    if all(str(k).isdigit() for k in keys) and all(isinstance(v, dict) for v in raw.values()):
+        return {int(k): dict(v) for k, v in raw.items()}
+    return {0: dict(raw)}
+
+
+def part_draft(po: PurchaseOrder, selected_part_index: int | None) -> dict[str, Any]:
+    drafts = read_part_drafts(getattr(po, "traveler_draft", None))
+    key = 0 if selected_part_index is None else selected_part_index
+    saved = drafts.get(key) or {}
+    return saved if isinstance(saved, dict) else {}
+
+
+def set_part_draft(
+    po: PurchaseOrder,
+    selected_part_index: int | None,
+    fields: dict[str, Any] | None,
+) -> None:
+    """Write one part's traveler draft without touching the others."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    drafts = read_part_drafts(getattr(po, "traveler_draft", None))
+    key = 0 if selected_part_index is None else selected_part_index
+    if fields:
+        drafts[key] = fields
+    else:
+        drafts.pop(key, None)
+    po.traveler_draft = {str(i): v for i, v in sorted(drafts.items())} or None
+    try:
+        flag_modified(po, "traveler_draft")
+    except Exception:
+        # not a mapped instance (unit tests); assigning a new dict is enough
+        pass
+
+
 def draft_from_po(
     db: Session,
     po: PurchaseOrder,
@@ -330,58 +400,64 @@ def draft_from_po(
     generated_by = actor.name if actor else ""
     generated_at = stamp.strftime("%Y-%m-%d %H:%M %Z").strip() or stamp.isoformat(timespec="minutes")
 
-    # If this PO carries a parts list, prefer the first part for the packet
-    # defaults but expose the parts count via part_of (e.g. "Part 1 of X").
-    first_part = None
-    total_parts = 0
-    if isinstance(getattr(po, "parts", None), list) and po.parts:
-        total_parts = len(po.parts)
-        # selected_part_index is zero-based here; if provided and valid, pick it.
-        if isinstance(selected_part_index, int) and 0 <= selected_part_index < total_parts:
-            first_part = po.parts[selected_part_index]
-        else:
-            first_part = po.parts[0]
+    first_part, total_parts = _pick_part(po, selected_part_index)
+    part_no = (
+        (selected_part_index + 1)
+        if isinstance(selected_part_index, int) and total_parts > 0
+        else (1 if total_parts > 0 else 1)
+    )
+    hardware = (
+        bool(first_part.get("hardware"))
+        if isinstance(first_part, dict) and first_part.get("hardware") is not None
+        else bool(po.hardware)
+    )
+    inspection_raw = _part_field(first_part, "inspection", po.inspection)
 
     base: dict[str, Any] = {
         "work_order": po.job_no,
         "due_date": po.due_date.isoformat() if po.due_date else "",
-        "mat_dim": po.mat_dim or "",
+        "mat_dim": _s(_part_field(first_part, "mat_dim", po.mat_dim or "")),
         "sign": created_by,
         "po_number": po.po_number,
         "part_name": (
-            _s(first_part.get("part_name")) if first_part and isinstance(first_part, dict) and first_part.get("part_name")
+            _s(first_part.get("part_name")) if first_part and first_part.get("part_name")
             else _part_name_from_model(po.model_filename) or po.part_number
         ),
         "part_number": (
-            _s(first_part.get("part_number")) if first_part and isinstance(first_part, dict) and first_part.get("part_number")
+            _s(first_part.get("part_number")) if first_part and first_part.get("part_number")
             else po.part_number
         ),
-        "qty": (first_part.get("qty") if first_part and isinstance(first_part, dict) and first_part.get("qty") is not None else po.qty),
-        "finish": po.finish or "",
-        "inserts": "Yes" if po.hardware else "No",
-        "material": po.material or "",
+        "qty": (
+            first_part.get("qty")
+            if first_part and first_part.get("qty") is not None
+            else po.qty
+        ),
+        "finish": _s(_part_field(first_part, "finish", po.finish or "")),
+        "inserts": "Yes" if hardware else "No",
+        "material": _s(_part_field(first_part, "material", po.material or "")),
         "material_spec": "Per Drawing",
-        "inspection": _inspection_label(po.inspection),
+        "inspection": _inspection_label(inspection_raw),
         "part_marking": "None",
-        "certificates": _certificates_from_card(db, po),
+        "certificates": _s(_part_field(first_part, "certificates", _certificates_from_card(db, po))),
         "notes": po.note or "",
-        "dims": po.dims or "",
-        "part_of": (f"Part { (selected_part_index + 1) if isinstance(selected_part_index, int) else 1 } of {total_parts}" if total_parts > 0 else "Part 1 of 1"),
+        "dims": _s(_part_field(first_part, "dims", po.dims or "")),
+        "part_of": (
+            f"Part {part_no} of {total_parts}" if total_parts > 0 else "Part 1 of 1"
+        ),
         "customer": po.customer or "",
         "programmer": generated_by,
         "program_date": stamp.strftime("%Y-%m-%d"),
         "created_by": created_by,
         "generated_by": generated_by,
         "generated_at": generated_at,
-        # Thumbnail selection: prefer the selected part's thumbnail, otherwise the PO-level one
         "thumbnail_url": (
-            (first_part.get("thumbnail_url") if isinstance(first_part, dict) and first_part.get("thumbnail_url") else None)
+            (first_part.get("thumbnail_url") if first_part and first_part.get("thumbnail_url") else None)
             or getattr(po, "thumbnail_url", None)
         ),
         "status": getattr(po, "status_label", None) or _s(po.status),
     }
 
-    saved = po.traveler_draft if isinstance(getattr(po, "traveler_draft", None), dict) else {}
+    saved = part_draft(po, selected_part_index)
     # Saved edits win for user-editable fields; generation metadata always refreshes
     # on download/preview unless the client posts explicit overrides.
     editable = {k: v for k, v in saved.items() if k in TRAVELER_FIELD_KEYS and k not in {

@@ -2508,6 +2508,15 @@ button.jobcard-thumb:focus-visible {
   border-bottom: 1px solid var(--rule);
 }
 
+.drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 0;
+}
+
 .drawer-body {
   padding: 1rem;
   overflow-y: auto;
@@ -2524,9 +2533,56 @@ button.jobcard-thumb:focus-visible {
   flex-shrink: 0;
 }
 
-.drawer-head strong {
+.drawer-head > strong {
   min-width: 0;
-  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scrim.add-part-scrim {
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.add-part-modal {
+  background: var(--paper, #fff);
+  border-radius: 8px;
+  padding: 16px;
+  width: 640px;
+  max-width: calc(100% - 32px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.add-part-modal-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.add-part-modal-head .add-part-title,
+.add-part-modal-head h2 {
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+  overflow-wrap: normal !important;
+  word-break: keep-all !important;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max-content;
+}
+
+.add-part-modal-head .btn {
+  margin-left: auto;
 }
 
 .form-grid {

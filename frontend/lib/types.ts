@@ -81,9 +81,24 @@ export interface PurchaseOrder {
   model_filename: string | null;
   model_size: number | null;
   owner: OwnerBrief | null;
-  /** Optional list of parts/components for multipart orders. Each part may include
-   *  part_number, part_name, qty, and thumbnail_url. */
-  parts?: Array<{ part_number?: string; part_name?: string; qty?: number; thumbnail_url?: string }>;
+  /** Optional list of parts/components for multipart orders. */
+  parts?: Array<{
+    part_number?: string;
+    part_name?: string;
+    qty?: number;
+    dims?: string;
+    mat_dim?: string;
+    material?: string;
+    finish?: string;
+    inspection?: string;
+    hardware?: boolean;
+    priority?: string;
+    certificates?: string;
+    thumbnail_url?: string | null;
+    model_url?: string | null;
+    model_filename?: string | null;
+    model_size?: number | null;
+  }>;
   /** Admin-defined attributes; keys match board settings customFields. */
   custom_fields: Record<string, string | number | null> | null;
   /** Editable traveler packet overrides persisted on the PO. */

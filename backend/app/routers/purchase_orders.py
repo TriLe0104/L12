@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from sqlalchemy import case, func
 
@@ -36,6 +37,8 @@ from ..schemas import (
     POOut,
     POUpdate,
     PartCreate,
+    PartUpdate,
+    POWithPartUpdate,
     TravelerDraftOut,
     TravelerDraftUpdate,
     TravelerGenerateBody,
@@ -65,6 +68,91 @@ def _guard_locked(po: PurchaseOrder, actor: User) -> None:
             f"{po.job_no} is locked. Only an {role_label(LOCKED_PO_FLOOR).lower()} "
             f"can change or unlock it.",
         )
+
+
+def _as_parts_list(po: PurchaseOrder) -> list[dict[str, Any]]:
+    """Copy of the parts JSON. SQLAlchemy does not track in-place list mutation."""
+    raw = getattr(po, "parts", None)
+    if not isinstance(raw, list) or not raw:
+        return []
+    return [dict(p) if isinstance(p, dict) else p for p in raw]
+
+
+def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
+    return {
+        "part_number": po.part_number,
+        "part_name": po.part_number,
+        "qty": po.qty,
+        "dims": po.dims,
+        "mat_dim": po.mat_dim,
+        "material": po.material,
+        "finish": po.finish,
+        "inspection": po.inspection,
+        "hardware": po.hardware,
+        "priority": po.priority,
+        "thumbnail_url": po.thumbnail_url,
+        "model_url": po.model_url,
+        "model_filename": po.model_filename,
+        "model_size": po.model_size,
+    }
+
+
+def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
+    return {
+        "part_number": payload.part_number.strip() if isinstance(payload.part_number, str) else payload.part_number,
+        "part_name": payload.part_name or payload.part_number,
+        "qty": int(payload.qty) if payload.qty is not None else 1,
+        "dims": payload.dims,
+        "mat_dim": payload.mat_dim,
+        "material": payload.material,
+        "finish": payload.finish,
+        "inspection": payload.inspection,
+        "hardware": bool(payload.hardware) if payload.hardware is not None else False,
+        "priority": payload.priority,
+        "certificates": payload.certificates,
+        "thumbnail_url": payload.thumbnail_url,
+        "model_url": payload.model_url,
+        "model_filename": payload.model_filename,
+        "model_size": payload.model_size,
+    }
+
+
+def _apply_part_update(part: dict[str, Any], payload: PartUpdate) -> dict[str, Any]:
+    """Apply only fields the client actually sent, including explicit nulls."""
+    data = payload.model_dump(exclude_unset=True)
+    if "part_number" in data and isinstance(data["part_number"], str):
+        data["part_number"] = data["part_number"].strip()
+    if "qty" in data and data["qty"] is not None:
+        data["qty"] = int(data["qty"])
+    if "hardware" in data and data["hardware"] is not None:
+        data["hardware"] = bool(data["hardware"])
+    part.update(data)
+    return part
+
+
+def _adopt_part_media(po: PurchaseOrder, part: dict[str, Any]) -> None:
+    """Fill empty PO-level media from a part, without overwriting another part's art."""
+    if not po.thumbnail_url and part.get("thumbnail_url"):
+        po.thumbnail_url = part.get("thumbnail_url")
+    if not po.model_url and part.get("model_url"):
+        po.model_url = part.get("model_url")
+        po.model_filename = part.get("model_filename")
+        po.model_size = part.get("model_size")
+
+
+def _set_parts(po: PurchaseOrder, parts: list[dict[str, Any]]) -> None:
+    po.parts = parts
+    flag_modified(po, "parts")
+
+
+def _traveler_part_index(po: PurchaseOrder, part: int | None) -> int | None:
+    """Convert a 1-based `?part=` query into a 0-based index."""
+    parts = _as_parts_list(po)
+    if isinstance(part, int) and part > 0:
+        return part - 1
+    if parts:
+        return 0
+    return None
 
 
 def _resolve_owner(db: Session, owner_id: str | None) -> User | None:
@@ -418,27 +506,23 @@ def create_po(
             "part_number": data.get("part_number"),
             "part_name": data.get("model_filename") or data.get("part_number"),
             "qty": data.get("qty"),
+            "dims": data.get("dims"),
+            "mat_dim": data.get("mat_dim"),
+            "material": data.get("material"),
+            "finish": data.get("finish"),
+            "inspection": data.get("inspection"),
+            "hardware": data.get("hardware"),
+            "priority": data.get("priority"),
             "thumbnail_url": data.get("thumbnail_url"),
         }
         # If the existing PO has no `parts` array yet, promote the current
         # top-level part into the parts list so both the original and the new
         # part are preserved on the PO.
-        if isinstance(getattr(existing, "parts", None), list) and existing.parts:
-            parts = existing.parts
-        else:
-            parts = []
-            # Promote the current primary part into the parts list if it looks valid.
-            if existing.part_number or existing.part_number is not None:
-                parts.append(
-                    {
-                        "part_number": existing.part_number,
-                        "part_name": existing.part_number,
-                        "qty": existing.qty,
-                        "thumbnail_url": existing.thumbnail_url,
-                    }
-                )
+        parts = _as_parts_list(existing)
+        if not parts and existing.part_number is not None:
+            parts.append(_top_level_as_part(existing))
         parts.append(part_entry)
-        existing.parts = parts
+        _set_parts(existing, parts)
         # If the PO had no top-level thumbnail, adopt the new part's thumbnail so
         # the dashboard shows a photo at the order level.
         if not existing.thumbnail_url and part_entry.get("thumbnail_url"):
@@ -502,40 +586,14 @@ def add_part(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
     _guard_locked(po, actor)
 
-    # Build the part entry from the supplied payload while keeping only the
-    # fields we want to persist.
-    part_entry = {
-        "part_number": payload.part_number.strip() if isinstance(payload.part_number, str) else payload.part_number,
-        "part_name": payload.part_name or payload.part_number,
-        "qty": int(payload.qty) if payload.qty is not None else 1,
-        "dims": payload.dims,
-        "mat_dim": payload.mat_dim,
-        "material": payload.material,
-        "finish": payload.finish,
-        "inspection": payload.inspection,
-        "hardware": bool(payload.hardware) if payload.hardware is not None else False,
-        "priority": payload.priority,
-        "certificates": payload.certificates,
-        "thumbnail_url": payload.thumbnail_url,
-    }
+    part_entry = _part_entry_from_create(payload)
 
-    if isinstance(getattr(po, "parts", None), list) and po.parts:
-        parts = po.parts
-    else:
-        parts = []
-        if po.part_number or po.part_number is not None:
-            parts.append(
-                {
-                    "part_number": po.part_number,
-                    "part_name": po.part_number,
-                    "qty": po.qty,
-                    "thumbnail_url": po.thumbnail_url,
-                }
-            )
+    parts = _as_parts_list(po)
+    if not parts and po.part_number is not None:
+        parts.append(_top_level_as_part(po))
     parts.append(part_entry)
-    po.parts = parts
-    if not po.thumbnail_url and part_entry.get("thumbnail_url"):
-        po.thumbnail_url = part_entry.get("thumbnail_url")
+    _set_parts(po, parts)
+    _adopt_part_media(po, part_entry)
 
     db.add(
         Activity(
@@ -569,43 +627,14 @@ def update_part(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
     _guard_locked(po, actor)
 
-    parts = po.parts if isinstance(getattr(po, "parts", None), list) else []
+    parts = _as_parts_list(po)
     if index < 0 or index >= len(parts):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
 
-    part = dict(parts[index] or {})
-    # Apply provided updates only
-    if payload.part_number is not None:
-        part["part_number"] = payload.part_number.strip()
-    if payload.part_name is not None:
-        part["part_name"] = payload.part_name
-    if payload.qty is not None:
-        part["qty"] = int(payload.qty)
-    if payload.dims is not None:
-        part["dims"] = payload.dims
-    if payload.mat_dim is not None:
-        part["mat_dim"] = payload.mat_dim
-    if payload.material is not None:
-        part["material"] = payload.material
-    if payload.finish is not None:
-        part["finish"] = payload.finish
-    if payload.inspection is not None:
-        part["inspection"] = payload.inspection
-    if payload.hardware is not None:
-        part["hardware"] = bool(payload.hardware)
-    if payload.priority is not None:
-        part["priority"] = payload.priority
-    if payload.certificates is not None:
-        part["certificates"] = payload.certificates
-    if payload.thumbnail_url is not None:
-        part["thumbnail_url"] = payload.thumbnail_url
-
+    part = _apply_part_update(dict(parts[index] or {}), payload)
     parts[index] = part
-    po.parts = parts
-
-    # Optionally adopt thumbnail at PO level if none exists
-    if not po.thumbnail_url and part.get("thumbnail_url"):
-        po.thumbnail_url = part.get("thumbnail_url")
+    _set_parts(po, parts)
+    _adopt_part_media(po, part)
 
     db.add(
         Activity(
@@ -643,39 +672,13 @@ def update_po_with_part(
     # Apply part update if requested
     if payload.part_index is not None and payload.part is not None:
         idx = payload.part_index
-        parts = po.parts if isinstance(getattr(po, "parts", None), list) else []
+        parts = _as_parts_list(po)
         if idx < 0 or idx >= len(parts):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
-        part = dict(parts[idx] or {})
-        p = payload.part
-        if p.part_number is not None:
-            part["part_number"] = p.part_number.strip()
-        if p.part_name is not None:
-            part["part_name"] = p.part_name
-        if p.qty is not None:
-            part["qty"] = int(p.qty)
-        if p.dims is not None:
-            part["dims"] = p.dims
-        if p.mat_dim is not None:
-            part["mat_dim"] = p.mat_dim
-        if p.material is not None:
-            part["material"] = p.material
-        if p.finish is not None:
-            part["finish"] = p.finish
-        if p.inspection is not None:
-            part["inspection"] = p.inspection
-        if p.hardware is not None:
-            part["hardware"] = bool(p.hardware)
-        if p.priority is not None:
-            part["priority"] = p.priority
-        if p.certificates is not None:
-            part["certificates"] = p.certificates
-        if p.thumbnail_url is not None:
-            part["thumbnail_url"] = p.thumbnail_url
+        part = _apply_part_update(dict(parts[idx] or {}), payload.part)
         parts[idx] = part
-        po.parts = parts
-        if not po.thumbnail_url and part.get("thumbnail_url"):
-            po.thumbnail_url = part.get("thumbnail_url")
+        _set_parts(po, parts)
+        _adopt_part_media(po, part)
         db.add(
             Activity(
                 actor_id=actor.id,
@@ -971,9 +974,6 @@ def _merged_traveler_fields(
     selected_part_index: int | None = None,
 ) -> dict[str, Any]:
     base = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_part_index)
-    # Include any stored PO thumbnail so the traveler generator can embed it.
-    if getattr(po, "thumbnail_url", None):
-        base["thumbnail_url"] = po.thumbnail_url
     return traveler_svc.apply_draft_overrides(base, overrides)
 
 
@@ -1017,11 +1017,13 @@ def get_traveler(
     po_id: str,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
+    part: int | None = Query(None, ge=1),
 ) -> TravelerDraftOut:
-    """Merged editable traveler fields. Any authenticated user."""
+    """Merged editable traveler fields for one part. Any authenticated user."""
     po = _load_po_for_traveler(db, po_id)
-    fields = traveler_svc.draft_from_po(db, po, actor=actor)
-    saved = po.traveler_draft if isinstance(po.traveler_draft, dict) else None
+    selected_idx = _traveler_part_index(po, part)
+    fields = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_idx)
+    saved = traveler_svc.part_draft(po, selected_idx) or None
     return TravelerDraftOut(fields=fields, saved=saved)
 
 
@@ -1031,16 +1033,18 @@ def put_traveler(
     payload: TravelerDraftUpdate,
     db: Session = Depends(get_db),
     actor: User = Depends(require_editor),
+    part: int | None = Query(None, ge=1),
 ) -> TravelerDraftOut:
-    """Persist traveler field overrides on the PO. Does not write activity."""
+    """Persist traveler field overrides for one part. Does not write activity."""
     po = _load_po_for_traveler(db, po_id)
     _guard_locked(po, actor)
+    selected_idx = _traveler_part_index(po, part)
     normalised = traveler_svc.normalize_draft(payload.fields)
-    po.traveler_draft = normalised or None
+    traveler_svc.set_part_draft(po, selected_idx, normalised or None)
     db.commit()
     db.refresh(po)
-    fields = traveler_svc.draft_from_po(db, po, actor=actor)
-    return TravelerDraftOut(fields=fields, saved=po.traveler_draft)
+    fields = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_idx)
+    return TravelerDraftOut(fields=fields, saved=traveler_svc.part_draft(po, selected_idx) or None)
 
 
 @router.get("/{po_id}/traveler/{fmt}")
@@ -1058,7 +1062,7 @@ def preview_traveler(
     if fmt.lower() not in _TRAVELER_FORMATS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown format {fmt!r}")
     po = _load_po_for_traveler(db, po_id)
-    selected_idx = (part - 1) if isinstance(part, int) and part > 0 else None
+    selected_idx = _traveler_part_index(po, part)
     fields = _merged_traveler_fields(db, po, actor, None, selected_part_index=selected_idx)
     if fmt.lower() == "pdf":
         t0 = time.perf_counter()
@@ -1102,6 +1106,7 @@ def generate_traveler(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown format {fmt!r}")
     po = _load_po_for_traveler(db, po_id)
     body = payload or TravelerGenerateBody()
+    selected_idx = _traveler_part_index(po, part)
     if body.persist:
         if not has_rank(actor.role, EDITOR_FLOOR):
             raise HTTPException(
@@ -1109,8 +1114,9 @@ def generate_traveler(
                 f"Requires {role_label(EDITOR_FLOOR).lower()} or above to save traveler draft",
             )
         _guard_locked(po, actor)
-        po.traveler_draft = traveler_svc.normalize_draft(body.fields) or None
-    selected_idx = (part - 1) if isinstance(part, int) and part > 0 else None
+        traveler_svc.set_part_draft(
+            po, selected_idx, traveler_svc.normalize_draft(body.fields) or None
+        )
     fields = _merged_traveler_fields(db, po, actor, body.fields, selected_part_index=selected_idx)
     _log(
         db,

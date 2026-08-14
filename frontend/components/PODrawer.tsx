@@ -121,10 +121,15 @@ export function PODrawer({
     const parts = (rec as any).parts ?? [];
     if (!Array.isArray(parts) || parts.length === 0) return rec as PODraft;
     const p = parts[idx] ?? {};
+    // Only the original part (index 0) inherits PO-level media when the part
+    // record never stored its own. Later parts start empty unless they have art.
+    const media = (key: "thumbnail_url" | "model_url" | "model_filename" | "model_size") => {
+      if (Object.prototype.hasOwnProperty.call(p, key)) return p[key] ?? null;
+      return idx === 0 ? ((rec as any)[key] ?? null) : null;
+    };
     return {
       ...(rec as any),
       part_number: p.part_number ?? (rec as any).part_number,
-      // part_name is not part of PO top-level but CardEditor / traveler may use it
       part_name: p.part_name ?? p.part_number ?? (rec as any).part_name,
       qty: p.qty ?? (rec as any).qty,
       dims: p.dims ?? (rec as any).dims,
@@ -134,7 +139,11 @@ export function PODrawer({
       inspection: p.inspection ?? (rec as any).inspection,
       hardware: p.hardware ?? (rec as any).hardware,
       priority: p.priority ?? (rec as any).priority,
-      thumbnail_url: p.thumbnail_url ?? (rec as any).thumbnail_url,
+      certificates: p.certificates ?? (rec as any).certificates,
+      thumbnail_url: media("thumbnail_url"),
+      model_url: media("model_url"),
+      model_filename: media("model_filename"),
+      model_size: media("model_size"),
     } as PODraft;
   }
 
@@ -216,10 +225,23 @@ export function PODrawer({
               hardware: !!draft.hardware,
               priority: draft.priority || undefined,
               certificates: (draft as any).certificates || undefined,
-              thumbnail_url: draft.thumbnail_url || undefined,
+              thumbnail_url: draft.thumbnail_url ?? null,
+              model_url: draft.model_url ?? null,
+              model_filename: draft.model_filename ?? null,
+              model_size: draft.model_size ?? null,
             };
-            // Call the combined atomic endpoint
-            saved = await api.updatePOWithPart(record.id, { ...draft, qty: Number(draft.qty) || 1 }, selectedPartIndex, partPayload);
+            const poFields = {
+              job_no: draft.job_no,
+              po_number: draft.po_number,
+              due_date: draft.due_date,
+              status: draft.status,
+              locked: draft.locked,
+              customer: draft.customer,
+              note: draft.note,
+              owner_id: draft.owner_id,
+              custom_fields: draft.custom_fields,
+            };
+            saved = await api.updatePOWithPart(record.id, poFields, selectedPartIndex, partPayload);
         } else {
             saved = await api.updatePO(record!.id, { ...draft, qty: Number(draft.qty) || 1 });
         }
@@ -227,10 +249,11 @@ export function PODrawer({
 
       // stay open on the saved record: server-derived fields (stage, labels) come back here
       setRecord(saved);
-      setDraft(saved);
+      const after = mergePartIntoDraft(saved, selectedPartIndex);
+      setDraft(after);
       // the drawer staying open is exactly why this has to move: without it the
       // next click on the scrim would ask about changes already written
-      setBaseline(saved);
+      setBaseline(after);
       setSavedNote(creating ? "Created." : "Saved.");
       onSaved(saved);
       await loadActivity(saved.id);
@@ -270,9 +293,9 @@ export function PODrawer({
           <strong style={{ letterSpacing: "-0.02em" }}>
             {creating ? "New purchase order" : `${record?.job_no} · ${record?.po_number}`}
           </strong>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="drawer-head-actions">
             {record && Array.isArray(record.parts) && record.parts.length > 0 && (
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", whiteSpace: "nowrap" }}>
                 Part
                 <select
                   value={selectedPartIndex ?? ""}
@@ -284,8 +307,10 @@ export function PODrawer({
                     setBaseline(merged);
                   }}
                 >
-                  {(record.parts ?? []).map((p: any, i: number) => (
-                    <option key={i} value={i}>{`Part ${i + 1} of ${ (record.parts?.length ?? (record.parts ? record.parts.length : 0)) } · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}</option>
+                  {(record.parts ?? []).map((p, i) => (
+                    <option key={i} value={i}>
+                      {`Part ${i + 1} of ${record.parts?.length ?? 0} · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -299,7 +324,6 @@ export function PODrawer({
                 onDone={async (saved, note) => {
                   setBusy(false);
                   setRecord(saved);
-                  // if new part added, select the last part
                   const partsCount = Array.isArray(saved.parts) ? saved.parts.length : 0;
                   const idx = partsCount > 0 ? partsCount - 1 : null;
                   setSelectedPartIndex(idx);
@@ -316,10 +340,10 @@ export function PODrawer({
                 }}
               />
             )}
+            <button className="btn" onClick={requestClose}>
+              Close
+            </button>
           </div>
-          <button className="btn" style={{ marginLeft: record && editable ? 8 : "auto" }} onClick={requestClose}>
-            Close
-          </button>
         </header>
 
         <div className="drawer-body">
@@ -374,8 +398,11 @@ export function PODrawer({
           {!creating && record && (
             <>
               <TravelerPanel
+                key={`${record.id}:${selectedPartIndex ?? "po"}`}
                 poId={record.id}
                 jobNo={record.job_no}
+                part={selectedPartIndex != null ? selectedPartIndex + 1 : undefined}
+                partCount={Array.isArray(record.parts) ? record.parts.length : 0}
                 canEditDraft={modifiable}
                 onGenerated={() => void loadActivity(record.id)}
               />

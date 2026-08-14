@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -74,7 +75,7 @@ class POBase(BaseModel):
     # Optional list of parts/components for multipart orders. Each part is an
     # arbitrary small object; clients may include part_number, part_name, qty,
     # and thumbnail_url.
-    parts: list[dict[str, str | int | None]] | None = None
+    parts: list[dict[str, Any]] | None = None
     # Admin-defined attributes; keys match board settings customFields.
     custom_fields: dict[str, str | int | float | None] | None = None
 
@@ -96,6 +97,9 @@ class PartCreate(BaseModel):
     priority: str | None = "normal"
     certificates: str | None = None
     thumbnail_url: str | None = None
+    model_url: str | None = None
+    model_filename: str | None = None
+    model_size: int | None = None
 
 
 class PartUpdate(BaseModel):
@@ -111,6 +115,9 @@ class PartUpdate(BaseModel):
     priority: str | None = None
     certificates: str | None = None
     thumbnail_url: str | None = None
+    model_url: str | None = None
+    model_filename: str | None = None
+    model_size: int | None = None
 
 
 class POUpdate(BaseModel):
@@ -200,9 +207,10 @@ class POOut(ORMModel):
     custom_fields: dict[str, str | int | float | None] | None = None
     # Optional list of parts/components for multipart orders. Kept optional to
     # preserve single-part PO compatibility.
-    parts: list[dict[str, str | int | None]] | None = None
-    # Editable traveler packet overrides; merged over live PO values on generate.
-    traveler_draft: dict[str, str | int | float | None] | None = None
+    parts: list[dict[str, Any]] | None = None
+    # Editable traveler packet overrides. Legacy rows are a flat field map;
+    # multi-part orders store `{ "0": {...}, "1": {...} }` keyed by part index.
+    traveler_draft: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
     # Absent unless the route bothered to derive it; the list and every write

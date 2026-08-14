@@ -307,9 +307,8 @@ export function CardEditor({
     }
   }
 
-  /* One model per order: a second upload replaces the first, exactly as the
-     photo well above does. The server re-checks the file's leading bytes, so a
-     rejection here carries a real reason rather than a generic failure. */
+  /* One model per card (the selected part, or the order when it has no parts
+     list). A second upload replaces the first, same as the photo well. */
   async function uploadModel(file: File | undefined) {
     if (!file || disabled) return;
     setModelUploading(true);

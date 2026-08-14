@@ -168,21 +168,25 @@ export const api = {
       file,
     ),
 
-  /** Merged traveler field map for the editable packet editor. */
-  getTraveler: (poId: string) =>
+  /** Merged traveler field map for the editable packet editor. `part` is 1-based. */
+  getTraveler: (poId: string, part?: number | null) =>
     request<{
       fields: Record<string, string | number | null>;
       saved: Record<string, string | number | null> | null;
-    }>(`/api/purchase-orders/${poId}/traveler`),
+    }>(`/api/purchase-orders/${poId}/traveler${part ? `?part=${part}` : ""}`),
   /** Get a single PO by id. */
   getPO: (poId: string) => request<PurchaseOrder>(`/api/purchase-orders/${poId}`),
 
-  /** Persist traveler_draft JSON on the PO (editor floor). */
-  saveTraveler: (poId: string, fields: Record<string, string | number | null>) =>
+  /** Persist traveler_draft JSON for one part (editor floor). `part` is 1-based. */
+  saveTraveler: (
+    poId: string,
+    fields: Record<string, string | number | null>,
+    part?: number | null,
+  ) =>
     request<{
       fields: Record<string, string | number | null>;
       saved: Record<string, string | number | null> | null;
-    }>(`/api/purchase-orders/${poId}/traveler`, {
+    }>(`/api/purchase-orders/${poId}/traveler${part ? `?part=${part}` : ""}`, {
       method: "PUT",
       body: JSON.stringify({ fields }),
     }),
