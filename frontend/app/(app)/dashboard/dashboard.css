@@ -371,6 +371,11 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: flex-start;
+}
+
+.dash-table td[data-numeric="true"] .dash-part-inner {
+  align-items: flex-end;
 }
 
 .dash-row-part[data-open="true"] .dash-part-inner {
@@ -563,7 +568,9 @@
 }
 
 .dash-stage {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
   max-width: 100%;
   padding: 0.14rem 0.4rem;
   border-radius: 999px;

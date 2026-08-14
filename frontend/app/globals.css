@@ -468,10 +468,14 @@ textarea {
 }
 
 .prio {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
   font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.28rem;
+  letter-spacing: 0.08em;
+  padding: 0.12rem 0.35rem;
   border-radius: 2px;
   color: #fff;
   background: var(--prio, var(--tone-slate));

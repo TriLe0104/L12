@@ -50,16 +50,8 @@ export const TONE_BY_PRIORITY: Record<string, string> = {
   low: "graphite",
 };
 
-const PRIORITY_SHORT: Record<string, string> = {
-  hot: "HOT",
-  high: "HI",
-  normal: "NRM",
-  low: "LOW",
-};
-
 export function PriorityTag({ priority, label }: { priority: string; label: string }) {
   const key = (priority || "normal").toLowerCase();
-  const text = PRIORITY_SHORT[key] ?? (label.length > 4 ? label.slice(0, 4).toUpperCase() : label.toUpperCase());
   return (
     <span
       className="prio"
@@ -67,7 +59,7 @@ export function PriorityTag({ priority, label }: { priority: string; label: stri
       style={{ ["--prio" as string]: `var(--tone-${TONE_BY_PRIORITY[key] ?? "slate"})` }}
       title={`Priority: ${label}`}
     >
-      {text}
+      {label}
     </span>
   );
 }

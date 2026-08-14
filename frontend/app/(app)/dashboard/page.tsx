@@ -204,7 +204,7 @@ const FALLBACK_COLUMNS: Column[] = [
   { key: "job", label: "Job", widthRem: 4.3, ...BUILTIN_COLUMN_DEFS.job },
   { key: "po_number", label: "PO #", widthRem: 4.8, ...BUILTIN_COLUMN_DEFS.po_number },
   { key: "customer", label: "Customer", widthRem: 5.7, ...BUILTIN_COLUMN_DEFS.customer },
-  { key: "priority", label: "Priority", widthRem: 3.4, ...BUILTIN_COLUMN_DEFS.priority },
+  { key: "priority", label: "Priority", widthRem: 5.4, ...BUILTIN_COLUMN_DEFS.priority },
   { key: "stage", label: "Stage", widthRem: 6.7, ...BUILTIN_COLUMN_DEFS.stage },
   { key: "status", label: "Status", widthRem: 8.75, ...BUILTIN_COLUMN_DEFS.status },
   { key: "owner", label: "Owner", widthRem: 5.0, ...BUILTIN_COLUMN_DEFS.owner },
