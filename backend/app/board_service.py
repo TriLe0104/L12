@@ -32,10 +32,12 @@ from .board_defaults import (
     _normalize_option_list,
     apply_card_field_types_upgrade,
     apply_dashboard_columns_upgrade,
+    apply_certificates_card_field,
     apply_dashboard_filterable_upgrade,
     apply_priority_card_visible,
     clone_default,
     default_selection_lists,
+    document_needs_certificates_field,
     document_needs_card_field_types_upgrade,
     document_needs_dashboard_columns_upgrade,
     document_needs_dashboard_filterable_upgrade,
@@ -168,6 +170,19 @@ def ensure_row(db: Session) -> BoardSettings:
     # v8: dashboardColumns.filterable (stage/status/priority default on).
     if document_needs_dashboard_filterable_upgrade(doc):
         patched = apply_dashboard_filterable_upgrade(doc if isinstance(doc, dict) else {})
+        if isinstance(row.document, dict):
+            for key, value in row.document.items():
+                if key not in patched:
+                    patched[key] = deepcopy(value)
+        row.document = patched
+        row.version = DOCUMENT_VERSION
+        row.updated_at = _now()
+        doc_upgraded = True
+        doc = patched
+
+    # v9: official Certificates builtin; fold a custom cert field into it.
+    if document_needs_certificates_field(doc):
+        patched = apply_certificates_card_field(doc if isinstance(doc, dict) else {})
         if isinstance(row.document, dict):
             for key, value in row.document.items():
                 if key not in patched:

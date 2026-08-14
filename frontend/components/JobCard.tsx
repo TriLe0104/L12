@@ -127,6 +127,7 @@ export function JobCard({
           { key: "mat_dim", kind: "builtin" as const, label: "Mat Dim", visible: true },
           { key: "material", kind: "builtin" as const, label: "Material", visible: true },
           { key: "finish", kind: "builtin" as const, label: "Finish", visible: true },
+          { key: "certificates", kind: "builtin" as const, label: "Certificates", visible: true },
           { key: "inspection", kind: "builtin" as const, label: "Inspection", visible: true },
           { key: "hardware", kind: "builtin" as const, label: "Hardware", visible: true },
         ];

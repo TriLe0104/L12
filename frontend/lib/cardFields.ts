@@ -40,6 +40,8 @@ export function builtinRawString(draft: PODraft, key: string): string {
       return draft.material ?? "";
     case "finish":
       return draft.finish ?? "";
+    case "certificates":
+      return draft.certificates ?? "";
     case "inspection":
       return (draft.inspection ?? "").toString();
     case "priority":
@@ -67,6 +69,7 @@ export function patchBuiltinScalar(
   if (key === "mat_dim") return { mat_dim: raw };
   if (key === "material") return { material: raw || null };
   if (key === "finish") return { finish: raw || null };
+  if (key === "certificates") return { certificates: raw || null };
   if (key === "inspection") return { inspection: raw || "standard" };
   if (key === "priority") return { priority: raw || "normal" };
   if (key === "customer") return { customer: raw || null };
@@ -107,6 +110,8 @@ export function builtinValue(draft: PODraft, key: string): string {
       return draft.material?.trim() || "—";
     case "finish":
       return draft.finish?.trim() || "—";
+    case "certificates":
+      return draft.certificates?.trim() || "—";
     case "inspection":
       return (draft.inspection ?? "standard").toUpperCase();
     case "hardware":

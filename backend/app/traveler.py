@@ -276,6 +276,8 @@ def _certificates_from_card(db: Session, po: PurchaseOrder) -> str:
     contains "certificat" so a rename in Board Settings doesn't silently
     break the traveler.
     """
+    if getattr(po, "certificates", None):
+        return _s(po.certificates)
     values = po.custom_fields if isinstance(po.custom_fields, dict) else {}
     if not values:
         return ""

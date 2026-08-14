@@ -32,6 +32,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "traveler_draft": "JSON",
         "parts": "JSON",
         "display_part_index": "INTEGER NOT NULL DEFAULT 0",
+        "certificates": "VARCHAR(500)",
     },
     "users": {
         "avatar_url": "VARCHAR(1000)",

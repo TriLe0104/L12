@@ -91,6 +91,13 @@ def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
         "inspection": po.inspection,
         "hardware": po.hardware,
         "priority": po.priority,
+        "certificates": po.certificates
+        or (
+            (po.custom_fields or {}).get("certificates")
+            if isinstance(po.custom_fields, dict)
+            else None
+        ),
+        "custom_fields": dict(po.custom_fields) if isinstance(po.custom_fields, dict) else {},
         "thumbnail_url": po.thumbnail_url,
         "model_url": po.model_url,
         "model_filename": po.model_filename,
@@ -111,6 +118,7 @@ def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
         "hardware": bool(payload.hardware) if payload.hardware is not None else False,
         "priority": payload.priority,
         "certificates": payload.certificates,
+        "custom_fields": dict(payload.custom_fields) if isinstance(payload.custom_fields, dict) else {},
         "thumbnail_url": payload.thumbnail_url,
         "model_url": payload.model_url,
         "model_filename": payload.model_filename,

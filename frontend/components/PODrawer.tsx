@@ -40,6 +40,7 @@ const blank = (defaults: PODraft = {}): PODraft => ({
   mat_dim: "",
   material: "",
   finish: "",
+  certificates: "",
   inspection: "standard",
   hardware: false,
   status: "need_material_size",
@@ -142,7 +143,17 @@ export function PODrawer({
       inspection: p.inspection ?? (rec as any).inspection,
       hardware: p.hardware ?? (rec as any).hardware,
       priority: p.priority ?? (rec as any).priority,
-      certificates: p.certificates ?? (rec as any).certificates,
+      certificates: Object.prototype.hasOwnProperty.call(p, "certificates")
+        ? (p.certificates ?? "")
+        : idx === 0
+          ? ((rec as any).certificates ?? (rec as any).custom_fields?.certificates ?? "")
+          : "",
+      custom_fields:
+        p.custom_fields && typeof p.custom_fields === "object"
+          ? { ...p.custom_fields }
+          : idx === 0
+            ? { ...((rec as any).custom_fields ?? {}) }
+            : {},
       thumbnail_url: media("thumbnail_url"),
       model_url: media("model_url"),
       model_filename: media("model_filename"),
@@ -237,7 +248,8 @@ export function PODrawer({
               inspection: draft.inspection || undefined,
               hardware: !!draft.hardware,
               priority: draft.priority || undefined,
-              certificates: (draft as any).certificates || undefined,
+              certificates: (draft as any).certificates ?? null,
+              custom_fields: draft.custom_fields ?? {},
               thumbnail_url: draft.thumbnail_url ?? null,
               model_url: draft.model_url ?? null,
               model_filename: draft.model_filename ?? null,
@@ -252,7 +264,6 @@ export function PODrawer({
               customer: draft.customer,
               note: draft.note,
               owner_id: draft.owner_id,
-              custom_fields: draft.custom_fields,
             };
             saved = await api.updatePOWithPart(record.id, poFields, selectedPartIndex, partPayload);
         } else {

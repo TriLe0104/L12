@@ -146,6 +146,7 @@ export const DEFAULT_DASHBOARD_WIDTH_REM: Record<string, number | null> = {
   mat_dim: 6.0,
   inspection: 5.5,
   hardware: 4.5,
+  certificates: 6.5,
 };
 
 /** Builtin dashboard column catalog (order + default visibility / filterable). */
@@ -159,6 +160,7 @@ export const BUILTIN_DASHBOARD_COLUMNS: DashboardColumnConfig[] = [
   { key: "owner", label: "Owner", visible: true, widthRem: 5.0, filterable: false },
   { key: "material", label: "Material", visible: true, widthRem: null, filterable: false },
   { key: "finish", label: "Finish", visible: true, widthRem: null, filterable: false },
+  { key: "certificates", label: "Certificates", visible: false, widthRem: 6.5, filterable: false },
   { key: "due", label: "Due", visible: true, widthRem: 4.3, filterable: false },
   { key: "modified", label: "Modified", visible: true, widthRem: 5.4, filterable: false },
   { key: "comments", label: "Comments", visible: true, widthRem: 2.35, filterable: false },
@@ -312,6 +314,7 @@ export const BUILTIN_DEFAULT_TYPES: Record<string, CustomFieldType> = {
   priority: "select",
   customer: "text",
   owner: "text",
+  certificates: "text",
 };
 
 /**
@@ -332,6 +335,7 @@ export const BUILTIN_ALLOWED_TYPES: Record<string, readonly CustomFieldType[]> =
   priority: ["select", "text"],
   customer: ["text", "select", "number", "date"],
   owner: ["text"],
+  certificates: ["text", "select", "number", "date"],
 };
 
 export const CUSTOM_FIELD_TYPES: readonly CustomFieldType[] = [

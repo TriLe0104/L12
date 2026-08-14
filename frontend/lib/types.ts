@@ -65,6 +65,7 @@ export interface PurchaseOrder {
   mat_dim: string | null;
   material: string | null;
   finish: string | null;
+  certificates?: string | null;
   inspection: Inspection;
   hardware: boolean;
   status: POStatus;
@@ -93,7 +94,8 @@ export interface PurchaseOrder {
     inspection?: string;
     hardware?: boolean;
     priority?: string;
-    certificates?: string;
+    certificates?: string | null;
+    custom_fields?: Record<string, string | number | null> | null;
     thumbnail_url?: string | null;
     model_url?: string | null;
     model_filename?: string | null;

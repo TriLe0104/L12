@@ -114,6 +114,7 @@ class PurchaseOrder(Base):
     mat_dim: Mapped[str | None] = mapped_column(String(120), nullable=True)   # 1.25 x 1.7 x .500
     material: Mapped[str | None] = mapped_column(String(160), nullable=True)  # AL 6061-T651, Plate
     finish: Mapped[str | None] = mapped_column(String(200), nullable=True)    # CLEAR ANODIZE; CHEM FILM GOLD
+    certificates: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # process — inspection / priority are plain strings so Admin can extend the
     # published selectionLists without an enum migration (same pattern as status).

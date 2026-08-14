@@ -27,6 +27,17 @@ export function poShowingPart(po: PurchaseOrder, index?: number): PurchaseOrder 
     inspection: p.inspection ?? po.inspection,
     hardware: p.hardware ?? po.hardware,
     priority: p.priority ?? po.priority,
+    certificates: Object.prototype.hasOwnProperty.call(p, "certificates")
+      ? (p.certificates ?? null)
+      : i === 0
+        ? (po.certificates ?? null)
+        : null,
+    custom_fields:
+      p.custom_fields && typeof p.custom_fields === "object"
+        ? { ...p.custom_fields }
+        : i === 0
+          ? { ...(po.custom_fields ?? {}) }
+          : {},
     thumbnail_url: inheritMedia ? po.thumbnail_url : (p.thumbnail_url ?? null),
     model_url: inheritModel ? po.model_url : (p.model_url ?? null),
     model_filename: inheritModel ? po.model_filename : (p.model_filename ?? null),

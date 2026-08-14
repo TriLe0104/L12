@@ -35,6 +35,7 @@ BUILTIN_DEFAULT_TYPES: dict[str, str] = {
     "customer": "text",
     # Owner keeps the assignee picker in the UI; type is locked to text.
     "owner": "text",
+    "certificates": "text",
 }
 
 # Safe type transitions. Identity keys stay text; hardware stays select (bool
@@ -53,6 +54,7 @@ BUILTIN_ALLOWED_TYPES: dict[str, frozenset[str]] = {
     "priority": frozenset({"select", "text"}),
     "customer": frozenset({"text", "select", "number", "date"}),
     "owner": frozenset({"text"}),
+    "certificates": frozenset({"text", "select", "number", "date"}),
 }
 
 # Built-in card fields shown on JobCard / CardEditor (order = display order).
@@ -68,6 +70,7 @@ BUILTIN_CARD_FIELDS: list[dict[str, Any]] = [
     {"key": "mat_dim", "kind": "builtin", "label": "Mat Dim", "visible": True, "type": "text"},
     {"key": "material", "kind": "builtin", "label": "Material", "visible": True, "type": "select"},
     {"key": "finish", "kind": "builtin", "label": "Finish", "visible": True, "type": "text"},
+    {"key": "certificates", "kind": "builtin", "label": "Certificates", "visible": True, "type": "text"},
     {"key": "inspection", "kind": "builtin", "label": "Inspection", "visible": True, "type": "select"},
     {"key": "hardware", "kind": "builtin", "label": "Hardware", "visible": True, "type": "select"},
     {"key": "priority", "kind": "builtin", "label": "Priority", "visible": True, "type": "select"},
@@ -84,6 +87,7 @@ JOBCARD_VISIBLE_DEFAULT = {
     "mat_dim",
     "material",
     "finish",
+    "certificates",
     "inspection",
     "hardware",
     "priority",
@@ -113,6 +117,7 @@ DEFAULT_DASHBOARD_WIDTH_REM: dict[str, float | None] = {
     "mat_dim": 6.0,
     "inspection": 5.5,
     "hardware": 4.5,
+    "certificates": 6.5,
 }
 
 # Dashboard table columns — visibility, order, optional widthRem, and filterable.
@@ -128,6 +133,7 @@ BUILTIN_DASHBOARD_COLUMNS: list[dict[str, Any]] = [
     {"key": "owner", "label": "Owner", "visible": True, "widthRem": 5.0, "filterable": False},
     {"key": "material", "label": "Material", "visible": True, "widthRem": None, "filterable": False},
     {"key": "finish", "label": "Finish", "visible": True, "widthRem": None, "filterable": False},
+    {"key": "certificates", "label": "Certificates", "visible": False, "widthRem": 6.5, "filterable": False},
     {"key": "due", "label": "Due", "visible": True, "widthRem": 4.3, "filterable": False},
     {"key": "modified", "label": "Modified", "visible": True, "widthRem": 5.4, "filterable": False},
     {"key": "comments", "label": "Comments", "visible": True, "widthRem": 2.35, "filterable": False},
@@ -216,7 +222,8 @@ DEFAULT_PRIORITY_OPTIONS = ["hot", "high", "normal", "low"]
 # v6: dashboardColumns.widthRem + sync custom/new builtin columns (hidden).
 # v7: cardFields.type on builtins + Admin-editable builtin labels.
 # v8: dashboardColumns.filterable (stage/status/priority on by default).
-DOCUMENT_VERSION = 8
+# v9: official Certificates builtin; per-part custom fields.
+DOCUMENT_VERSION = 9
 
 
 def default_selection_lists() -> dict[str, list[str]]:
@@ -806,6 +813,84 @@ def document_needs_card_field_types_upgrade(doc: dict[str, Any] | None) -> bool:
     return False
 
 
+CERT_CUSTOM_KEYS = frozenset({"certificates", "certificate", "certs", "cert"})
+
+
+def apply_certificates_card_field(doc: dict[str, Any]) -> dict[str, Any]:
+    """v9: official Certificates builtin. Fold a custom cert field into it."""
+    out = deepcopy(doc) if isinstance(doc, dict) else clone_default()
+    fields = out.get("cardFields")
+    if not isinstance(fields, list):
+        fields = []
+        out["cardFields"] = fields
+
+    custom_raw = out.get("customFields") if isinstance(out.get("customFields"), list) else []
+    custom_label = "Certificates"
+    custom_visible = True
+    kept_custom: list[dict[str, Any]] = []
+    for item in custom_raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().lower()
+        if key in CERT_CUSTOM_KEYS:
+            label = str(item.get("label") or "").strip()
+            if label:
+                custom_label = label
+            continue
+        kept_custom.append(item)
+    out["customFields"] = kept_custom
+
+    found = False
+    for item in fields:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        if key.lower() in CERT_CUSTOM_KEYS or key == "certificates":
+            item["key"] = "certificates"
+            item["kind"] = "builtin"
+            item["type"] = item.get("type") if item.get("type") in BUILTIN_ALLOWED_TYPES["certificates"] else "text"
+            if not str(item.get("label") or "").strip():
+                item["label"] = custom_label
+            item["visible"] = True if item.get("visible") is None else bool(item.get("visible"))
+            found = True
+            break
+    if not found:
+        fields.append(
+            {
+                "key": "certificates",
+                "kind": "builtin",
+                "label": custom_label,
+                "visible": custom_visible,
+                "type": "text",
+            }
+        )
+
+    try:
+        ver = int(out.get("version") or 0)
+    except (TypeError, ValueError):
+        ver = 0
+    out["version"] = max(ver, 9)
+    return out
+
+
+def document_needs_certificates_field(doc: dict[str, Any] | None) -> bool:
+    if not isinstance(doc, dict):
+        return True
+    try:
+        version = int(doc.get("version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < 9:
+        return True
+    fields = doc.get("cardFields")
+    if not isinstance(fields, list):
+        return True
+    for item in fields:
+        if isinstance(item, dict) and item.get("key") == "certificates" and item.get("kind") == "builtin":
+            return False
+    return True
+
+
 def upgrade_document(doc: dict[str, Any]) -> dict[str, Any]:
     """Rewrite a stored board document onto the current catalog (v2–v7).
 
@@ -900,6 +985,8 @@ def upgrade_document(doc: dict[str, Any]) -> dict[str, Any]:
     out = apply_card_field_types_upgrade(out)
     # v8: dashboard column filterable flags.
     out = apply_dashboard_filterable_upgrade(out)
+    # v9: official Certificates builtin; fold custom cert fields into it.
+    out = apply_certificates_card_field(out)
     out["version"] = DOCUMENT_VERSION
 
     return out

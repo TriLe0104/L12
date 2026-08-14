@@ -12,6 +12,7 @@ import { canEdit, useAuth } from "@/lib/auth";
 import { useBoardSettings } from "@/lib/boardSettings";
 import { PRIORITY_FIELD_KEY, dashboardColumnWidthStyle, resolveToneColor, selectionOptions, type DashboardColumnConfig } from "@/lib/boardTypes";
 import { customFieldMap } from "@/lib/cardFields";
+import { poShowingPart } from "@/lib/parts";
 import {
   PRIORITY_ORDER,
   type PurchaseOrder,
@@ -132,8 +133,9 @@ const BUILTIN_COLUMN_DEFS: Record<string, BuiltinColumnDef> = {
     value: (po, statusRank) => statusRank.get(po.status) ?? FALLBACK_STATUS_SEQUENCE.length,
   },
   owner: { noun: "owner", value: (po) => text(po.owner?.name) },
-  material: { noun: "material", value: (po) => text(po.material) },
-  finish: { noun: "finish", value: (po) => text(po.finish) },
+  material: { noun: "material", value: (po) => text(poShowingPart(po).material) },
+  finish: { noun: "finish", value: (po) => text(poShowingPart(po).finish) },
+  certificates: { noun: "certificates", value: (po) => text(poShowingPart(po).certificates) },
   due: { noun: "due date", value: (po) => dayNumber(po.due_date) },
   modified: {
     noun: "when it was last modified",
@@ -143,12 +145,12 @@ const BUILTIN_COLUMN_DEFS: Record<string, BuiltinColumnDef> = {
     noun: "comment count",
     value: (po) => po.comment_count ?? 0,
   },
-  qty: { noun: "quantity", numeric: true, value: (po) => po.qty },
-  part_number: { noun: "part number", value: (po) => po.part_number },
-  dims: { noun: "dimensions", value: (po) => text(po.dims) },
-  mat_dim: { noun: "material dimensions", value: (po) => text(po.mat_dim) },
-  inspection: { noun: "inspection", value: (po) => text(po.inspection) },
-  hardware: { noun: "hardware", value: (po) => (po.hardware ? 1 : 0) },
+  qty: { noun: "quantity", numeric: true, value: (po) => poShowingPart(po).qty },
+  part_number: { noun: "part number", value: (po) => poShowingPart(po).part_number },
+  dims: { noun: "dimensions", value: (po) => text(poShowingPart(po).dims) },
+  mat_dim: { noun: "material dimensions", value: (po) => text(poShowingPart(po).mat_dim) },
+  inspection: { noun: "inspection", value: (po) => text(poShowingPart(po).inspection) },
+  hardware: { noun: "hardware", value: (po) => (poShowingPart(po).hardware ? 1 : 0) },
 };
 
 const FALLBACK_COLUMNS: Column[] = [
@@ -204,7 +206,7 @@ function columnsFromConfig(
         widthRem: c.widthRem,
         numeric: meta?.type === "number",
         value: (po) => {
-          const raw = po.custom_fields?.[c.key];
+          const raw = poShowingPart(po).custom_fields?.[c.key];
           if (raw === null || raw === undefined || raw === "") return null;
           if (typeof raw === "number") return raw;
           if (meta?.type === "number") {
@@ -823,26 +825,41 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "material") {
+                        const material = poShowingPart(po).material;
                         return (
                           <td
                             key="material"
                             data-col="material"
                             style={widthStyle}
-                            title={po.material ?? undefined}
+                            title={material ?? undefined}
                           >
-                            {wrapped(text(po.material))}
+                            {wrapped(text(material))}
                           </td>
                         );
                       }
                       if (col.key === "finish") {
+                        const finish = poShowingPart(po).finish;
                         return (
                           <td
                             key="finish"
                             data-col="finish"
                             style={widthStyle}
-                            title={po.finish ?? undefined}
+                            title={finish ?? undefined}
                           >
-                            {wrapped(text(po.finish))}
+                            {wrapped(text(finish))}
+                          </td>
+                        );
+                      }
+                      if (col.key === "certificates") {
+                        const certificates = poShowingPart(po).certificates;
+                        return (
+                          <td
+                            key="certificates"
+                            data-col="certificates"
+                            style={widthStyle}
+                            title={certificates ?? undefined}
+                          >
+                            {wrapped(text(certificates))}
                           </td>
                         );
                       }
@@ -972,7 +989,7 @@ export default function DashboardPage() {
                       }
                       // Custom field column
                       const meta = customs.get(col.key);
-                      const raw = po.custom_fields?.[col.key];
+                      const raw = poShowingPart(po).custom_fields?.[col.key];
                       const display =
                         raw === null || raw === undefined || raw === ""
                           ? null

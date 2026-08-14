@@ -60,6 +60,7 @@ class POBase(BaseModel):
     mat_dim: str | None = None
     material: str | None = None
     finish: str | None = None
+    certificates: str | None = None
     inspection: str = "standard"
     hardware: bool = False
     # Status key from the published board catalog (day-one: POStatus values).
@@ -96,6 +97,7 @@ class PartCreate(BaseModel):
     hardware: bool | None = False
     priority: str | None = "normal"
     certificates: str | None = None
+    custom_fields: dict[str, Any] | None = None
     thumbnail_url: str | None = None
     model_url: str | None = None
     model_filename: str | None = None
@@ -114,6 +116,7 @@ class PartUpdate(BaseModel):
     hardware: bool | None = None
     priority: str | None = None
     certificates: str | None = None
+    custom_fields: dict[str, Any] | None = None
     thumbnail_url: str | None = None
     model_url: str | None = None
     model_filename: str | None = None
@@ -130,6 +133,7 @@ class POUpdate(BaseModel):
     mat_dim: str | None = None
     material: str | None = None
     finish: str | None = None
+    certificates: str | None = None
     inspection: str | None = None
     hardware: bool | None = None
     status: str | None = None
@@ -189,6 +193,7 @@ class POOut(ORMModel):
     mat_dim: str | None
     material: str | None
     finish: str | None
+    certificates: str | None = None
     inspection: str
     hardware: bool
     status: str
