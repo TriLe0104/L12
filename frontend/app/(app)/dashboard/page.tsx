@@ -679,14 +679,6 @@ export default function DashboardPage() {
     setDrawerMode("view");
   };
 
-  const tableMinWidth = useMemo(() => {
-    const sum = visibleColumns.reduce((total, col) => {
-      const rem = colWidths[col.key] ?? col.widthRem ?? 6.5;
-      return total + rem;
-    }, 0);
-    return Math.max(sum, 26);
-  }, [visibleColumns, colWidths]);
-
   const upsert = (saved: PurchaseOrder) =>
     setPOs((prev) =>
       prev.some((p) => p.id === saved.id)
@@ -856,7 +848,7 @@ export default function DashboardPage() {
           <table
             className="dash-table"
             data-resizing={resizingCol ? "true" : undefined}
-            style={{ minWidth: `${tableMinWidth}rem` }}
+            style={{ width: "100%" }}
           >
             <colgroup>
               {visibleColumns.map((col) => (

@@ -336,25 +336,26 @@ export function PODrawer({
           </strong>
           <div className="drawer-head-actions">
             {record && Array.isArray(record.parts) && record.parts.length > 0 && (
-              <label style={{ display: "flex", gap: 8, alignItems: "center", whiteSpace: "nowrap" }}>
-                Part
-                <select
-                  value={selectedPartIndex ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value === "" ? null : Number(e.target.value);
-                    setSelectedPartIndex(v);
-                    const merged = mergePartIntoDraft(record, v);
-                    setDraft(merged);
-                    setBaseline(merged);
-                  }}
-                >
-                  {(record.parts ?? []).map((p, i) => (
-                    <option key={i} value={i}>
-                      {`Part ${i + 1} of ${record.parts?.length ?? 0} · ${p.part_number ?? p.part_name ?? "(unnamed)"}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <select
+                className="drawer-part-pick"
+                aria-label="Selected part"
+                value={selectedPartIndex ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  setSelectedPartIndex(v);
+                  const merged = mergePartIntoDraft(record, v);
+                  setDraft(merged);
+                  setBaseline(merged);
+                }}
+              >
+                {(record.parts ?? []).map((p, i) => (
+                  <option key={i} value={i}>
+                    {`${i + 1} / ${record.parts?.length ?? 0}${
+                      p.part_number || p.part_name ? ` · ${p.part_number || p.part_name}` : ""
+                    }`}
+                  </option>
+                ))}
+              </select>
             )}
 
             {record && editable && (

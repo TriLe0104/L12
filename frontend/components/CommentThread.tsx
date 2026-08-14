@@ -149,8 +149,8 @@ export function CommentThread({
   useEffect(() => {
     if (variant !== "panel" || !onClose) return;
     const opener = document.activeElement as HTMLElement | null;
-    textareaRef.current?.focus();
-    return () => opener?.focus?.();
+    textareaRef.current?.focus({ preventScroll: true });
+    return () => opener?.focus?.({ preventScroll: true });
   }, [variant, onClose]);
 
   async function post() {

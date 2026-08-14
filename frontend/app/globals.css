@@ -1117,7 +1117,7 @@ button.jobcard-thumb:focus-visible {
   border: 1px solid transparent;
   border-radius: 0.4rem;
   background: transparent;
-  color: var(--steel);
+  color: var(--ink);
   cursor: pointer;
 }
 
@@ -1125,7 +1125,7 @@ button.jobcard-thumb:focus-visible {
 .jobcard-comment-btn[aria-expanded="true"] {
   color: var(--ink);
   border-color: var(--rule);
-  background: rgba(13, 17, 23, 0.04);
+  background: rgba(13, 17, 23, 0.06);
 }
 
 .jobcard-comment-btn[data-has="true"] {
@@ -1138,19 +1138,20 @@ button.jobcard-thumb:focus-visible {
 
 .jobcard-comment-badge {
   position: absolute;
-  top: -0.18rem;
-  right: -0.22rem;
-  min-width: 0.9rem;
-  height: 0.9rem;
-  padding: 0 0.18rem;
+  top: -0.22rem;
+  right: -0.28rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.22rem;
   border-radius: 999px;
-  background: var(--ink);
-  color: #fff;
+  background: var(--signal, #f5a800);
+  color: #1a1408;
   font-family: var(--font-mono), monospace;
-  font-size: 0.52rem;
-  font-weight: 700;
-  line-height: 0.9rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1rem;
   text-align: center;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85);
 }
 
 /* narrow cards (kanban columns, the drawer, the smaller zoom steps): the
@@ -2946,6 +2947,20 @@ button.jobcard-thumb:focus-visible {
   flex: 0 0 auto;
   margin-left: auto;
   min-width: 0;
+}
+
+.drawer-part-pick {
+  height: 2rem;
+  max-width: 12rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper, #fff);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .drawer-body {

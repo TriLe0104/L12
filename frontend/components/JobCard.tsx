@@ -369,12 +369,18 @@ export function JobCard({
                   : "Comments"
               }
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 commentAnchorRef.current = e.currentTarget;
                 const idx = opts.partIndex ?? 0;
                 setCommentPart((cur) => (cur === idx ? null : idx));
               }}
-              onPointerDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+              }}
             >
               <CommentBubbleIcon filled={faceComments > 0} />
               {faceComments > 0 && (
