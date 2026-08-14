@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { Avatar } from "@/components/Avatar";
 import { ImageViewer } from "@/components/ImageViewer";
@@ -90,17 +90,26 @@ const isLate = (po: PurchaseOrder, completedStatuses: Set<string>) =>
   po.due_date < new Date().toISOString().slice(0, 10) && !completedStatuses.has(po.status);
 
 /** Full spreadsheet-style job card: the paper card, rebuilt. */
+const HIDDEN_AT_DENSITY: Record<"s" | "m" | "l", string[]> = {
+  s: ["certificates", "hardware", "inspection", "mat_dim", "finish", "dims"],
+  m: ["certificates", "hardware", "inspection"],
+  l: [],
+};
+
 export function JobCard({
   po,
   onClick,
   onUpdated,
   hideParts = false,
+  density = "l",
 }: {
   po: PurchaseOrder;
   onClick?: (face?: PurchaseOrder) => void;
   onUpdated?: (saved: PurchaseOrder) => void;
   /** Hide the parts deck chrome (used inside print sheets and the old picker). */
   hideParts?: boolean;
+  /** Smaller All Cards sizes drop extra spec rows instead of shrinking type. */
+  density?: "s" | "m" | "l";
 }) {
   const { user } = useAuth();
   const canShuffle = canEditStatus(user);
@@ -117,7 +126,7 @@ export function JobCard({
   if (completedStatuses.size === 0) completedStatuses.add("ready_to_ship");
 
   // Until settings load, fall back to the classic nine-row grid.
-  const displayFields =
+  const rawFields =
     fields.length > 0
       ? fields
       : [
@@ -132,16 +141,38 @@ export function JobCard({
           { key: "inspection", kind: "builtin" as const, label: "Inspection", visible: true },
           { key: "hardware", kind: "builtin" as const, label: "Hardware", visible: true },
         ];
+  const hideKeys = new Set(HIDDEN_AT_DENSITY[density]);
+  const displayFields = rawFields.filter(
+    (f) => !hideKeys.has(f.key) && !(density === "s" && f.kind === "custom"),
+  );
 
   const parts = po.parts ?? [];
   const isDeck = !hideParts && parts.length > 1;
   const serverIndex = displayPartIndex(po);
   const [faceIndex, setFaceIndex] = useState(serverIndex);
-  const [expanded, setExpanded] = useState(false);
+  const [spread, setSpread] = useState<"stacked" | "deal" | "fold">("stacked");
+  const foldTimer = useRef<number | null>(null);
   const [shuffleBusy, setShuffleBusy] = useState(false);
   useEffect(() => {
     setFaceIndex(serverIndex);
   }, [po.id, serverIndex]);
+  useEffect(
+    () => () => {
+      if (foldTimer.current) window.clearTimeout(foldTimer.current);
+    },
+    [],
+  );
+
+  function openDeal() {
+    if (foldTimer.current) window.clearTimeout(foldTimer.current);
+    setSpread("deal");
+  }
+
+  function foldDeal() {
+    setSpread("fold");
+    if (foldTimer.current) window.clearTimeout(foldTimer.current);
+    foldTimer.current = window.setTimeout(() => setSpread("stacked"), 560);
+  }
 
   const shown = hideParts ? po : poShowingPart(po, isDeck ? faceIndex : serverIndex);
   const [viewing, setViewing] = useState(false);
@@ -150,7 +181,7 @@ export function JobCard({
   async function chooseFace(next: number, collapse = false) {
     if (!isDeck || shuffleBusy) return;
     setFaceIndex(next);
-    if (collapse) setExpanded(false);
+    if (collapse) foldDeal();
     if (!canShuffle || next === serverIndex) return;
     setShuffleBusy(true);
     try {
@@ -217,19 +248,20 @@ export function JobCard({
             <button
               type="button"
               className="jobcard-deck-toggle"
-              aria-expanded={expanded}
+              aria-expanded={spread !== "stacked"}
               title={
-                expanded
-                  ? "Stack the parts back into a deck"
+                spread !== "stacked"
+                  ? "Shuffle parts back into one card"
                   : `Deal all ${parts.length} part cards`
               }
               onClick={(e) => {
                 e.stopPropagation();
-                setExpanded((v) => !v);
+                if (spread === "deal") foldDeal();
+                else openDeal();
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {expanded ? "Stack" : `${parts.length} parts`}
+              {spread !== "stacked" ? "Stack" : `${parts.length} parts`}
             </button>
           )}
           {face.priority !== "normal" && (
@@ -322,9 +354,9 @@ export function JobCard({
 
   if (!isDeck) return renderFace(shown, { openDrawer: true, current: true });
 
-  if (expanded) {
+  if (spread !== "stacked") {
     return (
-      <div className="jobcard-deal" data-count={parts.length}>
+      <div className="jobcard-deal" data-count={parts.length} data-phase={spread}>
         {parts.map((_, i) => {
           const face = poShowingPart(po, i);
           const isCurrent = i === faceIndex;
@@ -333,9 +365,16 @@ export function JobCard({
               key={i}
               className="jobcard-deal-item"
               data-current={isCurrent}
-              style={{ ["--deal-i" as string]: i } as CSSProperties}
+              data-phase={spread}
+              style={
+                {
+                  ["--deal-i" as string]: i,
+                  ["--deal-n" as string]: parts.length,
+                } as CSSProperties
+              }
               onClick={(e) => {
                 e.stopPropagation();
+                if (spread === "fold") return;
                 if (isCurrent) {
                   onClick?.(face);
                   return;
@@ -353,39 +392,7 @@ export function JobCard({
     );
   }
 
-  const peek = parts
-    .map((_, i) => i)
-    .filter((i) => i !== faceIndex)
-    .slice(0, 2);
-
-  return (
-    <div className="jobcard-deck" data-count={parts.length}>
-      {peek.map((i, depth) => {
-        const face = poShowingPart(po, i);
-        return (
-          <button
-            key={i}
-            type="button"
-            className="jobcard-deck-back"
-            data-depth={peek.length - depth}
-            aria-label={`Deal all ${parts.length} part cards`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(true);
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <span className="jobcard-deck-back-job">{po.job_no}</span>
-            <span className="jobcard-deck-back-part">
-              Part {i + 1}
-              {face.part_number ? ` · ${face.part_number}` : ""}
-            </span>
-          </button>
-        );
-      })}
-      {renderFace(shown, { openDrawer: true, current: true })}
-    </div>
-  );
+  return renderFace(shown, { openDrawer: true, current: true });
 }
 
 /** Compact card used inside calendar day cells. */

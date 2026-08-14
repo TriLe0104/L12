@@ -926,12 +926,8 @@ button.jobcard-thumb:focus-visible {
   .spec dt,
   .spec dd {
     padding: 0.2rem 0.35rem;
-    font-size: 0.7rem;
   }
   .spec dt {
-    font-size: 0.61rem;
-    /* INSPECTION clears this track by barely a pixel, so the label gives up its
-       tracking and some gutter rather than the values giving up track width */
     letter-spacing: 0;
     padding-left: 0.28rem;
     padding-right: 0.28rem;
@@ -946,20 +942,8 @@ button.jobcard-thumb:focus-visible {
     padding-left: 0.5rem;
     padding-right: 0.5rem;
   }
-  .jobcard-thumb {
-    width: 6.75rem;
-    flex: 0 0 6.75rem;
-    min-width: 6.75rem;
-    height: 6.75rem;
-  }
   .card-wells {
     --well: 3.4rem;
-  }
-  .jobcard-job {
-    font-size: 1.05rem;
-  }
-  .jobcard-due {
-    font-size: 0.72rem;
   }
 
 /* the smallest zoom step of the all-cards view: below this the label track was
@@ -971,23 +955,13 @@ button.jobcard-thumb:focus-visible {
     grid-template-columns: minmax(2.4rem, 4.35rem) minmax(0, 1fr);
   }
   .spec dt {
-    font-size: 0.52rem;
-    /* tracking is pure overhead on a label this small and buys a whole glyph */
     letter-spacing: 0;
     padding-left: 0.22rem;
     padding-right: 0.22rem;
   }
   .spec dd {
-    font-size: 0.67rem;
-    /* hand the values back most of what the wider label track just cost them */
     padding-left: 0.28rem;
     padding-right: 0.28rem;
-  }
-  .jobcard-thumb {
-    width: 5.5rem;
-    flex: 0 0 5.5rem;
-    min-width: 5.5rem;
-    height: 5.5rem;
   }
   .card-wells {
     --well: 2.8rem;
@@ -1701,8 +1675,21 @@ button.jobcard-thumb:focus-visible {
 
 .jobcard-deal-item {
   position: relative;
+}
+
+.jobcard-deal-item[data-phase="deal"] {
   animation: card-deal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: calc(var(--deal-i, 0) * 58ms);
+}
+
+.jobcard-deal-item[data-phase="fold"] {
+  animation: card-fold 380ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation-delay: calc((var(--deal-n, 4) - var(--deal-i, 0) - 1) * 42ms);
+  pointer-events: none;
+}
+
+.jobcard-deal-item[data-phase="fold"][data-current="true"] {
+  animation-name: card-fold-current;
 }
 
 .jobcard-deal-item[data-current="true"] .jobcard {
@@ -1733,6 +1720,28 @@ button.jobcard-thumb:focus-visible {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes card-fold {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-36px) translateX(12px) rotate(7deg) scale(0.9);
+  }
+}
+
+@keyframes card-fold-current {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-6px) scale(0.985);
+    opacity: 1;
   }
 }
 

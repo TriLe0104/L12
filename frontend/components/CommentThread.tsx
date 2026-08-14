@@ -75,11 +75,6 @@ export function CommentThread({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pos, setPos] = useState<CSSProperties>({});
-  const [postPart, setPostPart] = useState(defaultPart ?? 1);
-
-  useEffect(() => {
-    if (defaultPart != null) setPostPart(defaultPart);
-  }, [defaultPart]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,7 +162,7 @@ export function CommentThread({
       const created = await api.addComment(
         poId,
         trimmed,
-        part === "all" ? postPart : part,
+        part === "all" ? null : part,
       );
       setComments((prev) => {
         const next = [...prev, created];
@@ -278,33 +273,12 @@ export function CommentThread({
       {error && <p className="error comment-thread-error">{error}</p>}
 
       <div className="comment-composer">
-        {part === "all" && (parts?.length ?? 0) > 1 && (
-          <label className="comment-part-pick">
-            <span>Discussing</span>
-            <select
-              className="field"
-              value={postPart}
-              aria-label="Part this comment is about"
-              onChange={(e) => setPostPart(Number(e.target.value))}
-            >
-              {parts!.map((p, i) => (
-                <option key={i} value={i + 1}>
-                  {partTag(i, parts)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <textarea
           ref={textareaRef}
           className="field comment-composer-input"
           rows={2}
           maxLength={2000}
-          placeholder={
-            part === "all"
-              ? `Comment on ${partTag(postPart - 1, parts)}…`
-              : "Write a comment…"
-          }
+          placeholder="Write a comment…"
           aria-label="Comment"
           value={body}
           disabled={busy}

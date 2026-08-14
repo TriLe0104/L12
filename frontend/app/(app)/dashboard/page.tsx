@@ -463,7 +463,7 @@ export default function DashboardPage() {
   };
 
   const widthOf = useCallback(
-    (col: Column) => dashboardColumnWidthStyle(colWidths[col.key] ?? col.widthRem),
+    (col: Column) => dashboardColumnWidthStyle(colWidths[col.key] ?? col.widthRem ?? 8),
     [colWidths],
   );
 
@@ -471,9 +471,19 @@ export default function DashboardPage() {
     event.preventDefault();
     event.stopPropagation();
     const th = event.currentTarget.closest("th");
+    const table = th?.closest("table");
     const startX = event.clientX;
     const startPx = th?.getBoundingClientRect().width ?? 64;
     const rootFont = parseFloat(getComputedStyle(globalThis.document.documentElement).fontSize) || 16;
+    const locked: Record<string, number> = { ...colWidthsRef.current };
+    table?.querySelectorAll<HTMLElement>("thead th[data-col]").forEach((cell) => {
+      const colKey = cell.dataset.col;
+      if (!colKey) return;
+      locked[colKey] = Math.round((cell.getBoundingClientRect().width / rootFont) * 100) / 100;
+    });
+    locked[key] = Math.round((startPx / rootFont) * 100) / 100;
+    colWidthsRef.current = locked;
+    setColWidths(locked);
     setResizingCol(key);
     const onMove = (ev: PointerEvent) => {
       const px = Math.max(MIN_COL_REM * rootFont, startPx + ev.clientX - startX);
@@ -656,7 +666,7 @@ export default function DashboardPage() {
 
   const tableMinWidth = useMemo(() => {
     const sum = visibleColumns.reduce((total, col) => {
-      const rem = colWidths[col.key] ?? col.widthRem ?? 6.5;
+      const rem = colWidths[col.key] ?? col.widthRem ?? 8;
       return total + rem;
     }, 0);
     return Math.max(sum, 26);
@@ -831,7 +841,7 @@ export default function DashboardPage() {
           <table
             className="dash-table"
             data-resizing={resizingCol ? "true" : undefined}
-            style={{ minWidth: `${tableMinWidth}rem` }}
+            style={{ width: `${tableMinWidth}rem` }}
           >
             <thead>
               <tr>
@@ -1039,9 +1049,34 @@ export default function DashboardPage() {
                       }
                       if (col.key === "stage") {
                         if (entry.kind === "parent" && partsCount > 1) {
+                          const partStages = parts.map((_, i) => {
+                            const st = poShowingPart(po, i).status ?? po.status;
+                            return stages.find((s) => s.statuses.includes(st));
+                          });
+                          const unique = [
+                            ...new Map(
+                              partStages
+                                .filter((s): s is NonNullable<typeof s> => !!s)
+                                .map((s) => [s.value, s]),
+                            ).values(),
+                          ];
+                          const mixed = unique.length > 1;
+                          const shownStage = mixed ? null : (unique[0] ?? stage);
+                          const title = unique.map((s) => s.label).join(" · ");
                           return (
-                            <td key="stage" data-col="stage" style={widthStyle}>
-                              {EMPTY}
+                            <td key="stage" data-col="stage" style={widthStyle} title={title}>
+                              {mixed ? (
+                                <span className="dash-stage dash-stage-mixed">Mixed</span>
+                              ) : shownStage ? (
+                                <span
+                                  className="dash-stage"
+                                  style={{ ["--tone" as string]: resolveToneColor(shownStage.tone) }}
+                                >
+                                  {shownStage.label}
+                                </span>
+                              ) : (
+                                EMPTY
+                              )}
                             </td>
                           );
                         }
@@ -1068,9 +1103,17 @@ export default function DashboardPage() {
                       }
                       if (col.key === "status") {
                         if (entry.kind === "parent" && partsCount > 1) {
+                          const done = po.parts_completed ?? 0;
+                          const total = po.parts_total ?? partsCount;
+                          const label = `${done} of ${total} Completed`;
                           return (
-                            <td key="status" data-col="status" style={widthStyle}>
-                              {EMPTY}
+                            <td
+                              key="status"
+                              data-col="status"
+                              style={widthStyle}
+                              title={label}
+                            >
+                              <span className="dash-status dash-status-rollup">{label}</span>
                             </td>
                           );
                         }

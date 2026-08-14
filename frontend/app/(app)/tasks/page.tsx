@@ -33,21 +33,20 @@ const SORTS: { value: SortKey; label: string }[] = [
 
 const SORT_STORAGE_KEY = "po_calendar_task_sort";
 const VIEW_STORAGE_KEY = "po_calendar_task_view";
-const ZOOM_STORAGE_KEY = "po_calendar_task_zoom";
 const HIDE_COMPLETED_STORAGE_KEY = "po_calendar_task_hide_completed";
 
 /* Zoom is the grid's minimum track width, not a transform: the cards really are
    bigger, so the type stays sharp and the hit targets stay honest. Each step
    drops one column at 1920px — seven cards per row at XS, three at XL. */
-const ZOOM_STEPS: { min: string; label: string }[] = [
-  { min: "12rem", label: "XS" },
-  { min: "15rem", label: "S" },
-  { min: "18rem", label: "M" },
-  { min: "23rem", label: "L" },
-  { min: "29rem", label: "XL" },
+const ZOOM_STEPS: { min: string; label: string; density: "s" | "m" | "l" }[] = [
+  { min: "18rem", label: "S", density: "s" },
+  { min: "22rem", label: "M", density: "m" },
+  { min: "26rem", label: "L", density: "l" },
+  { min: "32rem", label: "XL", density: "l" },
 ];
 
-const DEFAULT_ZOOM = 2;
+const DEFAULT_ZOOM = 1;
+const ZOOM_STORAGE_KEY = "po_calendar_task_zoom_v2";
 
 function priorityRank(priority: string, order: string[]): number {
   const key = priority.toLowerCase();
@@ -453,6 +452,7 @@ export default function TasksPage() {
               <div key={po.id} style={{ animationDelay: `${Math.min(i * 18, 220)}ms` }}>
                 <JobCard
                   po={po}
+                  density={ZOOM_STEPS[zoom].density}
                   onUpdated={upsert}
                   onClick={(face) => {
                     setSelected(face ?? po);

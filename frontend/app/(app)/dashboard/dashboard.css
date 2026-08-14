@@ -162,8 +162,8 @@
 }
 
 .dash-table {
-  width: 100%;
-  min-width: 62rem;
+  width: max-content;
+  min-width: 0;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
@@ -549,11 +549,22 @@
   vertical-align: middle;
 }
 
+.dash-stage-mixed {
+  --tone: var(--steel);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .dash-status {
   color: var(--tone);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.05em;
+}
+
+.dash-status-rollup {
+  color: var(--ink);
+  letter-spacing: 0.02em;
 }
 
 .dash-person {
