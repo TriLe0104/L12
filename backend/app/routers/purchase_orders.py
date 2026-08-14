@@ -206,6 +206,50 @@ def _persist_rollup_status(db: Session, po: PurchaseOrder) -> None:
         po.status = rollup
 
 
+def _freeze_part_priorities(po: PurchaseOrder) -> None:
+    """Stamp the current PO priority onto parts that never stored their own."""
+    parts = _as_parts_list(po)
+    if len(parts) < 2:
+        return
+    current = po.priority
+    if hasattr(current, "value"):
+        current = current.value  # type: ignore[assignment]
+    current = str(current or "normal").casefold()
+    changed = False
+    for part in parts:
+        if isinstance(part, dict) and not part.get("priority"):
+            part["priority"] = current
+            changed = True
+    if changed:
+        _set_parts(po, parts)
+
+
+def _persist_rollup_priority(db: Session, po: PurchaseOrder) -> None:
+    """Parent priority is the hottest of its parts."""
+    parts = _as_parts_list(po)
+    if len(parts) < 2:
+        return
+    opts = [str(o).casefold() for o in board_service.field_options(db=db, field_key="priority")]
+    if not opts:
+        opts = ["hot", "high", "normal", "low"]
+    rank = {key: i for i, key in enumerate(opts)}
+    best: str | None = None
+    best_i = 10_000
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        raw = part.get("priority") or po.priority or "normal"
+        if hasattr(raw, "value"):
+            raw = raw.value
+        key = str(raw).casefold()
+        i = rank.get(key, 10_000)
+        if i < best_i:
+            best_i = i
+            best = key
+    if best and str(getattr(po.priority, "value", po.priority)).casefold() != best:
+        po.priority = best
+
+
 def _traveler_part_index(po: PurchaseOrder, part: int | None) -> int | None:
     """Convert a 1-based `?part=` query into a 0-based index."""
     parts = _as_parts_list(po)
@@ -657,6 +701,7 @@ def add_part(
     part_entry = _part_entry_from_create(payload)
 
     _freeze_part_statuses(po)
+    _freeze_part_priorities(po)
     parts = _as_parts_list(po)
     if not parts and po.part_number is not None:
         parts.append(_top_level_as_part(po))
@@ -664,6 +709,7 @@ def add_part(
     _set_parts(po, parts)
     _adopt_part_media(po, part_entry)
     _persist_rollup_status(db, po)
+    _persist_rollup_priority(db, po)
 
     db.add(
         Activity(
@@ -702,12 +748,14 @@ def update_part(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
 
     _freeze_part_statuses(po)
+    _freeze_part_priorities(po)
     parts = _as_parts_list(po)
     part = _apply_part_update(dict(parts[index] or {}), payload)
     parts[index] = part
     _set_parts(po, parts)
     _adopt_part_media(po, part)
     _persist_rollup_status(db, po)
+    _persist_rollup_priority(db, po)
 
     db.add(
         Activity(
@@ -794,12 +842,14 @@ def update_po_with_part(
         if idx < 0 or idx >= len(parts):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
         _freeze_part_statuses(po)
+        _freeze_part_priorities(po)
         parts = _as_parts_list(po)
         part = _apply_part_update(dict(parts[idx] or {}), payload.part)
         parts[idx] = part
         _set_parts(po, parts)
         _adopt_part_media(po, part)
         _persist_rollup_status(db, po)
+        _persist_rollup_priority(db, po)
         part_dump = payload.part.model_dump(exclude_unset=True)
         part_status_applied = "status" in part_dump
         db.add(

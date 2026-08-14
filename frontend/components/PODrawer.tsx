@@ -111,6 +111,8 @@ export function PODrawer({
     ? changed.length > 0
     : statusOnly && changed.includes("status");
   const canSave = modifiable || (statusOnly && dirty);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   const loadActivity = (id: string) =>
     api.poActivity(id).then(setActivity).catch(() => setActivity([]));
@@ -201,9 +203,18 @@ export function PODrawer({
   /** Every way out of the drawer comes through here, so the guard cannot be
    *  bypassed by whichever dismissal the user happens to reach for. */
   const requestClose = useCallback(() => {
-    if (dirty) setConfirming(true);
-    else onClose();
-  }, [dirty, onClose]);
+    if (creating && dirty) {
+      setConfirming(true);
+      return;
+    }
+    if (!creating && dirty && (modifiable || statusOnly)) {
+      void save(draftRef.current, true).then((ok) => {
+        if (ok) onClose();
+      });
+      return;
+    }
+    onClose();
+  }, [creating, dirty, modifiable, statusOnly, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && requestClose();
@@ -211,8 +222,8 @@ export function PODrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [requestClose]);
 
-  async function save(nextDraft?: PODraft): Promise<boolean> {
-    const d = nextDraft ?? draft;
+  async function save(nextDraft?: PODraft, quiet = false): Promise<boolean> {
+    const d = nextDraft ?? draftRef.current;
     if (!d.job_no?.trim() || !d.po_number?.trim() || !d.part_number?.trim()) {
       setError("Job #, PO # and Part # are required");
       return false;
@@ -230,9 +241,10 @@ export function PODrawer({
         return false;
       }
     }
-    setBusy(true);
+    if (!quiet) setBusy(true);
     setError(null);
-    setSavedNote(null);
+    if (!quiet) setSavedNote(null);
+    const snap = JSON.stringify(d);
     try {
       // Status-only actors send just status — never the whole draft — so a stray
       // disabled-field echo cannot widen the PATCH past what the server allows.
@@ -290,22 +302,34 @@ export function PODrawer({
 
       // stay open on the saved record: server-derived fields (stage, labels) come back here
       setRecord(saved);
-      const after = mergePartIntoDraft(saved, selectedPartIndex);
-      setDraft(after);
-      // the drawer staying open is exactly why this has to move: without it the
-      // next click on the scrim would ask about changes already written
-      setBaseline(after);
+      if (JSON.stringify(draftRef.current) === snap) {
+        const after = mergePartIntoDraft(saved, selectedPartIndexRef.current);
+        setDraft(after);
+        setBaseline(after);
+      } else {
+        setBaseline(d);
+      }
       setSavedNote(creating ? "Created." : "Saved.");
       onSaved(saved);
-      await loadActivity(saved.id);
+      if (!quiet) await loadActivity(saved.id);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
       return false;
     } finally {
-      setBusy(false);
+      if (!quiet) setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (creating || !record || !dirty) return;
+    if (!(modifiable || statusOnly)) return;
+    if (!draft.job_no?.trim() || !draft.po_number?.trim() || !draft.part_number?.trim()) return;
+    const id = window.setTimeout(() => {
+      void save(draftRef.current, true);
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [draft, dirty, creating, record, modifiable, statusOnly]);
 
   /** Save from inside the prompt. A refused save — a 403 on a locked order, a
    *  validation message, a dead network — must not close anything: the prompt
@@ -398,13 +422,10 @@ export function PODrawer({
               if (
                 !creating &&
                 record &&
-                modifiable &&
-                typeof patch.thumbnail_url === "string" &&
-                patch.thumbnail_url
+                (modifiable || statusOnly) &&
+                ("thumbnail_url" in patch || "model_url" in patch)
               ) {
-                void save(next).then((ok) => {
-                  if (ok) setSavedNote("Photo saved.");
-                });
+                void save(next, true);
               }
             }}
             statuses={statuses}
@@ -425,13 +446,19 @@ export function PODrawer({
 
           {(modifiable || statusEditable) && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => void save()}
-                disabled={busy || !canSave}
-              >
-                {busy ? "Saving…" : creating ? "Create PO" : "Save changes"}
-              </button>
+              {creating ? (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void save()}
+                  disabled={busy || !canSave}
+                >
+                  {busy ? "Saving…" : "Create PO"}
+                </button>
+              ) : (
+                <span role="status" style={{ fontSize: "0.75rem", color: "var(--go)" }}>
+                  {dirty ? "Saving…" : savedNote ?? "Saved."}
+                </span>
+              )}
               {modifiable && !creating && record && (
                 <button
                   className="btn btn-danger"
@@ -441,7 +468,7 @@ export function PODrawer({
                   Delete
                 </button>
               )}
-              {savedNote && (
+              {creating && savedNote && (
                 <span role="status" style={{ fontSize: "0.75rem", color: "var(--go)" }}>
                   {savedNote}
                 </span>

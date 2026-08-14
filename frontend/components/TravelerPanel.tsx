@@ -103,7 +103,7 @@ export function TravelerPanel({
   dirtyRef.current = dirty;
 
   const downloading = downloadFmt != null;
-  const actionsLocked = downloading || saving || previewing;
+  const actionsLocked = downloading || previewing;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -217,19 +217,33 @@ export function TravelerPanel({
   };
 
   async function saveDraft() {
+    if (!canEditDraft) return;
+    const snap = fieldsRef.current;
     setSaving(true);
     setError(null);
     try {
-      const res = await api.saveTraveler(poId, fields, part);
-      setFields(res.fields);
-      setBaseline(res.fields);
-      setNote("Traveler draft saved.");
+      const res = await api.saveTraveler(poId, snap, part);
+      if (JSON.stringify(fieldsRef.current) === JSON.stringify(snap)) {
+        setFields(res.fields);
+        setBaseline(res.fields);
+      } else {
+        setBaseline(snap);
+      }
+      setNote("Saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
   }
+
+  useEffect(() => {
+    if (!canEditDraft || !dirty || loading) return;
+    const id = window.setTimeout(() => {
+      void saveDraft();
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [fields, dirty, canEditDraft, loading, poId, part]);
 
   async function openPreview() {
     // Cancel any in-flight preview so re-clicks don't stack work.
@@ -382,14 +396,9 @@ export function TravelerPanel({
           Excel
         </button>
         {canEditDraft && (
-          <button
-            type="button"
-            className="btn"
-            disabled={actionsLocked || !dirty}
-            onClick={() => void saveDraft()}
-          >
-            Save draft
-          </button>
+          <span className="traveler-autosave" role="status">
+            {dirty || saving ? "Saving…" : "Saved."}
+          </span>
         )}
       </div>
 
@@ -427,13 +436,13 @@ export function TravelerPanel({
                 className="cell-input"
                 rows={3}
                 value={String(fields[f.key] ?? "")}
-                disabled={!canEditDraft || saving}
+                disabled={!canEditDraft}
                 onChange={(e) => patch(f.key, e.target.value)}
               />
             ) : f.key === "material" ? (
               <MaterialCombobox
                 value={String(fields.material ?? "") || null}
-                disabled={!canEditDraft || saving}
+                disabled={!canEditDraft}
                 options={materialOptions}
                 onChange={(material) => patch("material", material ?? "")}
               />
@@ -441,7 +450,7 @@ export function TravelerPanel({
               <input
                 className="cell-input"
                 value={String(fields[f.key] ?? "")}
-                disabled={!canEditDraft || saving}
+                disabled={!canEditDraft}
                 onChange={(e) => patch(f.key, e.target.value)}
               />
             )}

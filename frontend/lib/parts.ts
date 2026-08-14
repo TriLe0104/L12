@@ -1,4 +1,27 @@
-import type { PurchaseOrder } from "./types";
+import { PRIORITY_ORDER, type PurchaseOrder } from "./types";
+
+export function highestPriority(
+  po: PurchaseOrder,
+  order: string[] = PRIORITY_ORDER,
+): string {
+  const parts = po.parts ?? [];
+  if (parts.length < 2) return po.priority;
+  const rank = (value: string) => {
+    const i = order.findIndex((o) => o.toLowerCase() === value.toLowerCase());
+    return i < 0 ? order.length : i;
+  };
+  let best = po.priority || "normal";
+  let bestRank = rank(best);
+  for (const part of parts) {
+    const value = part.priority || po.priority || "normal";
+    const r = rank(value);
+    if (r < bestRank) {
+      best = value;
+      bestRank = r;
+    }
+  }
+  return best;
+}
 
 export function displayPartIndex(po: PurchaseOrder): number {
   const n = po.parts?.length ?? 0;

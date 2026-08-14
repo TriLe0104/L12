@@ -470,8 +470,8 @@ textarea {
 .prio {
   font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
-  padding: 0.12rem 0.35rem;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.28rem;
   border-radius: 2px;
   color: #fff;
   background: var(--prio, var(--tone-slate));
@@ -2947,6 +2947,13 @@ button.jobcard-thumb:focus-visible {
   flex: 0 0 auto;
   margin-left: auto;
   min-width: 0;
+}
+
+.traveler-autosave {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--go);
+  white-space: nowrap;
 }
 
 .drawer-part-pick {
