@@ -159,8 +159,12 @@ export function PODrawer({
     let nextIdx: number | null = null;
     if (po && partsCount > 0) {
       const prev = selectedPartIndexRef.current;
-      nextIdx =
-        samePo && prev != null && prev >= 0 && prev < partsCount ? prev : 0;
+      if (samePo && prev != null && prev >= 0 && prev < partsCount) {
+        nextIdx = prev;
+      } else {
+        const preferred = po.display_part_index ?? 0;
+        nextIdx = preferred >= 0 && preferred < partsCount ? preferred : 0;
+      }
     }
     setSelectedPartIndex(nextIdx);
     const draftValue = mergePartIntoDraft(opened, nextIdx);

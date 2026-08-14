@@ -415,6 +415,7 @@ export default function TasksPage() {
                     >
                       <JobCard
                         po={po}
+                        onUpdated={upsert}
                         onClick={() => {
                           setSelected(po);
                           setDrawerMode("view");
@@ -440,6 +441,7 @@ export default function TasksPage() {
               <div key={po.id} style={{ animationDelay: `${Math.min(i * 18, 220)}ms` }}>
                 <JobCard
                   po={po}
+                  onUpdated={upsert}
                   onClick={() => {
                     setSelected(po);
                     setDrawerMode("view");

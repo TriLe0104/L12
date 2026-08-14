@@ -144,6 +144,8 @@ class PurchaseOrder(Base):
     # keys like part_number, part_name, qty, thumbnail_url. Kept as JSON to avoid
     # an extra table migration for a first pass.
     parts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Which part the board cards show. Everyone sees this index; 0 is the first.
+    display_part_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates

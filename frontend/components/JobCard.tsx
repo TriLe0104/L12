@@ -20,7 +20,9 @@ import {
   MODEL_FORMAT_LABEL,
 } from "@/lib/model-format";
 import { resolveToneColor } from "@/lib/boardTypes";
+import { poShowingPart } from "@/lib/parts";
 import type { PurchaseOrder } from "@/lib/types";
+import { PartsCarousel } from "./PartsCarousel";
 
 /** Legacy status → named tone (pre-settings). Mapped to hex via resolveToneColor. */
 export const TONE_BY_STATUS: Record<string, string> = {
@@ -88,7 +90,18 @@ const isLate = (po: PurchaseOrder, completedStatuses: Set<string>) =>
   po.due_date < new Date().toISOString().slice(0, 10) && !completedStatuses.has(po.status);
 
 /** Full spreadsheet-style job card: the paper card, rebuilt. */
-export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => void }) {
+export function JobCard({
+  po,
+  onClick,
+  onUpdated,
+  hideParts = false,
+}: {
+  po: PurchaseOrder;
+  onClick?: () => void;
+  onUpdated?: (saved: PurchaseOrder) => void;
+  /** Hide the parts-count control (used inside the parts carousel). */
+  hideParts?: boolean;
+}) {
   const { document, statusByKey } = useBoardSettings();
   const fields = visibleCardFields(document);
   const customs = customFieldMap(document);
@@ -118,15 +131,15 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
           { key: "hardware", kind: "builtin" as const, label: "Hardware", visible: true },
         ];
 
-  const photo = assetUrl(po.thumbnail_url);
-  const [viewing, setViewing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
   const parts = po.parts ?? [];
+  const shown = hideParts ? po : poShowingPart(po);
+  const photo = assetUrl(shown.thumbnail_url);
+  const [viewing, setViewing] = useState(false);
+  const [pickingParts, setPickingParts] = useState(false);
 
-  const model = assetUrl(po.model_url);
-  const modelFormat = detectModelFormat(po.model_filename ?? po.model_url);
-  const modelSize = formatModelSize(po.model_size);
+  const model = assetUrl(shown.model_url);
+  const modelFormat = detectModelFormat(shown.model_filename ?? shown.model_url);
+  const modelSize = formatModelSize(shown.model_size);
   const [viewingModel, setViewingModel] = useState(false);
 
   return (
@@ -162,30 +175,30 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
            onKeyDown={(e) => {
              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
            }}
-           aria-label={`View the 3D model of part ${po.part_number}`}
-           title={`3D model: ${po.model_filename ?? MODEL_FORMAT_LABEL[modelFormat]}${
+           aria-label={`View the 3D model of part ${shown.part_number}`}
+           title={`3D model: ${shown.model_filename ?? MODEL_FORMAT_LABEL[modelFormat]}${
              modelSize ? ` · ${modelSize}` : ""
            }`}
          >
            3D {MODEL_FORMAT_LABEL[modelFormat]}
          </button>
         )}
-        {parts.length > 1 && (
+        {!hideParts && parts.length > 1 && (
          <button
            type="button"
            className="parts-toggle"
            onClick={(e) => {
              e.stopPropagation();
-             setExpanded((s) => !s);
+             setPickingParts(true);
            }}
-           aria-expanded={expanded}
-           title={`${parts.length} parts`}
+           aria-haspopup="dialog"
+           title={`${parts.length} parts — browse and set the board card`}
          >
-           {expanded ? "▾" : "▸"} {parts.length}
+           ▸ {parts.length}
          </button>
         )}
-        {po.priority !== "normal" && (
-          <PriorityTag priority={po.priority} label={po.priority_label} />
+        {shown.priority !== "normal" && (
+          <PriorityTag priority={shown.priority} label={shown.priority_label || shown.priority.toUpperCase()} />
         )}
         <div className="jobcard-due" data-late={isLate(po, completedStatuses)}>
           DUE {formatDue(po.due_date)}
@@ -199,7 +212,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
             around it would open the detail drawer as well. */
          <button
            type="button"
-           className={`jobcard-thumb ${parts.length > 1 ? "stacked" : ""}`}
+           className="jobcard-thumb"
            onClick={(e) => {
              e.stopPropagation();
              setViewing(true);
@@ -207,23 +220,11 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
            onKeyDown={(e) => {
              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
            }}
-           aria-label={`View photo of part ${po.part_number} full size`}
+           aria-label={`View photo of part ${shown.part_number} full size`}
            title="View photo full size"
          >
            {/* eslint-disable-next-line @next/next/no-img-element */}
-           <img src={photo} alt={`${po.part_number} part`} />
-           {parts.length > 1 && (
-             <div className="parts-stack">
-               {parts.slice(0, 4).map((p, i) => (
-                 <img
-                   key={i}
-                   src={assetUrl(p?.thumbnail_url ?? undefined) ?? undefined}
-                   alt={p?.part_number ?? ""}
-                   className={`stack-item stack-${i}`}
-                 />
-               ))}
-             </div>
-           )}
+           <img src={photo} alt={`${shown.part_number} part`} />
          </button>
         ) : (
          <div className="jobcard-thumb">NO IMG</div>
@@ -232,7 +233,7 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
         {viewing && photo && (
           <ImageViewer
             src={photo}
-            alt={`${po.part_number} part`}
+            alt={`${shown.part_number} part`}
             onClose={() => setViewing(false)}
           />
         )}
@@ -240,43 +241,34 @@ export function JobCard({ po, onClick }: { po: PurchaseOrder; onClick?: () => vo
         {viewingModel && model && modelFormat && (
           <ModelViewer
             src={model}
-            filename={po.model_filename ?? `${po.part_number}.${modelFormat}`}
+            filename={shown.model_filename ?? `${shown.part_number}.${modelFormat}`}
             format={modelFormat}
             onClose={() => setViewingModel(false)}
           />
         )}
 
-        {expanded && parts.length > 0 && (
-          <ul className="parts-list">
-            {parts.map((p, i) => (
-              <li key={i} className="part-item">
-                <div className="part-thumb">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={assetUrl(p?.thumbnail_url ?? undefined) ?? undefined} alt={p.part_number ?? p.part_name} />
-                </div>
-                <div className="part-meta">
-                  <div className="part-name">{p.part_name ?? p.part_number}</div>
-                  <div className="part-qty">×{p.qty ?? 1}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {pickingParts && parts.length > 1 && (
+          <PartsCarousel
+            po={po}
+            onClose={() => setPickingParts(false)}
+            onUpdated={onUpdated}
+          />
         )}
 
         <dl className="spec">
           {displayFields.map((f) => (
             <div key={f.key} className="spec-pair">
               <dt>{f.label}</dt>
-              <dd className={f.kind === "builtin" ? builtinClass(f.key, po) : ""}>
+              <dd className={f.kind === "builtin" ? builtinClass(f.key, shown) : ""}>
                 {f.kind === "builtin" && f.key === "priority" ? (
                   <PriorityTag
-                    priority={po.priority}
-                    label={po.priority_label || po.priority.toUpperCase()}
+                    priority={shown.priority}
+                    label={shown.priority_label || shown.priority.toUpperCase()}
                   />
                 ) : f.kind === "builtin" ? (
-                  builtinValue(po, f.key)
+                  builtinValue(shown, f.key)
                 ) : (
-                  customValue(po, f.key, customs.get(f.key))
+                  customValue(shown, f.key, customs.get(f.key))
                 )}
               </dd>
             </div>
@@ -306,6 +298,7 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
   const { statusByKey } = useBoardSettings();
   const tone = statusByKey.get(po.status)?.tone;
   const parts = po.parts ?? [];
+  const shown = poShowingPart(po);
   return (
     <div
       className="chip"
@@ -315,7 +308,7 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
     >
       <div className="chip-top">
         <div className="chip-thumb">
-          <img src={assetUrl(po.thumbnail_url ?? parts[0]?.thumbnail_url ?? undefined) ?? undefined} alt={po.po_number} />
+          <img src={assetUrl(shown.thumbnail_url ?? undefined) ?? undefined} alt={shown.po_number} />
           {parts.length > 1 && <span className="chip-parts-count">{parts.length}</span>}
         </div>
         <span className="chip-job">{po.job_no}</span>
@@ -332,9 +325,9 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
           />
         )}
         <span className="chip-po">{po.po_number}</span>
-        <span className="chip-qty">×{po.qty}</span>
+        <span className="chip-qty">×{shown.qty}</span>
       </div>
-      <div className="chip-mat">{po.material ?? "material TBD"}</div>
+      <div className="chip-mat">{shown.material ?? "material TBD"}</div>
       <div className="chip-status">{po.status_label}</div>
     </div>
   );

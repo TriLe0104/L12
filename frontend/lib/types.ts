@@ -99,6 +99,8 @@ export interface PurchaseOrder {
     model_filename?: string | null;
     model_size?: number | null;
   }>;
+  /** Which part the board cards show for everyone. Zero-based. */
+  display_part_index?: number;
   /** Admin-defined attributes; keys match board settings customFields. */
   custom_fields: Record<string, string | number | null> | null;
   /** Editable traveler packet overrides persisted on the PO. */

@@ -208,6 +208,7 @@ class POOut(ORMModel):
     # Optional list of parts/components for multipart orders. Kept optional to
     # preserve single-part PO compatibility.
     parts: list[dict[str, Any]] | None = None
+    display_part_index: int = 0
     # Editable traveler packet overrides. Legacy rows are a flat field map;
     # multi-part orders store `{ "0": {...}, "1": {...} }` keyed by part index.
     traveler_draft: dict[str, Any] | None = None
@@ -227,6 +228,12 @@ class TravelerDraftOut(BaseModel):
 
     fields: dict[str, str | int | float | None]
     saved: dict[str, str | int | float | None] | None = None
+
+
+class DisplayPartUpdate(BaseModel):
+    """Pick which part the board cards show for everyone."""
+
+    index: int
 
 
 class TravelerDraftUpdate(BaseModel):

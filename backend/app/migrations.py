@@ -31,6 +31,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Editable traveler packet field overrides (nullable JSON object).
         "traveler_draft": "JSON",
         "parts": "JSON",
+        "display_part_index": "INTEGER NOT NULL DEFAULT 0",
     },
     "users": {
         "avatar_url": "VARCHAR(1000)",

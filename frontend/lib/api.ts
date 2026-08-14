@@ -139,6 +139,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  setDisplayPart: (poId: string, index: number) =>
+    request<PurchaseOrder>(`/api/purchase-orders/${poId}/display-part`, {
+      method: "PATCH",
+      body: JSON.stringify({ index }),
+    }),
   patchPart: (poId: string, index: number, payload: Record<string, any>) =>
     request<PurchaseOrder>(`/api/purchase-orders/${poId}/parts/${index}`, {
       method: "PATCH",

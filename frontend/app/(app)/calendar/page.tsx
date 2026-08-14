@@ -254,6 +254,7 @@ export default function CalendarPage() {
                   <div key={po.id} style={{ animationDelay: `${Math.min(i * 28, 200)}ms` }}>
                     <JobCard
                       po={po}
+                      onUpdated={upsert}
                       onClick={() => {
                         setSelected(po);
                         setDrawerMode("view");

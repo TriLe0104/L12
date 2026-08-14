@@ -98,7 +98,7 @@ def _sync_local_docx_template() -> None:
     logger.info("Imported traveler Word template from %s (TRAVELER_IMPORT_FROM_DOWNLOADS)", downloaded)
 
 # Actions that appear on the activity trail but must not move dashboard Modified.
-NON_MODIFYING_ACTIONS = frozenset({"Traveler generated"})
+NON_MODIFYING_ACTIONS = frozenset({"Traveler generated", "Display part set"})
 
 TRAVELER_FIELD_KEYS = (
     "work_order",

@@ -36,6 +36,7 @@ from ..schemas import (
     POCreate,
     POOut,
     POUpdate,
+    DisplayPartUpdate,
     PartCreate,
     PartUpdate,
     POWithPartUpdate,
@@ -647,6 +648,50 @@ def update_part(
     )
     db.commit()
     db.refresh(po)
+    _enrich(db, [po])
+    return po
+
+
+@router.patch("/{po_id}/display-part", response_model=POOut)
+def set_display_part(
+    po_id: str,
+    payload: DisplayPartUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> PurchaseOrder:
+    """Choose which part the board cards show. Visible to every client.
+
+    User+ may flip this even on a locked order: it is which face the card
+    wears, not an edit of the order itself. Does not move Modified.
+    """
+    if not has_rank(actor.role, STATUS_FLOOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Requires {role_label(STATUS_FLOOR).lower()} or above",
+        )
+    po = db.get(PurchaseOrder, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    parts = _as_parts_list(po)
+    if not parts:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This order has no parts list")
+    if payload.index < 0 or payload.index >= len(parts):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Part index out of range")
+    if po.display_part_index != payload.index:
+        po.display_part_index = payload.index
+        chosen = parts[payload.index] if isinstance(parts[payload.index], dict) else {}
+        label = chosen.get("part_number") or chosen.get("part_name") or f"Part {payload.index + 1}"
+        db.add(
+            Activity(
+                actor_id=actor.id,
+                action="Display part set",
+                entity_type="purchase_order",
+                entity_id=po.id,
+                detail=f"{po.job_no}: showing {label} ({payload.index + 1} of {len(parts)})",
+            )
+        )
+        db.commit()
+        db.refresh(po)
     _enrich(db, [po])
     return po
 
