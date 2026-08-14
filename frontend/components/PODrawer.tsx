@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import AddPartInline from "./AddPartInline";
@@ -115,6 +115,9 @@ export function PODrawer({
     api.poActivity(id).then(setActivity).catch(() => setActivity([]));
 
   const [selectedPartIndex, setSelectedPartIndex] = useState<number | null>(null);
+  const selectedPartIndexRef = useRef<number | null>(null);
+  const openedPoIdRef = useRef<string | null>(null);
+  selectedPartIndexRef.current = selectedPartIndex;
 
   function mergePartIntoDraft(rec: PODraft | PurchaseOrder | null, idx: number | null) {
     if (!rec || idx == null) return rec ?? newDraft();
@@ -149,12 +152,18 @@ export function PODrawer({
 
   useEffect(() => {
     const opened = po ?? newDraft();
+    const samePo = Boolean(po && po.id === openedPoIdRef.current);
+    openedPoIdRef.current = po?.id ?? null;
     setRecord(po);
-    // default selected part to first part if present
-    const partsCount = Array.isArray(po?.parts) ? po!.parts!.length : 0;
-    const defaultIdx = partsCount > 0 ? 0 : null;
-    setSelectedPartIndex(defaultIdx);
-    const draftValue = mergePartIntoDraft(opened, defaultIdx);
+    const partsCount = Array.isArray(po?.parts) ? po.parts.length : 0;
+    let nextIdx: number | null = null;
+    if (po && partsCount > 0) {
+      const prev = selectedPartIndexRef.current;
+      nextIdx =
+        samePo && prev != null && prev >= 0 && prev < partsCount ? prev : 0;
+    }
+    setSelectedPartIndex(nextIdx);
+    const draftValue = mergePartIntoDraft(opened, nextIdx);
     setDraft(draftValue);
     // one object for both, so a freshly opened form is never dirty against a
     // second blank built a millisecond later

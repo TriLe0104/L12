@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 2
+OVERLAY_VERSION = 3
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -445,8 +445,8 @@ def draft_from_po(
             f"Part {part_no} of {total_parts}" if total_parts > 0 else "Part 1 of 1"
         ),
         "customer": po.customer or "",
-        "programmer": generated_by,
-        "program_date": stamp.strftime("%Y-%m-%d"),
+        "programmer": "",
+        "program_date": "",
         "created_by": created_by,
         "generated_by": generated_by,
         "generated_at": generated_at,
@@ -470,13 +470,11 @@ def draft_from_po(
     # so strip the CAD extension on the merged value rather than only the base.
     merged["part_name"] = _part_name_from_model(merged.get("part_name")) or base["part_name"]
     merged["created_by"] = created_by
-    merged["sign"] = merged.get("sign") or created_by
+    # Sign defaults to the creator only when the part has never saved a sign.
+    if "sign" not in editable:
+        merged["sign"] = created_by
     merged["generated_by"] = generated_by
     merged["generated_at"] = generated_at
-    if not merged.get("programmer"):
-        merged["programmer"] = generated_by
-    if not merged.get("program_date"):
-        merged["program_date"] = stamp.strftime("%Y-%m-%d")
     return merged
 
 def normalize_draft(raw: dict[str, Any] | None) -> dict[str, Any]:
@@ -518,11 +516,9 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     due = _traveler_date(fields.get("due_date"))
     _set_cell_text(t1.rows[1].cells[1], due)
     material_dims = _s(fields.get("mat_dim"))
-    # Per user preference, do not render a sign/name on the Material sheet.
-    # Leave the material dims visible in the merged cell if present.
-    sign = ""
+    sign = _s(fields.get("sign"))
     if t1.rows[1].cells[2]._tc is t1.rows[1].cells[3]._tc:
-        shared_value = f"{material_dims}".strip()
+        shared_value = "    ".join(part for part in (material_dims, sign) if part)
         _set_cell_text(t1.rows[1].cells[2], shared_value)
     else:
         _set_cell_text(t1.rows[1].cells[2], material_dims)
@@ -603,15 +599,9 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
         _xlsx_set(part, "AE3", _s(qty))
     _xlsx_set(part, "W5", _s(fields.get("material")))
     _xlsx_set(part, "W6", _s(fields.get("material_spec")) or "Per Drawing")
-    # Order release BY + date. User prefers no name sign on release — leave blank.
-    # AC13 ships as =TODAY(); a live formula would bake the render day into the
-    # cached background forever, so it is replaced.
-    # Intentionally omit Z13 (Order release BY) to avoid printing a name.
-    _xlsx_set(
-        part,
-        "AC13",
-        _traveler_date(fields.get("program_date") or fields.get("generated_at")),
-    )
+    # Order release date: only the explicit program date. Empty by default.
+    # AC13 ships as =TODAY(); replace it so a live formula cannot bake in.
+    _xlsx_set(part, "AC13", _traveler_date(fields.get("program_date")) or "")
     finish = _s(fields.get("finish"))
     _xlsx_set(part, "D44", finish.lower() if finish.lower() in {"none", ""} else finish or "none")
 
@@ -620,11 +610,7 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
     # Only render the explicit programmer name. Do not fall back to generated_by
     # which would surface account names on the program sheet.
     _xlsx_set(prog, "B4", _s(fields.get("programmer")))
-    _xlsx_set(
-        prog,
-        "F4",
-        _traveler_date(fields.get("program_date") or fields.get("generated_at")),
-    )
+    _xlsx_set(prog, "F4", _traveler_date(fields.get("program_date")) or "")
     _clear_workbook_artifacts(part, prog)
 
     # Excel otherwise tiles the wide shop form across multiple PDF pages even
@@ -725,6 +711,7 @@ def _build_reportlab_pdf(fields: dict[str, Any]) -> bytes:
                 ("Work Order #", _s(fields.get("work_order"))),
                 ("Due Date", _traveler_date(fields.get("due_date"))),
                 ("Material Dims", _s(fields.get("mat_dim"))),
+                ("Sign", _s(fields.get("sign"))),
                 ("Customer PO #", _s(fields.get("po_number"))),
                 ("Part Name", _s(fields.get("part_name"))),
                 ("Quantity", _s(fields.get("qty"))),
@@ -789,12 +776,7 @@ def _build_reportlab_pdf(fields: dict[str, Any]) -> bytes:
                 ("PART #", _s(fields.get("part_number"))),
                 ("QTY", _s(fields.get("qty"))),
                 ("Programmer", _s(fields.get("programmer"))),
-                (
-                    "Date",
-                    _traveler_date(
-                        fields.get("program_date") or fields.get("generated_at")
-                    ),
-                ),
+                ("Date", _traveler_date(fields.get("program_date"))),
             ]
         )
     )
@@ -1026,6 +1008,24 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # Notes overflow collector (may be appended to the final PDF as extra pages)
     notes_overflow_text: str | None = None
 
+    def _wrap_rows(text: str, font: str, size: float, width: float) -> list[str]:
+        rows: list[str] = []
+        for paragraph in text.split("\n"):
+            if not paragraph.strip():
+                rows.append("")
+                continue
+            current = ""
+            for word in paragraph.split():
+                candidate = f"{current} {word}".strip()
+                if current and pdfmetrics.stringWidth(candidate, font, size) > width:
+                    rows.append(current)
+                    current = word
+                else:
+                    current = candidate
+            if current:
+                rows.append(current)
+        return rows
+
     def wrapped(
         value: object,
         x: float,
@@ -1035,43 +1035,26 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         width: float,
         lines: int = 2,
         leading: float = 13.44,
+        shrink: bool = False,
     ) -> str | None:
-        """Draw up to `lines` wrapped lines, reducing font size if necessary.
-        Returns any leftover text (as a single string) if the content does not fit.
+        """Draw up to `lines` wrapped lines, centred in the box.
+
+        When ``shrink`` is false (notes), leftover text is returned for extra
+        pages instead of cramming it into a tiny font.
         """
         text = _s(value)
         if not text:
             return None
-        # Try progressively smaller sizes until the wrapped lines fit or we hit min size
         size_try = size
-        min_size = 6.5
-        while True:
-            words = text.split()
-            rows: list[str] = []
-            current = ""
-            for word in words:
-                candidate = f"{current} {word}".strip()
-                if (
-                    current
-                    and pdfmetrics.stringWidth(candidate, regular, size_try) > width
-                    and len(rows) < lines - 1
-                ):
-                    rows.append(current)
-                    current = word
-                else:
-                    current = candidate
-            if current:
-                rows.append(current)
-            if len(rows) <= lines or size_try <= min_size:
-                break
+        min_size = 6.5 if shrink else size
+        rows = _wrap_rows(text, regular, size_try, width)
+        while shrink and len(rows) > lines and size_try > min_size:
             size_try = max(min_size, size_try * 0.9)
-        # Draw the visible lines
+            rows = _wrap_rows(text, regular, size_try, width)
         for index, row in enumerate(rows[:lines]):
             center(row, x, y1 + leading * index, size=size_try, width=width)
-        # Return leftover as a single string (or None)
         if len(rows) > lines:
-            leftover = " ".join(rows[lines:])
-            return leftover
+            return "\n".join(rows[lines:]).strip()
         return None
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
@@ -1118,27 +1101,27 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("work_order"), col_left, 258.25, width=165)
     center(_traveler_date(fields.get("due_date")), col_mid, 258.25, width=170)
     center(fields.get("mat_dim"), col_mat_dims, 259.48, size=12, width=110)
-    # Per user preference, do not draw a name/sign in the material area or the
-    # small Order release box — intentionally omitted here.
+    center(fields.get("sign"), col_sign, 259.48, size=12, width=88)
     center(fields.get("po_number"), col_left, 335.68, width=165)
     center(fields.get("part_name") or fields.get("part_number"), col_mid, 335.68, width=175)
     center(fields.get("qty"), col_right, 335.68, width=160)
     center(fields.get("finish"), col_left, 406.48, width=165)
     center(fields.get("inserts") or "No", col_mid, 406.48, width=165)
     center(fields.get("material"), col_right, 406.48, width=160)
-    wrapped(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165)
+    center(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165)
     center(fields.get("part_marking") or "None", col_mid, 496.74, width=165)
-    # Certificates: allow the wrapper to reduce font size if needed
-    wrapped(fields.get("certificates"), col_right, 496.74, width=155, lines=2)
-    # Notes: draw up to three lines here, capture any leftover for extra pages
+    center(fields.get("certificates"), col_right, 496.74, width=155)
+    # Notes fill the bottom box at a readable size; leftover continues on extra pages.
+    notes_value = _s(fields.get("notes"))
     notes_overflow_text = wrapped(
-        fields.get("notes") or "None",
+        notes_value,
         col_mid,
-        642.15,
-        size=9.96,
-        width=500,
-        lines=3,
-        leading=12.2,
+        628.0,
+        size=10.5,
+        width=520,
+        lines=8,
+        leading=13.0,
+        shrink=False,
     )
 
     c.showPage()
@@ -1152,14 +1135,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("qty"), 532.4, 99.50, font=bold, size=11.52, width=28)
     center(fields.get("material"), 456.0, 120.74, font=bold, size=10.56, width=176)
     center(fields.get("material_spec") or "Per Drawing", 456.0, 146.54, size=10.56, width=176)
-    # Do not render Order release name on the Excel/overlay part page per user request.
-    center(
-        _traveler_date(fields.get("program_date") or fields.get("generated_at")),
-        516.4,
-        205.34,
-        size=10.56,
-        width=58,
-    )
+    program_date = _traveler_date(fields.get("program_date"))
+    if program_date:
+        center(program_date, 516.4, 205.34, size=10.56, width=58)
     center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120)
     c.showPage()
 
@@ -1176,13 +1154,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         size=10.92,
         width=190,
     )
-    left(
-        _traveler_date(fields.get("program_date") or fields.get("generated_at")),
-        433.2,
-        157.19,
-        size=10.92,
-        width=80,
-    )
+    if program_date:
+        left(program_date, 433.2, 157.19, size=10.92, width=80)
     c.save()
 
     overlay_reader = PdfReader(io.BytesIO(overlay_buf.getvalue()))
@@ -1194,45 +1167,28 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # If notes overflowed the available lines on page 1, append the remainder
     # as one or more simple text pages at the end of the packet.
     if notes_overflow_text:
-        try:
-            from reportlab.lib.utils import simpleSplit
-        except Exception:
-            simpleSplit = None
         extra_buf = io.BytesIO()
         ext_c = canvas.Canvas(extra_buf, pagesize=(612, 792))
-        font_size = 10
-        left_margin = 36
+        font_size = 11
+        left_margin = 48
         usable_width = 612 - left_margin * 2
-        if simpleSplit:
-            wrapped_lines = simpleSplit(notes_overflow_text, regular, font_size, usable_width)
-        else:
-            # Fallback naive split if simpleSplit is unavailable
-            wrapped_lines = []
-            for paragraph in (notes_overflow_text or "").split("\n"):
-                words = paragraph.split()
-                line = ""
-                for w in words:
-                    candidate = (line + " " + w).strip()
-                    if pdfmetrics.stringWidth(candidate, regular, font_size) > usable_width and line:
-                        wrapped_lines.append(line)
-                        line = w
-                    else:
-                        line = candidate
-                if line:
-                    wrapped_lines.append(line)
-        leading = 12
-        lines_per_page = max(1, int((792 - 72) / leading))
+        wrapped_lines = _wrap_rows(notes_overflow_text, regular, font_size, usable_width)
+        leading = 14
+        title = "Notes (continued)"
+        first = True
         idx = 0
         while idx < len(wrapped_lines):
-            text_obj = ext_c.beginText(left_margin, 792 - 36)
-            text_obj.setFont(regular, font_size)
-            text_obj.setLeading(leading)
-            for _ in range(lines_per_page):
-                if idx >= len(wrapped_lines):
-                    break
-                text_obj.textLine(wrapped_lines[idx])
+            y = 792 - 48
+            if first:
+                ext_c.setFont(bold, 13)
+                ext_c.drawString(left_margin, y, title)
+                y -= 22
+                first = False
+            ext_c.setFont(regular, font_size)
+            while idx < len(wrapped_lines) and y > 48:
+                ext_c.drawString(left_margin, y, wrapped_lines[idx])
+                y -= leading
                 idx += 1
-            ext_c.drawText(text_obj)
             ext_c.showPage()
         ext_c.save()
         extra_reader = PdfReader(io.BytesIO(extra_buf.getvalue()))
