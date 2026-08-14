@@ -964,22 +964,27 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "status") {
+                        const partStatus = face.status ?? po.status;
+                        const label =
+                          entry.kind === "child"
+                            ? statusByKey.get(partStatus)?.label ?? partStatus
+                            : po.status_label;
                         return (
                           <td
                             key="status"
                             data-col="status"
                             style={widthStyle}
-                            title={po.status_label}
+                            title={label}
                           >
                             <span
                               className="dash-status"
                               style={{
                                 ["--tone" as string]: resolveToneColor(
-                                  statusByKey.get(po.status)?.tone ?? TONE_BY_STATUS[po.status],
+                                  statusByKey.get(partStatus)?.tone ?? TONE_BY_STATUS[partStatus],
                                 ),
                               }}
                             >
-                              {po.status_label}
+                              {label}
                             </span>
                           </td>
                         );

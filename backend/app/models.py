@@ -239,6 +239,8 @@ class POComment(Base):
     )
     actor: Mapped[User | None] = relationship(back_populates="comments")
     body: Mapped[str] = mapped_column(Text)
+    # NULL = project chat for the whole PO; 0-based index = that part's thread.
+    part_index: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
 
 

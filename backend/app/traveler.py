@@ -441,7 +441,7 @@ def draft_from_po(
         "inspection": _inspection_label(inspection_raw),
         "part_marking": "None",
         "certificates": _s(_part_field(first_part, "certificates", _certificates_from_card(db, po))),
-        "notes": po.note or "",
+        "notes": _s(_part_field(first_part, "note", po.note or "")),
         "dims": _s(_part_field(first_part, "dims", po.dims or "")),
         "part_of": (
             f"Part {part_no} of {total_parts}" if total_parts > 0 else "Part 1 of 1"

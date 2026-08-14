@@ -305,6 +305,88 @@ def apply_po_overlays(db: Session, pos: list[PurchaseOrder]) -> None:
         po._stage = col or "pending"  # type: ignore[attr-defined]
         prio = po.priority if isinstance(po.priority, str) else getattr(po.priority, "value", str(po.priority))
         po._priority_label = priority_label_for(doc, prio)  # type: ignore[attr-defined]
+    apply_parts_progress(db, pos, doc)
+
+
+def apply_parts_progress(
+    db: Session, pos: list[PurchaseOrder], doc: dict[str, Any] | None = None
+) -> None:
+    """Overlay multi-part completion on the PO: '1 of 3 Completed' and kanban stage."""
+    if not pos:
+        return
+    if doc is None:
+        doc = get_document(db)
+    completed: set[str] = set()
+    sequence: list[str] = []
+    for col in doc.get("kanbanColumns") or []:
+        if not isinstance(col, dict):
+            continue
+        keys = [k for k in (col.get("statusKeys") or []) if isinstance(k, str)]
+        for key in keys:
+            if key not in sequence:
+                sequence.append(key)
+        if col.get("isCompleted"):
+            completed.update(keys)
+    if not completed:
+        completed.add("ready_to_ship")
+    rank = {key: i for i, key in enumerate(sequence)}
+
+    for po in pos:
+        raw = getattr(po, "parts", None)
+        parts = raw if isinstance(raw, list) else []
+        if len(parts) < 2:
+            po.parts_completed = None
+            po.parts_total = None
+            continue
+        statuses: list[str] = []
+        for part in parts:
+            if not isinstance(part, dict):
+                statuses.append(str(po.status))
+                continue
+            status = part.get("status") or po.status
+            statuses.append(str(status))
+        done = sum(1 for status in statuses if status in completed)
+        po.parts_completed = done
+        po.parts_total = len(parts)
+        po._status_label = f"{done} of {len(parts)} Completed"  # type: ignore[attr-defined]
+        incomplete = [s for s in statuses if s not in completed]
+        rollup = min(incomplete, key=lambda s: rank.get(s, 999)) if incomplete else statuses[-1]
+        col = column_for_status(doc, rollup)
+        if col:
+            po._stage = col  # type: ignore[attr-defined]
+
+
+def rollup_status(po: PurchaseOrder, doc: dict[str, Any] | None = None) -> str | None:
+    """Least-advanced part status for a multi-part PO, or None if not multi-part."""
+    raw = getattr(po, "parts", None)
+    parts = raw if isinstance(raw, list) else []
+    if len(parts) < 2:
+        return None
+    if doc is None:
+        # caller should pass a document when in a request
+        return None
+    completed: set[str] = set()
+    sequence: list[str] = []
+    for col in doc.get("kanbanColumns") or []:
+        if not isinstance(col, dict):
+            continue
+        keys = [k for k in (col.get("statusKeys") or []) if isinstance(k, str)]
+        for key in keys:
+            if key not in sequence:
+                sequence.append(key)
+        if col.get("isCompleted"):
+            completed.update(keys)
+    if not completed:
+        completed.add("ready_to_ship")
+    rank = {key: i for i, key in enumerate(sequence)}
+    statuses: list[str] = []
+    for part in parts:
+        if isinstance(part, dict):
+            statuses.append(str(part.get("status") or po.status))
+        else:
+            statuses.append(str(po.status))
+    incomplete = [s for s in statuses if s not in completed]
+    return min(incomplete, key=lambda s: rank.get(s, 999)) if incomplete else statuses[-1]
 
 
 def _require_key(value: object, *, what: str) -> str:

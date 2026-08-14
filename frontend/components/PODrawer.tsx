@@ -143,6 +143,12 @@ export function PODrawer({
       inspection: p.inspection ?? (rec as any).inspection,
       hardware: p.hardware ?? (rec as any).hardware,
       priority: p.priority ?? (rec as any).priority,
+      status: (p.status as PODraft["status"]) ?? (idx === 0 ? (rec as any).status : "need_material_size"),
+      note: Object.prototype.hasOwnProperty.call(p, "note")
+        ? (p.note ?? "")
+        : idx === 0
+          ? ((rec as any).note ?? "")
+          : "",
       certificates: Object.prototype.hasOwnProperty.call(p, "certificates")
         ? (p.certificates ?? "")
         : idx === 0
@@ -233,7 +239,16 @@ export function PODrawer({
       if (creating) {
         saved = await api.createPO({ ...draft, qty: Number(draft.qty) || 1 });
       } else if (statusOnly) {
-        saved = await api.updatePO(record!.id, { status: draft.status });
+        if (record && selectedPartIndex != null && (record.parts?.length ?? 0) > 1) {
+          saved = await api.updatePOWithPart(
+            record.id,
+            null,
+            selectedPartIndex,
+            { status: draft.status },
+          );
+        } else {
+          saved = await api.updatePO(record!.id, { status: draft.status });
+        }
       } else {
         // If a part is selected, persist part-specific fields together with PO
         if (record && selectedPartIndex != null) {
@@ -250,6 +265,8 @@ export function PODrawer({
               priority: draft.priority || undefined,
               certificates: (draft as any).certificates ?? null,
               custom_fields: draft.custom_fields ?? {},
+              status: draft.status,
+              note: draft.note ?? "",
               thumbnail_url: draft.thumbnail_url ?? null,
               model_url: draft.model_url ?? null,
               model_filename: draft.model_filename ?? null,
@@ -430,9 +447,25 @@ export function PODrawer({
                 canEditDraft={modifiable}
                 onGenerated={() => void loadActivity(record.id)}
               />
-              <div className="section-label">Comments</div>
+              {(record.parts?.length ?? 0) > 1 && selectedPartIndex != null && (
+                <>
+                  <div className="section-label">Part comments</div>
+                  <CommentThread
+                    key={`${record.id}:part:${selectedPartIndex}`}
+                    poId={record.id}
+                    part={selectedPartIndex + 1}
+                    title="Part comments"
+                    variant="embedded"
+                  />
+                </>
+              )}
+              <div className="section-label">
+                {(record.parts?.length ?? 0) > 1 ? "Project comments" : "Comments"}
+              </div>
               <CommentThread
+                key={`${record.id}:project`}
                 poId={record.id}
+                title={(record.parts?.length ?? 0) > 1 ? "Project comments" : "Comments"}
                 variant="embedded"
                 onCountChange={(count) => {
                   setRecord((r) => (r ? { ...r, comment_count: count } : r));

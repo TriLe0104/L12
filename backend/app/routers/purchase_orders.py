@@ -102,6 +102,8 @@ def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
         "model_url": po.model_url,
         "model_filename": po.model_filename,
         "model_size": po.model_size,
+        "status": po.status,
+        "note": po.note,
     }
 
 
@@ -123,6 +125,8 @@ def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
         "model_url": payload.model_url,
         "model_filename": payload.model_filename,
         "model_size": payload.model_size,
+        "status": payload.status or "need_material_size",
+        "note": payload.note or "",
     }
 
 
@@ -152,6 +156,23 @@ def _adopt_part_media(po: PurchaseOrder, part: dict[str, Any]) -> None:
 def _set_parts(po: PurchaseOrder, parts: list[dict[str, Any]]) -> None:
     po.parts = parts
     flag_modified(po, "parts")
+
+
+def _copy_status_to_parts(po: PurchaseOrder, status: str) -> None:
+    parts = _as_parts_list(po)
+    if not parts:
+        return
+    for part in parts:
+        if isinstance(part, dict):
+            part["status"] = status
+    _set_parts(po, parts)
+
+
+def _persist_rollup_status(db: Session, po: PurchaseOrder) -> None:
+    doc = board_service.get_document(db)
+    rollup = board_service.rollup_status(po, doc)
+    if rollup and po.status != rollup:
+        po.status = rollup
 
 
 def _traveler_part_index(po: PurchaseOrder, part: int | None) -> int | None:
@@ -267,7 +288,10 @@ def _attach_comment_counts(db: Session, pos: Sequence[PurchaseOrder]) -> None:
         return
     stmt = (
         select(POComment.purchase_order_id, func.count())
-        .where(POComment.purchase_order_id.in_(ids))
+        .where(
+            POComment.purchase_order_id.in_(ids),
+            POComment.part_index.is_(None),
+        )
         .group_by(POComment.purchase_order_id)
     )
     counts = dict(db.execute(stmt).all())
@@ -603,6 +627,7 @@ def add_part(
     parts.append(part_entry)
     _set_parts(po, parts)
     _adopt_part_media(po, part_entry)
+    _persist_rollup_status(db, po)
 
     db.add(
         Activity(
@@ -644,6 +669,7 @@ def update_part(
     parts[index] = part
     _set_parts(po, parts)
     _adopt_part_media(po, part)
+    _persist_rollup_status(db, po)
 
     db.add(
         Activity(
@@ -732,6 +758,7 @@ def update_po_with_part(
         parts[idx] = part
         _set_parts(po, parts)
         _adopt_part_media(po, part)
+        _persist_rollup_status(db, po)
         db.add(
             Activity(
                 actor_id=actor.id,
@@ -866,6 +893,7 @@ def update_po(
         before = _status_key(po.status)
         after = _status_key(changed["status"])
         _log(db, actor, "Status changed", po, f"{before} -> {after}")
+        _copy_status_to_parts(po, after)
     if "due_date" in changed:
         _log(db, actor, "Due date moved", po, f"{po.due_date} -> {changed['due_date']}")
     if "locked" in changed:
@@ -932,14 +960,25 @@ def _require_po(db: Session, po_id: str) -> PurchaseOrder:
 
 @router.get("/{po_id}/comments", response_model=list[CommentOut])
 def list_comments(
-    po_id: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    po_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    part: int | None = Query(None, ge=1),
 ) -> list[POComment]:
-    """Oldest first — chat order. Any signed-in rank; lock does not apply."""
+    """Oldest first — chat order. Any signed-in rank; lock does not apply.
+
+    Omit ``part`` for the project-wide thread. ``part=1`` is the first part.
+    """
     _require_po(db, po_id)
+    cond = [POComment.purchase_order_id == po_id]
+    if part is None:
+        cond.append(POComment.part_index.is_(None))
+    else:
+        cond.append(POComment.part_index == part - 1)
     stmt = (
         select(POComment)
         .options(selectinload(POComment.actor))
-        .where(POComment.purchase_order_id == po_id)
+        .where(*cond)
         .order_by(POComment.created_at.asc(), POComment.id.asc())
     )
     return list(db.scalars(stmt))
@@ -966,7 +1005,15 @@ def add_comment(
             status.HTTP_400_BAD_REQUEST,
             f"Comment is too long (max {COMMENT_MAX_LEN} characters)",
         )
-    comment = POComment(purchase_order_id=po.id, actor_id=actor.id, body=body)
+    part_index = payload.part_index
+    if part_index is not None and part_index < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "part_index out of range")
+    comment = POComment(
+        purchase_order_id=po.id,
+        actor_id=actor.id,
+        body=body,
+        part_index=part_index,
+    )
     db.add(comment)
     db.commit()
     loaded = db.scalars(

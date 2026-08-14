@@ -1004,6 +1004,47 @@ button.jobcard-thumb:focus-visible {
   text-wrap: pretty;
 }
 
+.jobcard-part-summary {
+  list-style: none;
+  margin: 0;
+  padding: 0.15rem 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.jobcard-part-summary li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.22rem 0.15rem;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 0.78rem;
+}
+
+.jobcard-part-summary li:last-child {
+  border-bottom: 0;
+}
+
+.jobcard-part-id {
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jobcard-part-st {
+  flex: 0 0 auto;
+  color: var(--steel);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .jobcard-status {
   display: flex;
   align-items: center;

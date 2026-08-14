@@ -62,6 +62,8 @@ export default function AddPartInline({
         priority: d.priority || "normal",
         certificates: d.certificates || d.custom_fields?.certificates || null,
         custom_fields: d.custom_fields && typeof d.custom_fields === "object" ? d.custom_fields : {},
+        status: d.status || "need_material_size",
+        note: d.note || "",
         thumbnail_url: thumbnail_url || null,
         model_url: d.model_url || null,
         model_filename: d.model_filename || null,

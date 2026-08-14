@@ -98,6 +98,8 @@ class PartCreate(BaseModel):
     priority: str | None = "normal"
     certificates: str | None = None
     custom_fields: dict[str, Any] | None = None
+    status: str | None = None
+    note: str | None = None
     thumbnail_url: str | None = None
     model_url: str | None = None
     model_filename: str | None = None
@@ -117,6 +119,8 @@ class PartUpdate(BaseModel):
     priority: str | None = None
     certificates: str | None = None
     custom_fields: dict[str, Any] | None = None
+    status: str | None = None
+    note: str | None = None
     thumbnail_url: str | None = None
     model_url: str | None = None
     model_filename: str | None = None
@@ -226,6 +230,9 @@ class POOut(ORMModel):
     # the dashboard badge never N+1s. Comments are not activity and never move
     # `last_modified`.
     comment_count: int = 0
+    # Multi-part rollup; null on single-part orders.
+    parts_completed: int | None = None
+    parts_total: int | None = None
 
 
 class TravelerDraftOut(BaseModel):
@@ -272,12 +279,15 @@ COMMENT_MAX_LEN = 2000
 
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=COMMENT_MAX_LEN)
+    # 0-based part index; omit / null for the project-wide thread.
+    part_index: int | None = None
 
 
 class CommentOut(ORMModel):
     id: str
     body: str
     created_at: datetime
+    part_index: int | None = None
     actor: OwnerBrief | None
 
 

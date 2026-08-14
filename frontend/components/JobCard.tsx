@@ -133,6 +133,7 @@ export function JobCard({
         ];
 
   const parts = po.parts ?? [];
+  const isSummary = !hideParts && parts.length > 1;
   const shown = hideParts ? po : poShowingPart(po);
   const photo = assetUrl(shown.thumbnail_url);
   const [viewing, setViewing] = useState(false);
@@ -145,9 +146,9 @@ export function JobCard({
 
   return (
     <article
-      className="jobcard"
+      className={isSummary ? "jobcard jobcard-summary" : "jobcard"}
       data-locked={po.locked}
-      data-has-model={!!model}
+      data-has-model={!isSummary && !!model}
       style={toneStyle(po.status, tone)}
       onClick={onClick}
       role={onClick ? "button" : undefined}
@@ -207,7 +208,22 @@ export function JobCard({
       </header>
 
       <div className="jobcard-body">
-        {photo ? (
+        {isSummary ? (
+          <ul className="jobcard-part-summary">
+            {parts.map((p, i) => {
+              const face = poShowingPart(po, i);
+              const st = face.status ?? po.status;
+              return (
+                <li key={i}>
+                  <span className="jobcard-part-id">{face.part_number || p.part_name || `Part ${i + 1}`}</span>
+                  <span className="jobcard-part-st">
+                    {statusByKey.get(st)?.label ?? st.replaceAll("_", " ")}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : photo ? (
          /* A real button, so the photo is tabbable; both the click and the
             Enter/Space that produced it are stopped here, otherwise the card
             around it would open the detail drawer as well. */
@@ -256,6 +272,7 @@ export function JobCard({
           />
         )}
 
+        {!isSummary && (
         <dl className="spec">
           {displayFields.map((f) => (
             <div key={f.key} className="spec-pair">
@@ -275,13 +292,19 @@ export function JobCard({
             </div>
           ))}
         </dl>
+        )}
       </div>
 
-      {po.note && <div className="jobcard-note">{po.note}</div>}
+      {!isSummary && shown.note && <div className="jobcard-note">{shown.note}</div>}
 
       <footer className="jobcard-status">
         <span>Status:</span>
-        <b>{po.status_label}</b>
+        <b>
+          {isSummary
+            ? po.status_label ||
+              `${po.parts_completed ?? 0} of ${po.parts_total ?? parts.length} Completed`
+            : statusByKey.get(shown.status ?? po.status)?.label ?? po.status_label}
+        </b>
         {po.owner && (
           <Avatar
             initials={po.owner.initials}

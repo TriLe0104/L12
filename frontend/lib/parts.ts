@@ -32,6 +32,12 @@ export function poShowingPart(po: PurchaseOrder, index?: number): PurchaseOrder 
       : i === 0
         ? (po.certificates ?? null)
         : null,
+    status: (p.status as PurchaseOrder["status"]) ?? (i === 0 ? po.status : po.status),
+    note: Object.prototype.hasOwnProperty.call(p, "note")
+      ? (p.note ?? "")
+      : i === 0
+        ? (po.note ?? "")
+        : "",
     custom_fields:
       p.custom_fields && typeof p.custom_fields === "object"
         ? { ...p.custom_fields }

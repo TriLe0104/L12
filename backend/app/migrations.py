@@ -37,6 +37,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "users": {
         "avatar_url": "VARCHAR(1000)",
     },
+    "po_comments": {
+        # NULL = project-level chat; 0+ = comments on that part index.
+        "part_index": "INTEGER",
+    },
 }
 
 # Absolute object-storage URLs outgrow the original 500-char columns. Postgres

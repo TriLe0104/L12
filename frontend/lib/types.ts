@@ -100,9 +100,15 @@ export interface PurchaseOrder {
     model_url?: string | null;
     model_filename?: string | null;
     model_size?: number | null;
+    status?: string;
+    note?: string | null;
+    comment_count?: number;
   }>;
   /** Which part the board cards show for everyone. Zero-based. */
   display_part_index?: number;
+  /** Multi-part rollup; null on single-part orders. */
+  parts_completed?: number | null;
+  parts_total?: number | null;
   /** Admin-defined attributes; keys match board settings customFields. */
   custom_fields: Record<string, string | number | null> | null;
   /** Editable traveler packet overrides persisted on the PO. */

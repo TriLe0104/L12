@@ -30,12 +30,17 @@ function when(iso: string) {
 
 export function CommentThread({
   poId,
+  part,
+  title = "Comments",
   variant = "embedded",
   onCountChange,
   onClose,
   anchorEl,
 }: {
   poId: string;
+  /** 1-based part number. Omit for the project-wide thread. */
+  part?: number | null;
+  title?: string;
   /** Drawer section vs dashboard popover panel. */
   variant?: "embedded" | "panel";
   /** Dashboard badge refresh after post/delete. */
@@ -60,7 +65,7 @@ export function CommentThread({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await api.listComments(poId);
+      const rows = await api.listComments(poId, part);
       setComments(rows);
       onCountChange?.(rows.length);
       setError(null);
@@ -72,7 +77,7 @@ export function CommentThread({
     // onCountChange is a notification, not an input — keep it out of deps so an
     // inline parent callback cannot re-fetch in a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poId]);
+  }, [poId, part]);
 
   useEffect(() => {
     void load();
@@ -140,7 +145,7 @@ export function CommentThread({
     setBusy(true);
     setError(null);
     try {
-      const created = await api.addComment(poId, trimmed);
+      const created = await api.addComment(poId, trimmed, part);
       setComments((prev) => {
         const next = [...prev, created];
         onCountChange?.(next.length);
@@ -187,7 +192,7 @@ export function CommentThread({
     >
       {variant === "panel" && (
         <header className="comment-thread-head">
-          <strong id={titleId}>Comments</strong>
+          <strong id={titleId}>{title}</strong>
           <button type="button" className="btn" onClick={onClose} aria-label="Close comments">
             Close
           </button>
