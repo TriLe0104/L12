@@ -23,6 +23,7 @@ import {
 import { resolveToneColor } from "@/lib/boardTypes";
 import { displayPartIndex, poShowingPart } from "@/lib/parts";
 import type { PurchaseOrder } from "@/lib/types";
+import { CommentBubbleIcon, CommentThread } from "./CommentThread";
 
 /** Legacy status → named tone (pre-settings). Mapped to hex via resolveToneColor. */
 export const TONE_BY_STATUS: Record<string, string> = {
@@ -171,12 +172,20 @@ export function JobCard({
   function foldDeal() {
     setSpread("fold");
     if (foldTimer.current) window.clearTimeout(foldTimer.current);
-    foldTimer.current = window.setTimeout(() => setSpread("stacked"), 560);
+    foldTimer.current = window.setTimeout(() => setSpread("stacked"), 520);
   }
 
   const shown = hideParts ? po : poShowingPart(po, isDeck ? faceIndex : serverIndex);
   const [viewing, setViewing] = useState(false);
   const [viewingModel, setViewingModel] = useState(false);
+  const [commentPart, setCommentPart] = useState<number | null>(null);
+  const commentAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const [partCounts, setPartCounts] = useState<Record<string, number>>(
+    () => po.part_comment_counts ?? {},
+  );
+  useEffect(() => {
+    setPartCounts(po.part_comment_counts ?? {});
+  }, [po.id, po.part_comment_counts]);
 
   async function chooseFace(next: number, collapse = false) {
     if (!isDeck || shuffleBusy) return;
@@ -196,8 +205,12 @@ export function JobCard({
 
   function renderFace(
     face: PurchaseOrder,
-    opts: { openDrawer?: boolean; current?: boolean } = {},
+    opts: { openDrawer?: boolean; current?: boolean; partIndex?: number } = {},
   ) {
+    const faceComments =
+      isDeck && opts.partIndex != null
+        ? (partCounts[String(opts.partIndex)] ?? 0)
+        : (po.comment_count ?? 0);
     const facePhoto = assetUrl(face.thumbnail_url);
     const faceTone = statusByKey.get(face.status ?? po.status)?.tone;
     const faceModel = assetUrl(face.model_url);
@@ -343,6 +356,34 @@ export function JobCard({
         <footer className="jobcard-status">
           <span>Status:</span>
           <b>{statusByKey.get(face.status ?? po.status)?.label ?? po.status_label}</b>
+          {!hideParts && (
+            <button
+              type="button"
+              className="jobcard-comment-btn"
+              data-has={faceComments > 0 ? "true" : "false"}
+              aria-expanded={commentPart === (opts.partIndex ?? -1)}
+              aria-label="Comments"
+              title={
+                isDeck && opts.partIndex != null
+                  ? `Part ${opts.partIndex + 1} comments`
+                  : "Comments"
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                commentAnchorRef.current = e.currentTarget;
+                const idx = opts.partIndex ?? 0;
+                setCommentPart((cur) => (cur === idx ? null : idx));
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <CommentBubbleIcon filled={faceComments > 0} />
+              {faceComments > 0 && (
+                <span className="jobcard-comment-badge">
+                  {faceComments > 99 ? "99+" : faceComments}
+                </span>
+              )}
+            </button>
+          )}
           {po.owner && (
             <Avatar
               initials={po.owner.initials}
@@ -355,46 +396,64 @@ export function JobCard({
     );
   }
 
-  if (!isDeck) return renderFace(shown, { openDrawer: true, current: true });
-
-  if (spread !== "stacked") {
-    return (
-      <div className="jobcard-deal" data-count={parts.length} data-phase={spread}>
-        {parts.map((_, i) => {
-          const face = poShowingPart(po, i);
-          const isCurrent = i === faceIndex;
-          return (
-            <div
-              key={i}
-              className="jobcard-deal-item"
-              data-current={isCurrent}
-              data-phase={spread}
-              style={
-                {
-                  ["--deal-i" as string]: i,
-                  ["--deal-n" as string]: parts.length,
-                } as CSSProperties
+  const body = !isDeck ? (
+    renderFace(shown, { openDrawer: true, current: true, partIndex: 0 })
+  ) : spread !== "stacked" ? (
+    <div className="jobcard-deal" data-count={parts.length} data-phase={spread}>
+      {parts.map((_, i) => {
+        const face = poShowingPart(po, i);
+        const isCurrent = i === faceIndex;
+        return (
+          <div
+            key={i}
+            className="jobcard-deal-item"
+            data-current={isCurrent}
+            data-phase={spread}
+            style={
+              {
+                ["--deal-i" as string]: i,
+                ["--deal-n" as string]: parts.length,
+              } as CSSProperties
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              if (spread === "fold") return;
+              if (isCurrent) {
+                onClick?.(face);
+                return;
               }
-              onClick={(e) => {
-                e.stopPropagation();
-                if (spread === "fold") return;
-                if (isCurrent) {
-                  onClick?.(face);
-                  return;
-                }
-                void chooseFace(i, true);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              {renderFace(face, { current: isCurrent })}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
+              void chooseFace(i, true);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {renderFace(face, { current: isCurrent, partIndex: i })}
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    renderFace(shown, { openDrawer: true, current: true, partIndex: faceIndex })
+  );
 
-  return renderFace(shown, { openDrawer: true, current: true });
+  return (
+    <>
+      {body}
+      {!hideParts && commentPart != null && (
+        <CommentThread
+          poId={po.id}
+          part={isDeck ? commentPart + 1 : null}
+          parts={po.parts}
+          title={isDeck ? `Part ${commentPart + 1} comments` : "Comments"}
+          variant="panel"
+          anchorEl={commentAnchorRef.current}
+          onClose={() => setCommentPart(null)}
+          onCountChange={(count) => {
+            setPartCounts((prev) => ({ ...prev, [String(commentPart)]: count }));
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 /** Compact card used inside calendar day cells. */

@@ -212,7 +212,7 @@ const FALLBACK_COLUMNS: Column[] = [
   { key: "finish", label: "Finish", widthRem: null, ...BUILTIN_COLUMN_DEFS.finish },
   { key: "due", label: "Due", widthRem: 4.3, ...BUILTIN_COLUMN_DEFS.due },
   { key: "modified", label: "Modified", widthRem: 5.4, ...BUILTIN_COLUMN_DEFS.modified },
-  { key: "comments", label: "Comments", widthRem: 2.35, ...BUILTIN_COLUMN_DEFS.comments },
+  { key: "comments", label: "Comments", widthRem: 2.85, ...BUILTIN_COLUMN_DEFS.comments },
   { key: "qty", label: "Qty", widthRem: 3.75, ...BUILTIN_COLUMN_DEFS.qty },
 ];
 
@@ -463,7 +463,18 @@ export default function DashboardPage() {
   };
 
   const widthOf = useCallback(
-    (col: Column) => dashboardColumnWidthStyle(colWidths[col.key] ?? col.widthRem ?? 8),
+    (col: Column) => {
+      const stored = colWidths[col.key];
+      if (stored != null) {
+        const rem = col.key === "comments" ? Math.max(stored, 2.7) : stored;
+        return dashboardColumnWidthStyle(rem);
+      }
+      if (col.widthRem != null) {
+        const rem = col.key === "comments" ? Math.max(col.widthRem, 2.7) : col.widthRem;
+        return dashboardColumnWidthStyle(rem);
+      }
+      return undefined;
+    },
     [colWidths],
   );
 
@@ -479,6 +490,10 @@ export default function DashboardPage() {
     table?.querySelectorAll<HTMLElement>("thead th[data-col]").forEach((cell) => {
       const colKey = cell.dataset.col;
       if (!colKey) return;
+      const meta = visibleColumns.find((c) => c.key === colKey);
+      const alreadySet = locked[colKey] != null;
+      const isFlex = meta != null && meta.widthRem == null && !alreadySet;
+      if (isFlex && colKey !== key) return;
       locked[colKey] = Math.round((cell.getBoundingClientRect().width / rootFont) * 100) / 100;
     });
     locked[key] = Math.round((startPx / rootFont) * 100) / 100;
@@ -666,7 +681,7 @@ export default function DashboardPage() {
 
   const tableMinWidth = useMemo(() => {
     const sum = visibleColumns.reduce((total, col) => {
-      const rem = colWidths[col.key] ?? col.widthRem ?? 8;
+      const rem = colWidths[col.key] ?? col.widthRem ?? 6.5;
       return total + rem;
     }, 0);
     return Math.max(sum, 26);
@@ -841,8 +856,13 @@ export default function DashboardPage() {
           <table
             className="dash-table"
             data-resizing={resizingCol ? "true" : undefined}
-            style={{ width: `${tableMinWidth}rem` }}
+            style={{ minWidth: `${tableMinWidth}rem` }}
           >
+            <colgroup>
+              {visibleColumns.map((col) => (
+                <col key={col.key} data-col={col.key} style={widthOf(col)} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 {visibleColumns.map((col) => (

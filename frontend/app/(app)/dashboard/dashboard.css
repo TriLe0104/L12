@@ -151,6 +151,8 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* The table owns its overflow, so the page never scrolls sideways. It is also
@@ -159,11 +161,12 @@
 .dash-scroll {
   container-type: inline-size;
   overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .dash-table {
-  width: max-content;
-  min-width: 0;
+  width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
@@ -171,12 +174,17 @@
 
 .dash-table th,
 .dash-table td {
+  box-sizing: border-box;
   padding: 0.5rem 0.55rem;
   text-align: left;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dash-table td[data-col="comments"] {
+  overflow: hidden;
 }
 
 .dash-table thead th {
@@ -330,6 +338,9 @@
 .dash-part-clip {
   display: grid;
   grid-template-rows: 0fr;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   opacity: 0;
   transform: translateY(-8px);
   transition:
@@ -347,6 +358,7 @@
 
 .dash-part-inner {
   min-width: 0;
+  max-width: 100%;
   min-height: 2.1rem;
   overflow: hidden;
   line-height: normal;

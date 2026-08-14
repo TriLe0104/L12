@@ -1104,6 +1104,55 @@ button.jobcard-thumb:focus-visible {
   flex-shrink: 0;
 }
 
+.jobcard-comment-btn {
+  position: relative;
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--steel);
+  cursor: pointer;
+}
+
+.jobcard-comment-btn:hover,
+.jobcard-comment-btn[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--rule);
+  background: rgba(13, 17, 23, 0.04);
+}
+
+.jobcard-comment-btn[data-has="true"] {
+  color: var(--ink);
+}
+
+.jobcard-comment-btn + .avatar {
+  margin-left: 0.15rem;
+}
+
+.jobcard-comment-badge {
+  position: absolute;
+  top: -0.18rem;
+  right: -0.22rem;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 0.18rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  line-height: 0.9rem;
+  text-align: center;
+}
+
 /* narrow cards (kanban columns, the drawer, the smaller zoom steps): the
    "Status:" prefix is the part that can give way, so the label keeps its size */
 @container (max-width: 21rem) {
@@ -1669,6 +1718,11 @@ button.jobcard-thumb:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  transition: gap 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.jobcard-deal[data-phase="fold"] {
+  gap: 0;
 }
 
 .jobcard-deal-item {
@@ -1681,13 +1735,14 @@ button.jobcard-thumb:focus-visible {
 }
 
 .jobcard-deal-item[data-phase="fold"] {
-  animation: card-fold 380ms cubic-bezier(0.32, 0.72, 0, 1) both;
-  animation-delay: calc((var(--deal-n, 4) - var(--deal-i, 0) - 1) * 42ms);
+  animation: card-fold 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc((var(--deal-n, 4) - var(--deal-i, 0) - 1) * 36ms);
   pointer-events: none;
 }
 
 .jobcard-deal-item[data-phase="fold"][data-current="true"] {
-  animation-name: card-fold-current;
+  animation: none;
+  z-index: 2;
 }
 
 .jobcard-deal-item[data-current="true"] .jobcard {
@@ -1725,18 +1780,7 @@ button.jobcard-thumb:focus-visible {
   }
   to {
     opacity: 0;
-    transform: translateY(-36px) translateX(12px) rotate(7deg) scale(0.9);
-  }
-}
-
-@keyframes card-fold-current {
-  from {
-    transform: none;
-    opacity: 1;
-  }
-  to {
-    transform: translateY(-6px) scale(0.985);
-    opacity: 1;
+    transform: translateY(-14px) scale(0.98);
   }
 }
 
