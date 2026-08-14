@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 3
+OVERLAY_VERSION = 4
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -971,44 +971,27 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     overlay_buf = io.BytesIO()
     c = canvas.Canvas(overlay_buf, pagesize=(612, 792), pageCompression=1)
 
-    def fitted(text: str, font: str, size: float, max_width: float) -> float:
+    def fitted(text: str, font: str, size: float, max_width: float, *, min_size: float = 6.5) -> float:
         width = pdfmetrics.stringWidth(text, font, size)
-        return max(6.5, min(size, size * max_width / width)) if width else size
+        if not width or max_width <= 0:
+            return size
+        return max(min_size, min(size, size * max_width / width))
 
-    def left(
-        value: object,
-        x: float,
-        y1: float,
-        *,
-        font: str = regular,
-        size: float = 11.04,
-        width: float = 999,
-    ) -> None:
-        text = _s(value)
-        if not text:
-            return
-        actual = fitted(text, font, size, width)
-        c.setFont(font, actual)
-        c.drawString(x, 792 - y1 + actual * 0.25, text)
-
-    def center(
-        value: object,
-        x: float,
-        y1: float,
-        *,
-        font: str = regular,
-        size: float = 11.04,
-        width: float = 999,
-    ) -> None:
-        text = _s(value)
-        if not text:
-            return
-        actual = fitted(text, font, size, width)
-        c.setFont(font, actual)
-        c.drawCentredString(x, 792 - y1 + actual * 0.25, text)
-
-    # Notes overflow collector (may be appended to the final PDF as extra pages)
-    notes_overflow_text: str | None = None
+    def _split_token(word: str, font: str, size: float, width: float) -> list[str]:
+        if pdfmetrics.stringWidth(word, font, size) <= width:
+            return [word]
+        parts: list[str] = []
+        buf = ""
+        for ch in word:
+            trial = buf + ch
+            if buf and pdfmetrics.stringWidth(trial, font, size) > width:
+                parts.append(buf)
+                buf = ch
+            else:
+                buf = trial
+        if buf:
+            parts.append(buf)
+        return parts or [word]
 
     def _wrap_rows(text: str, font: str, size: float, width: float) -> list[str]:
         rows: list[str] = []
@@ -1017,7 +1000,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
                 rows.append("")
                 continue
             current = ""
+            tokens: list[str] = []
             for word in paragraph.split():
+                tokens.extend(_split_token(word, font, size, width))
+            for word in tokens:
                 candidate = f"{current} {word}".strip()
                 if current and pdfmetrics.stringWidth(candidate, font, size) > width:
                     rows.append(current)
@@ -1028,36 +1014,113 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
                 rows.append(current)
         return rows
 
-    def wrapped(
+    def _draw_lines(
+        rows: list[str],
+        x: float,
+        y1: float,
+        *,
+        font: str,
+        size: float,
+        width: float,
+        align: str,
+        leading: float,
+    ) -> None:
+        block = leading * max(len(rows) - 1, 0)
+        start = y1 - block / 2
+        for index, row in enumerate(rows):
+            c.setFont(font, size)
+            py = 792 - start - leading * index + size * 0.22
+            if align == "left":
+                c.drawString(x, py, row)
+            else:
+                c.drawCentredString(x, py, row)
+
+    def _fit_in_box(
         value: object,
         x: float,
         y1: float,
         *,
-        size: float = 11.04,
+        font: str,
+        size: float,
         width: float,
-        lines: int = 2,
-        leading: float = 13.44,
-        shrink: bool = False,
-    ) -> str | None:
-        """Draw up to `lines` wrapped lines, centred in the box.
+        height: float,
+        align: str,
+    ) -> None:
+        """Draw one value centred in its cell. Shrinks, then wraps, then clips
+        so the glyphs cannot leave the box."""
+        text = _s(value)
+        if not text or width <= 0 or height <= 0:
+            return
+        min_size = 6.0
+        one = fitted(text, font, size, width, min_size=min_size)
+        if pdfmetrics.stringWidth(text, font, one) <= width + 0.4:
+            _draw_lines([text], x, y1, font=font, size=one, width=width, align=align, leading=one)
+            return
+        size_try = size
+        max_lines = max(1, int(height / (min_size * 1.05)))
+        rows = _wrap_rows(text, font, size_try, width)
+        while len(rows) > max_lines and size_try > min_size:
+            size_try = max(min_size, size_try * 0.88)
+            rows = _wrap_rows(text, font, size_try, width)
+        rows = rows[:max_lines]
+        leading = min(size_try * 1.12, height / max(len(rows), 1))
+        _draw_lines(rows, x, y1, font=font, size=size_try, width=width, align=align, leading=leading)
 
-        When ``shrink`` is false (notes), leftover text is returned for extra
-        pages instead of cramming it into a tiny font.
-        """
+    def left(
+        value: object,
+        x: float,
+        y1: float,
+        *,
+        font: str = regular,
+        size: float = 11.04,
+        width: float = 999,
+        height: float = 18,
+    ) -> None:
+        _fit_in_box(value, x, y1, font=font, size=size, width=width, height=height, align="left")
+
+    def center(
+        value: object,
+        x: float,
+        y1: float,
+        *,
+        font: str = regular,
+        size: float = 11.04,
+        width: float = 999,
+        height: float = 20,
+    ) -> None:
+        _fit_in_box(value, x, y1, font=font, size=size, width=width, height=height, align="center")
+
+    def notes_in_box(
+        value: object,
+        x: float,
+        y1: float,
+        *,
+        width: float,
+        height: float,
+        size: float = 10.5,
+    ) -> str | None:
+        """Fill the page-1 Notes cell at a readable size. Leftover text is
+        returned so the caller can append extra pages."""
         text = _s(value)
         if not text:
             return None
-        size_try = size
-        min_size = 6.5 if shrink else size
-        rows = _wrap_rows(text, regular, size_try, width)
-        while shrink and len(rows) > lines and size_try > min_size:
-            size_try = max(min_size, size_try * 0.9)
-            rows = _wrap_rows(text, regular, size_try, width)
-        for index, row in enumerate(rows[:lines]):
-            center(row, x, y1 + leading * index, size=size_try, width=width)
-        if len(rows) > lines:
-            return "\n".join(rows[lines:]).strip()
-        return None
+        leading = size * 1.22
+        lines = max(1, int((height - 2) / leading))
+        rows = _wrap_rows(text, regular, size, width)
+        shown = rows[:lines]
+        leftover = "\n".join(rows[lines:]).strip()
+        if shown:
+            _draw_lines(
+                shown,
+                x,
+                y1,
+                font=regular,
+                size=size,
+                width=width,
+                align="center",
+                leading=leading,
+            )
+        return leftover or None
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
     # column centres are taken from the rendered headings and every data value
@@ -1097,67 +1160,65 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
     c.setFillColorRGB(0, 0, 0)
-    center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160)
-    center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130)
-    center(fields.get("dims"), body_tab, 193.24, size=12, width=130)
-    center(fields.get("work_order"), col_left, 258.25, width=165)
-    center(_traveler_date(fields.get("due_date")), col_mid, 258.25, width=170)
-    center(fields.get("mat_dim"), col_mat_dims, 259.48, size=12, width=110)
-    center(fields.get("sign"), col_sign, 259.48, size=12, width=88)
-    center(fields.get("po_number"), col_left, 335.68, width=165)
-    center(fields.get("part_name") or fields.get("part_number"), col_mid, 335.68, width=175)
-    center(fields.get("qty"), col_right, 335.68, width=160)
-    center(fields.get("finish"), col_left, 406.48, width=165)
-    center(fields.get("inserts") or "No", col_mid, 406.48, width=165)
-    center(fields.get("material"), col_right, 406.48, width=160)
-    center(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165)
-    center(fields.get("part_marking") or "None", col_mid, 496.74, width=165)
-    center(fields.get("certificates"), col_right, 496.74, width=155)
-    # Notes fill the bottom box at a readable size; leftover continues on extra pages.
-    notes_value = _s(fields.get("notes"))
-    notes_overflow_text = wrapped(
-        notes_value,
+    center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
+    center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
+    center(fields.get("dims"), body_tab, 193.24, size=12, width=130, height=14)
+    center(fields.get("work_order"), col_left, 258.25, width=165, height=20)
+    center(_traveler_date(fields.get("due_date")), col_mid, 258.25, width=170, height=20)
+    center(fields.get("mat_dim"), col_mat_dims, 259.48, size=12, width=110, height=20)
+    center(fields.get("sign"), col_sign, 259.48, size=12, width=88, height=20)
+    center(fields.get("po_number"), col_left, 335.68, width=165, height=16)
+    center(fields.get("part_name") or fields.get("part_number"), col_mid, 335.68, width=175, height=16)
+    center(fields.get("qty"), col_right, 335.68, width=160, height=16)
+    center(fields.get("finish"), col_left, 406.48, width=165, height=28)
+    center(fields.get("inserts") or "No", col_mid, 406.48, width=165, height=28)
+    center(fields.get("material"), col_right, 406.48, width=160, height=28)
+    center(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165, height=90)
+    center(fields.get("part_marking") or "None", col_mid, 496.74, width=165, height=90)
+    center(fields.get("certificates"), col_right, 496.74, width=155, height=90)
+    # Notes sit in the last table cell (~48pt tall). Leftover continues on extra pages.
+    notes_overflow_text = notes_in_box(
+        fields.get("notes"),
         col_mid,
-        628.0,
-        size=10.5,
+        630.0,
         width=520,
-        lines=8,
-        leading=13.0,
-        shrink=False,
+        height=46,
+        size=10.5,
     )
 
     c.showPage()
 
     # Excel Part 555. Every input cell here is centre-aligned in the workbook,
     # so values are centred on the merged cell bounded by the printed rules.
-    center(fields.get("work_order"), 443.7, 67.94, size=10.56, width=112)
-    center(fields.get("po_number"), 391.3, 84.26, font=bold, size=11.52, width=105)
-    center(_traveler_date(fields.get("due_date")), 511.0, 84.26, size=11.52, width=68)
-    center(fields.get("part_number"), 404.9, 99.02, font=bold, size=11.52, width=132)
-    center(fields.get("qty"), 532.4, 99.50, font=bold, size=11.52, width=28)
-    center(fields.get("material"), 456.0, 120.74, font=bold, size=10.56, width=176)
-    center(fields.get("material_spec") or "Per Drawing", 456.0, 146.54, size=10.56, width=176)
+    center(fields.get("work_order"), 443.7, 67.94, size=10.56, width=112, height=16)
+    center(fields.get("po_number"), 391.3, 84.26, font=bold, size=11.52, width=105, height=16)
+    center(_traveler_date(fields.get("due_date")), 511.0, 84.26, size=11.52, width=68, height=16)
+    center(fields.get("part_number"), 404.9, 99.02, font=bold, size=11.52, width=132, height=16)
+    center(fields.get("qty"), 532.4, 99.50, font=bold, size=11.52, width=28, height=16)
+    center(fields.get("material"), 456.0, 120.74, font=bold, size=10.56, width=176, height=18)
+    center(fields.get("material_spec") or "Per Drawing", 456.0, 146.54, size=10.56, width=176, height=18)
     program_date = _traveler_date(fields.get("program_date"))
     if program_date:
-        center(program_date, 516.4, 205.34, size=10.56, width=58)
-    center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120)
+        center(program_date, 516.4, 205.34, size=10.56, width=58, height=16)
+    center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120, height=14)
     c.showPage()
 
     # Excel Program sheet. Unlike Part 555 this sheet left-aligns the PO, part
     # and date cells and centres only QTY and Programer, so the overlay follows
     # each cell's own alignment instead of centring everything.
-    left(fields.get("po_number"), 242.7, 99.83, font=bold, size=10.92, width=120)
-    left(fields.get("part_number"), 242.7, 125.99, font=bold, size=10.92, width=120)
-    center(fields.get("qty"), 491.4, 126.47, font=bold, size=10.92, width=110)
+    left(fields.get("po_number"), 242.7, 99.83, font=bold, size=10.92, width=120, height=16)
+    left(fields.get("part_number"), 242.7, 125.99, font=bold, size=10.92, width=120, height=16)
+    center(fields.get("qty"), 491.4, 126.47, font=bold, size=10.92, width=110, height=16)
     center(
         fields.get("programmer"),
         279.4,
         156.71,
         size=10.92,
         width=190,
+        height=16,
     )
     if program_date:
-        left(program_date, 433.2, 157.19, size=10.92, width=80)
+        left(program_date, 433.2, 157.19, size=10.92, width=80, height=16)
     c.save()
 
     overlay_reader = PdfReader(io.BytesIO(overlay_buf.getvalue()))
@@ -1166,8 +1227,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         page.merge_page(overlay_reader.pages[index])
         writer.add_page(page)
 
-    # If notes overflowed the available lines on page 1, append the remainder
-    # as one or more simple text pages at the end of the packet.
+    # If notes overflowed the page-1 cell, append as many continuation pages
+    # as needed so nothing is clipped.
     if notes_overflow_text:
         extra_buf = io.BytesIO()
         ext_c = canvas.Canvas(extra_buf, pagesize=(612, 792))
@@ -1175,22 +1236,35 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         left_margin = 48
         usable_width = 612 - left_margin * 2
         wrapped_lines = _wrap_rows(notes_overflow_text, regular, font_size, usable_width)
-        leading = 14
-        title = "Notes (continued)"
-        first = True
+        leading = 15
+        job = _s(fields.get("work_order"))
+        part = _s(fields.get("part_number"))
+        po_number = _s(fields.get("po_number"))
         idx = 0
+        page_no = 0
         while idx < len(wrapped_lines):
+            page_no += 1
             y = 792 - 48
-            if first:
-                ext_c.setFont(bold, 13)
-                ext_c.drawString(left_margin, y, title)
-                y -= 22
-                first = False
+            ext_c.setFont(bold, 13)
+            ext_c.drawString(left_margin, y, "Notes (continued)")
+            y -= 16
+            ext_c.setFont(regular, 9)
+            meta = "  ·  ".join(p for p in (job, part, po_number) if p)
+            if meta:
+                ext_c.drawString(left_margin, y, meta)
+                y -= 10
+            ext_c.setStrokeColorRGB(0.75, 0.78, 0.82)
+            ext_c.line(left_margin, y, 612 - left_margin, y)
+            y -= 18
+            ext_c.setFillColorRGB(0, 0, 0)
             ext_c.setFont(regular, font_size)
-            while idx < len(wrapped_lines) and y > 48:
+            while idx < len(wrapped_lines) and y > 52:
                 ext_c.drawString(left_margin, y, wrapped_lines[idx])
                 y -= leading
                 idx += 1
+            ext_c.setFont(regular, 8)
+            ext_c.setFillColorRGB(0.35, 0.38, 0.42)
+            ext_c.drawRightString(612 - left_margin, 28, f"Notes page {page_no}")
             ext_c.showPage()
         ext_c.save()
         extra_reader = PdfReader(io.BytesIO(extra_buf.getvalue()))

@@ -91,8 +91,8 @@ const isLate = (po: PurchaseOrder, completedStatuses: Set<string>) =>
 
 /** Full spreadsheet-style job card: the paper card, rebuilt. */
 const HIDDEN_AT_DENSITY: Record<"s" | "m" | "l", string[]> = {
-  s: ["certificates", "hardware", "inspection", "mat_dim", "finish", "dims"],
-  m: ["certificates", "hardware", "inspection"],
+  s: ["hardware", "inspection", "mat_dim"],
+  m: [],
   l: [],
 };
 
@@ -261,8 +261,11 @@ export function JobCard({
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {spread !== "stacked" ? "Stack" : `${parts.length} parts`}
+              {faceIndex + 1} of {parts.length} parts
             </button>
+          )}
+          {opts.current && isDeck && spread !== "stacked" && (
+            <span className="jobcard-current-tag">Current</span>
           )}
           {face.priority !== "normal" && (
             <PriorityTag
@@ -383,7 +386,6 @@ export function JobCard({
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {isCurrent && <span className="jobcard-deal-badge">Current</span>}
               {renderFace(face, { current: isCurrent })}
             </div>
           );

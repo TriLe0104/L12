@@ -852,9 +852,8 @@ button.jobcard-thumb:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  /* both tracks may shrink, so a long MATERIAL string wraps instead of
-     widening the card past its container */
-  grid-template-columns: minmax(3.4rem, 5.25rem) minmax(0, 1fr);
+  /* Label track is wide enough for CERTIFICATES on one line. */
+  grid-template-columns: max-content minmax(0, 1fr);
   border-top: 1px solid var(--rule-soft);
 }
 
@@ -880,8 +879,7 @@ button.jobcard-thumb:focus-visible {
   color: var(--ink-soft);
   border-right: 1px solid var(--rule-soft);
   background: rgba(13, 17, 23, 0.022);
-  /* break-word, not anywhere: split a word only when it genuinely can't fit */
-  overflow-wrap: break-word;
+  white-space: nowrap;
 }
 
 .spec dd {
@@ -893,7 +891,7 @@ button.jobcard-thumb:focus-visible {
 /* narrow column (kanban, small screens): tighten type so values keep whole words */
 @container (max-width: 21rem) {
   .spec {
-    grid-template-columns: minmax(2.6rem, 4.7rem) minmax(0, 1fr);
+    grid-template-columns: max-content minmax(0, 1fr);
   }
 
   .parts-list { display: none; }
@@ -992,7 +990,7 @@ button.jobcard-thumb:focus-visible {
    The settings preview draws the same card, so it takes the same metrics. */
 .drawer .spec,
 .card-stage .spec {
-  grid-template-columns: minmax(4.8rem, 6.4rem) minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
 .drawer .spec dt,
@@ -1697,18 +1695,15 @@ button.jobcard-thumb:focus-visible {
   outline-offset: 2px;
 }
 
-.jobcard-deal-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
-  font-size: 0.62rem;
+.jobcard-current-tag {
+  flex: none;
+  font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   background: var(--go, #2f7d4a);
   color: #fff;
-  padding: 0.18rem 0.35rem;
+  padding: 0.14rem 0.35rem;
   border-radius: 3px;
 }
 
@@ -4732,7 +4727,7 @@ button.jobcard-thumb:focus-visible {
   .jobcard-deck-back,
   .jobcard-deck-nav,
   .jobcard-deck-toggle,
-  .jobcard-deal-badge {
+  .jobcard-current-tag {
     display: none !important;
   }
 
