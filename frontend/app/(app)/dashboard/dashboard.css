@@ -180,9 +180,32 @@
 }
 
 .dash-table thead th {
+  position: relative;
   padding: 0;
   border-bottom: 1px solid var(--rule);
   background: rgba(13, 17, 23, 0.025);
+}
+
+.dash-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 2;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.dash-col-resizer:hover,
+.dash-col-resizer[data-active="true"] {
+  background: rgba(13, 17, 23, 0.16);
+}
+
+.dash-table[data-resizing="true"],
+.dash-table[data-resizing="true"] .dash-sort {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* the whole header cell is the sort control */
@@ -261,6 +284,97 @@
   outline: 2px solid var(--signal);
   outline-offset: -2px;
   background: rgba(13, 17, 23, 0.035);
+}
+
+.dash-row-part {
+  background: rgba(13, 17, 23, 0.018);
+}
+
+.dash-row-part:hover {
+  background: rgba(13, 17, 23, 0.04);
+}
+
+.dash-po-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.dash-po-cell .dash-mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-parts-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  height: 1.35rem;
+  padding: 0 0.32rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.dash-parts-toggle:hover {
+  border-color: rgba(13, 17, 23, 0.32);
+  background: #fff;
+}
+
+.dash-parts-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--signal-ring);
+}
+
+.dash-part-index {
+  color: var(--steel);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.dash-tree {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-left: 0.15rem;
+}
+
+.dash-tree-lines {
+  position: relative;
+  flex: 0 0 0.9rem;
+  width: 0.9rem;
+  height: 2.1rem;
+}
+
+.dash-tree-lines::before {
+  content: "";
+  position: absolute;
+  left: 0.32rem;
+  top: -0.55rem;
+  bottom: 0;
+  border-left: 1.5px solid rgba(13, 17, 23, 0.28);
+}
+
+.dash-tree[data-last="true"] .dash-tree-lines::before {
+  bottom: 50%;
+}
+
+.dash-tree-lines::after {
+  content: "";
+  position: absolute;
+  left: 0.32rem;
+  top: 50%;
+  width: 0.55rem;
+  border-top: 1.5px solid rgba(13, 17, 23, 0.28);
 }
 
 /* two-line identifier: job number over part number */

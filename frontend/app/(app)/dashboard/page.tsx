@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 
 import { Avatar } from "@/components/Avatar";
 import { Combobox } from "@/components/Combobox";
@@ -70,6 +78,29 @@ const FALLBACK_STAGES: StageMeta[] = [
 const FILTER_STORAGE_KEY = "po_calendar_dashboard_filter";
 const FILTERS_STORAGE_KEY = "po_calendar_dashboard_filters_v2";
 const SORT_STORAGE_KEY = "po_calendar_dashboard_sort";
+const WIDTHS_STORAGE_KEY = "po_calendar_dashboard_col_widths";
+const MIN_COL_REM = 2.4;
+
+function widthsStorageKey(userId?: string | null): string {
+  return userId ? `${WIDTHS_STORAGE_KEY}:${userId}` : WIDTHS_STORAGE_KEY;
+}
+
+function readStoredWidths(userId?: string | null): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(widthsStorageKey(userId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const n = typeof value === "number" ? value : Number(value);
+      if (key && Number.isFinite(n) && n >= MIN_COL_REM) out[key] = Math.round(n * 100) / 100;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 type ColumnFilters = {
   stage: string;
@@ -250,6 +281,10 @@ export default function DashboardPage() {
   const [query, setQuery] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(DEFAULT_COLUMN_FILTERS);
   const [sort, setSort] = useState(DEFAULT_SORT);
+  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+  const colWidthsRef = useRef<Record<string, number>>({});
+  const [resizingCol, setResizingCol] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
   const [commentPoId, setCommentPoId] = useState<string | null>(null);
@@ -365,6 +400,12 @@ export default function DashboardPage() {
     if (key && (dir === "asc" || dir === "desc")) setSort({ key, dir });
   }, [STAGE_FILTERS]);
 
+  useEffect(() => {
+    const stored = readStoredWidths(user?.id);
+    setColWidths(stored);
+    colWidthsRef.current = stored;
+  }, [user?.id]);
+
   /* The search is the server's, same as the task board: it matches job, PO,
      part, material and customer, and everything below counts what came back. */
   const load = useCallback(async () => {
@@ -394,6 +435,54 @@ export default function DashboardPage() {
       sort.key === key ? { key, dir: sort.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" };
     setSort(next);
     window.localStorage.setItem(SORT_STORAGE_KEY, `${next.key}:${next.dir}`);
+  };
+
+  const widthOf = useCallback(
+    (col: Column) => dashboardColumnWidthStyle(colWidths[col.key] ?? col.widthRem),
+    [colWidths],
+  );
+
+  const startResize = (event: ReactPointerEvent<HTMLSpanElement>, key: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const th = event.currentTarget.closest("th");
+    const startX = event.clientX;
+    const startPx = th?.getBoundingClientRect().width ?? 64;
+    const rootFont = parseFloat(getComputedStyle(globalThis.document.documentElement).fontSize) || 16;
+    setResizingCol(key);
+    const onMove = (ev: PointerEvent) => {
+      const px = Math.max(MIN_COL_REM * rootFont, startPx + ev.clientX - startX);
+      const rem = Math.round((px / rootFont) * 100) / 100;
+      setColWidths((prev) => {
+        const next = { ...prev, [key]: rem };
+        colWidthsRef.current = next;
+        return next;
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setResizingCol(null);
+      try {
+        window.localStorage.setItem(
+          widthsStorageKey(user?.id),
+          JSON.stringify(colWidthsRef.current),
+        );
+      } catch {
+        /* quota / private mode */
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const toggleParts = (poId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(poId)) next.delete(poId);
+      else next.add(poId);
+      return next;
+    });
   };
 
   const statusRank = useMemo(() => {
@@ -515,10 +604,20 @@ export default function DashboardPage() {
     customerOptions,
   ]);
 
-  const open = (po: PurchaseOrder) => {
-    setSelected(po);
+  const open = (po: PurchaseOrder, partIndex?: number) => {
+    setSelected(
+      partIndex != null ? { ...po, display_part_index: partIndex } : po,
+    );
     setDrawerMode("view");
   };
+
+  const tableMinWidth = useMemo(() => {
+    const sum = visibleColumns.reduce((total, col) => {
+      const rem = colWidths[col.key] ?? col.widthRem ?? 6.5;
+      return total + rem;
+    }, 0);
+    return Math.max(sum, 26);
+  }, [visibleColumns, colWidths]);
 
   const upsert = (saved: PurchaseOrder) =>
     setPOs((prev) =>
@@ -658,7 +757,11 @@ export default function DashboardPage() {
 
       <div className="dash-panel">
         <div className="dash-scroll">
-          <table className="dash-table">
+          <table
+            className="dash-table"
+            data-resizing={resizingCol ? "true" : undefined}
+            style={{ minWidth: `${tableMinWidth}rem` }}
+          >
             <thead>
               <tr>
                 {visibleColumns.map((col) => (
@@ -667,7 +770,7 @@ export default function DashboardPage() {
                     scope="col"
                     data-col={col.key}
                     data-numeric={col.numeric ? "true" : undefined}
-                    style={dashboardColumnWidthStyle(col.widthRem)}
+                    style={widthOf(col)}
                     aria-sort={
                       sort.key === col.key
                         ? sort.dir === "asc"
@@ -692,32 +795,84 @@ export default function DashboardPage() {
                       )}
                       <Caret />
                     </button>
+                    <span
+                      className="dash-col-resizer"
+                      data-active={resizingCol === col.key ? "true" : undefined}
+                      title="Drag to resize column"
+                      onPointerDown={(e) => startResize(e, col.key)}
+                    />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((po) => {
+              {rows.flatMap((po) => {
                 const stage = stageMeta.get(po.stage);
-                return (
+                const parts = po.parts ?? [];
+                const partsCount = parts.length;
+                const isOpen = expandedIds.has(po.id) && partsCount > 1;
+                const entries: Array<{
+                  key: string;
+                  face: PurchaseOrder;
+                  kind: "parent" | "child";
+                  partIndex: number | null;
+                  last: boolean;
+                }> = [
+                  {
+                    key: po.id,
+                    face: poShowingPart(po),
+                    kind: "parent",
+                    partIndex: null,
+                    last: false,
+                  },
+                ];
+                if (isOpen) {
+                  parts.forEach((_, i) => {
+                    entries.push({
+                      key: `${po.id}:${i}`,
+                      face: poShowingPart(po, i),
+                      kind: "child",
+                      partIndex: i,
+                      last: i === partsCount - 1,
+                    });
+                  });
+                }
+                return entries.map((entry) => (
                   <tr
-                    key={po.id}
-                    className="dash-row"
+                    key={entry.key}
+                    className={entry.kind === "child" ? "dash-row dash-row-part" : "dash-row"}
                     data-job={po.job_no}
                     data-locked={po.locked}
                     tabIndex={0}
-                    aria-label={`Open ${po.job_no} · ${po.po_number}`}
-                    onClick={() => open(po)}
+                    aria-label={
+                      entry.kind === "child"
+                        ? `Open ${po.job_no} part ${entry.partIndex! + 1} · ${entry.face.part_number}`
+                        : `Open ${po.job_no} · ${po.po_number}`
+                    }
+                    onClick={() =>
+                      open(po, entry.kind === "child" ? entry.partIndex ?? undefined : undefined)
+                    }
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        open(po);
+                        open(po, entry.kind === "child" ? entry.partIndex ?? undefined : undefined);
                       }
                     }}
                   >
                     {visibleColumns.map((col) => {
-                      const widthStyle = dashboardColumnWidthStyle(col.widthRem);
+                      const widthStyle = widthOf(col);
+                      const face = entry.face;
                       if (col.key === "job") {
+                        if (entry.kind === "child") {
+                          return (
+                            <td key="job" data-col="job" style={widthStyle}>
+                              <div className="dash-tree" data-last={entry.last ? "true" : undefined}>
+                                <span className="dash-tree-lines" aria-hidden="true" />
+                                <span className="dash-id-sub">{face.part_number}</span>
+                              </div>
+                            </td>
+                          );
+                        }
                         return (
                           <td key="job" data-col="job" style={widthStyle}>
                             <div className="dash-id">
@@ -733,14 +888,43 @@ export default function DashboardPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="dash-id-sub">{po.part_number}</div>
+                            <div className="dash-id-sub">{face.part_number}</div>
                           </td>
                         );
                       }
                       if (col.key === "po_number") {
+                        if (entry.kind === "child") {
+                          return (
+                            <td key="po_number" data-col="po_number" style={widthStyle}>
+                              <span className="dash-part-index">
+                                Part {entry.partIndex! + 1} of {partsCount}
+                              </span>
+                            </td>
+                          );
+                        }
                         return (
                           <td key="po_number" data-col="po_number" style={widthStyle}>
-                            <span className="dash-mono">{po.po_number}</span>
+                            <div className="dash-po-cell">
+                              <span className="dash-mono">{po.po_number}</span>
+                              {partsCount > 1 && (
+                                <button
+                                  type="button"
+                                  className="dash-parts-toggle"
+                                  aria-expanded={isOpen}
+                                  title={
+                                    isOpen
+                                      ? `Hide ${partsCount} parts`
+                                      : `Show ${partsCount} parts`
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleParts(po.id);
+                                  }}
+                                >
+                                  {isOpen ? "▾" : "▸"} {partsCount}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         );
                       }
@@ -825,7 +1009,7 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "material") {
-                        const material = poShowingPart(po).material;
+                        const material = face.material;
                         return (
                           <td
                             key="material"
@@ -838,7 +1022,7 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "finish") {
-                        const finish = poShowingPart(po).finish;
+                        const finish = face.finish;
                         return (
                           <td
                             key="finish"
@@ -851,7 +1035,7 @@ export default function DashboardPage() {
                         );
                       }
                       if (col.key === "certificates") {
-                        const certificates = poShowingPart(po).certificates;
+                        const certificates = face.certificates;
                         return (
                           <td
                             key="certificates"
@@ -937,14 +1121,14 @@ export default function DashboardPage() {
                       if (col.key === "qty") {
                         return (
                           <td key="qty" data-col="qty" data-numeric="true" style={widthStyle}>
-                            {po.qty}
+                            {face.qty}
                           </td>
                         );
                       }
                       if (col.key === "part_number") {
                         return (
                           <td key="part_number" data-col="part_number" style={widthStyle}>
-                            <span className="dash-mono">{po.part_number}</span>
+                            <span className="dash-mono">{face.part_number}</span>
                           </td>
                         );
                       }
@@ -954,9 +1138,9 @@ export default function DashboardPage() {
                             key="dims"
                             data-col="dims"
                             style={widthStyle}
-                            title={po.dims ?? undefined}
+                            title={face.dims ?? undefined}
                           >
-                            {wrapped(text(po.dims))}
+                            {wrapped(text(face.dims))}
                           </td>
                         );
                       }
@@ -966,14 +1150,14 @@ export default function DashboardPage() {
                             key="mat_dim"
                             data-col="mat_dim"
                             style={widthStyle}
-                            title={po.mat_dim ?? undefined}
+                            title={face.mat_dim ?? undefined}
                           >
-                            {wrapped(text(po.mat_dim))}
+                            {wrapped(text(face.mat_dim))}
                           </td>
                         );
                       }
                       if (col.key === "inspection") {
-                        const label = (po.inspection ?? "").toUpperCase() || null;
+                        const label = (face.inspection ?? "").toUpperCase() || null;
                         return (
                           <td key="inspection" data-col="inspection" style={widthStyle}>
                             {cell(label)}
@@ -983,13 +1167,13 @@ export default function DashboardPage() {
                       if (col.key === "hardware") {
                         return (
                           <td key="hardware" data-col="hardware" style={widthStyle}>
-                            {po.hardware ? "YES" : "NO"}
+                            {face.hardware ? "YES" : "NO"}
                           </td>
                         );
                       }
                       // Custom field column
                       const meta = customs.get(col.key);
-                      const raw = poShowingPart(po).custom_fields?.[col.key];
+                      const raw = face.custom_fields?.[col.key];
                       const display =
                         raw === null || raw === undefined || raw === ""
                           ? null
@@ -1009,7 +1193,7 @@ export default function DashboardPage() {
                       );
                     })}
                   </tr>
-                );
+                ));
               })}
             </tbody>
           </table>
