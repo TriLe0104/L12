@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PurchaseOrder, PODraft, StatusMeta } from "@/lib/types";
 import { api } from "@/lib/api";
@@ -22,17 +22,24 @@ export default function AddPartInline({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<PODraft | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   function close() {
+    if (busyRef.current) return;
     setOpen(false);
     setDraft(null);
     setFile(null);
+    setBusy(false);
   }
 
   async function submitFromDraft() {
+    if (busyRef.current) return;
     if (!draft) return onError("No draft to submit");
     const pn = (draft.part_number ?? "").trim();
     if (!pn) return onError("Part number is required");
+    busyRef.current = true;
+    setBusy(true);
     onStart();
     try {
       let thumbnail_url = draft.thumbnail_url ?? undefined;
@@ -79,8 +86,14 @@ export default function AddPartInline({
       }
 
       onDone(saved, "Part added.");
-      close();
+      busyRef.current = false;
+      setBusy(false);
+      setOpen(false);
+      setDraft(null);
+      setFile(null);
     } catch (err) {
+      busyRef.current = false;
+      setBusy(false);
       onError(err instanceof Error ? err.message : "Add part failed");
     }
   }
@@ -162,7 +175,7 @@ export default function AddPartInline({
           >
             Add part
           </span>
-          <button type="button" className="btn" onClick={close}>
+          <button type="button" className="btn" disabled={busy} onClick={close}>
             Close
           </button>
         </header>
@@ -173,12 +186,19 @@ export default function AddPartInline({
             onChange={(patch) => setDraft((d) => ({ ...(d ?? {}), ...patch }))}
             statuses={statuses}
             hideFields={["po_number"]}
+            disabled={busy}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button type="button" className="btn" onClick={() => void submitFromDraft()}>
-              Add
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() => void submitFromDraft()}
+            >
+              {busy ? "Adding…" : "Add"}
             </button>
-            <button type="button" className="btn" onClick={close}>
+            <button type="button" className="btn" disabled={busy} onClick={close}>
               Cancel
             </button>
           </div>
