@@ -184,7 +184,8 @@ export const api = {
   getTraveler: (poId: string, part?: number | null) =>
     request<{
       fields: Record<string, string | number | null>;
-      saved: Record<string, string | number | null> | null;
+      saved: Record<string, unknown> | null;
+      detached: string[];
     }>(`/api/purchase-orders/${poId}/traveler${part ? `?part=${part}` : ""}`),
   /** Get a single PO by id. */
   getPO: (poId: string) => request<PurchaseOrder>(`/api/purchase-orders/${poId}`),
@@ -194,13 +195,15 @@ export const api = {
     poId: string,
     fields: Record<string, string | number | null>,
     part?: number | null,
+    detached?: string[],
   ) =>
     request<{
       fields: Record<string, string | number | null>;
-      saved: Record<string, string | number | null> | null;
+      saved: Record<string, unknown> | null;
+      detached: string[];
     }>(`/api/purchase-orders/${poId}/traveler${part ? `?part=${part}` : ""}`, {
       method: "PUT",
-      body: JSON.stringify({ fields }),
+      body: JSON.stringify({ fields, detached: detached ?? [] }),
     }),
 
   /** Silent preview fetch (no activity). */
@@ -218,6 +221,7 @@ export const api = {
     fmt: PacketFmt,
     body?: {
       fields?: Record<string, string | number | null>;
+      detached?: string[];
       persist?: boolean;
     },
     opts?: { part?: number; signal?: AbortSignal },

@@ -4597,6 +4597,38 @@ button.jobcard-thumb:focus-visible {
   min-width: 0;
 }
 
+.traveler-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.traveler-override {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--steel);
+  cursor: pointer;
+}
+
+.traveler-override:hover,
+.traveler-override:focus-visible {
+  color: var(--ink);
+}
+
+.traveler-override[data-on="true"] {
+  color: var(--tone-amber);
+}
+
 .traveler-grid .traveler-span {
   grid-column: 1 / -1;
 }

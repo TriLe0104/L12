@@ -241,7 +241,9 @@ class TravelerDraftOut(BaseModel):
     """Merged traveler field map ready for the editor / packet fill."""
 
     fields: dict[str, str | int | float | None]
-    saved: dict[str, str | int | float | None] | None = None
+    saved: dict[str, Any] | None = None
+    # Card-linked keys the user detached from the job card.
+    detached: list[str] = Field(default_factory=list)
 
 
 class DisplayPartUpdate(BaseModel):
@@ -251,15 +253,17 @@ class DisplayPartUpdate(BaseModel):
 
 
 class TravelerDraftUpdate(BaseModel):
-    """Persist editable traveler overrides onto the PO (`traveler_draft` JSON)."""
+    """Persist traveler-only values and any detached card-field overrides."""
 
     fields: dict[str, str | int | float | None]
+    detached: list[str] | None = None
 
 
 class TravelerGenerateBody(BaseModel):
     """Optional field overrides when downloading a packet; may also persist."""
 
     fields: dict[str, str | int | float | None] | None = None
+    detached: list[str] | None = None
     persist: bool = False
 
 

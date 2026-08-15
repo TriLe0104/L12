@@ -128,6 +128,41 @@ TRAVELER_FIELD_KEYS = (
     "status",
 )
 
+# Follow the job card unless the user detaches the field on the traveler.
+CARD_LINKED_KEYS = frozenset(
+    {
+        "work_order",
+        "due_date",
+        "mat_dim",
+        "po_number",
+        "part_name",
+        "part_number",
+        "qty",
+        "finish",
+        "inserts",
+        "material",
+        "inspection",
+        "certificates",
+        "notes",
+        "dims",
+        "customer",
+        "part_of",
+    }
+)
+
+# Traveler-only: never copied from the card, always stored if present.
+TRAVELER_ONLY_KEYS = frozenset(
+    {
+        "sign",
+        "material_spec",
+        "part_marking",
+        "programmer",
+        "program_date",
+    }
+)
+
+DETACHED_META_KEY = "detached"
+
 def _s(value: object | None) -> str:
     if value is None:
         return ""
@@ -366,6 +401,42 @@ def part_draft(po: PurchaseOrder, selected_part_index: int | None) -> dict[str, 
     return saved if isinstance(saved, dict) else {}
 
 
+def draft_overrides(saved: dict[str, Any] | None) -> tuple[list[str], dict[str, Any]]:
+    """Split a stored part draft into (detached card keys, field values).
+
+    New drafts store ``detached: ["certificates", ...]``. Legacy flat maps
+    copied every card field on autosave — those keys follow the card again.
+    Traveler-only values still apply either way.
+    """
+    if not isinstance(saved, dict) or not saved:
+        return [], {}
+    values = {k: v for k, v in saved.items() if k in TRAVELER_FIELD_KEYS}
+    raw = saved.get(DETACHED_META_KEY)
+    if not isinstance(raw, list):
+        return [], values
+    detached = [k for k in raw if isinstance(k, str) and k in CARD_LINKED_KEYS]
+    return detached, values
+
+
+def compose_saved_draft(
+    fields: dict[str, Any] | None,
+    detached: list[str] | None,
+) -> dict[str, Any]:
+    """Persist traveler-only values plus explicitly detached card fields."""
+    values = fields if isinstance(fields, dict) else {}
+    detached_keys = [k for k in (detached or []) if k in CARD_LINKED_KEYS]
+    out: dict[str, Any] = {}
+    for key in TRAVELER_ONLY_KEYS:
+        if key in values:
+            out[key] = values[key]
+    for key in detached_keys:
+        if key in values:
+            out[key] = values[key]
+    if detached_keys:
+        out[DETACHED_META_KEY] = detached_keys
+    return out
+
+
 def set_part_draft(
     po: PurchaseOrder,
     selected_part_index: int | None,
@@ -460,13 +531,15 @@ def draft_from_po(
     }
 
     saved = part_draft(po, selected_part_index)
-    # Saved edits win for user-editable fields; generation metadata always refreshes
-    # on download/preview unless the client posts explicit overrides.
-    editable = {k: v for k, v in saved.items() if k in TRAVELER_FIELD_KEYS and k not in {
-        "generated_by",
-        "generated_at",
-        "created_by",
-    }}
+    detached, saved_values = draft_overrides(saved)
+    # Card-linked fields follow the PO unless the user detached them.
+    # Traveler-only keys (sign, programmer, …) still win from the draft.
+    skip_meta = {"generated_by", "generated_at", "created_by"}
+    editable = {
+        k: v
+        for k, v in saved_values.items()
+        if k not in skip_meta and (k in TRAVELER_ONLY_KEYS or k in detached)
+    }
     merged = {**base, **editable}
     # Drafts saved before part names were cleaned still hold the raw upload name,
     # so strip the CAD extension on the merged value rather than only the base.

@@ -6,9 +6,14 @@ import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { useBoardSettings } from "@/lib/boardSettings";
 import { MATERIAL_FIELD_KEY, selectionOptions } from "@/lib/boardTypes";
+import {
+  isCardLinkedTravelerKey,
+  persistTravelerSlice,
+  type TravelerFieldMap,
+} from "@/lib/traveler";
 import { MaterialCombobox } from "./MaterialCombobox";
 
-type FieldMap = Record<string, string | number | null>;
+type FieldMap = TravelerFieldMap;
 type PacketFmt = "pdf" | "docx" | "xlsx";
 
 const EDIT_FIELDS: { key: string; label: string; multiline?: boolean }[] = [
@@ -61,6 +66,7 @@ export function TravelerPanel({
   part,
   partCount = 0,
   canEditDraft,
+  cardSource,
   onGenerated,
 }: {
   poId: string;
@@ -70,11 +76,15 @@ export function TravelerPanel({
   partCount?: number;
   /** Manager+ on an unlocked order — may persist traveler_draft. */
   canEditDraft: boolean;
+  /** Live job-card values for linked fields. */
+  cardSource?: FieldMap;
   /** Refresh activity after a logged generate. */
   onGenerated?: () => void;
 }) {
   const [fields, setFields] = useState<FieldMap>({});
   const [baseline, setBaseline] = useState<FieldMap>({});
+  const [detached, setDetached] = useState<string[]>([]);
+  const [baselineDetached, setBaselineDetached] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadFmt, setDownloadFmt] = useState<PacketFmt | null>(null);
   const [downloadElapsedMs, setDownloadElapsedMs] = useState(0);
@@ -93,14 +103,29 @@ export function TravelerPanel({
   const { document: boardDocument } = useBoardSettings();
   const materialOptions = selectionOptions(boardDocument, MATERIAL_FIELD_KEY);
   const fieldsRef = useRef<FieldMap>({});
+  const detachedRef = useRef<string[]>([]);
   const dirtyRef = useRef(false);
 
   const dirty = useMemo(
-    () => JSON.stringify(fields) !== JSON.stringify(baseline),
-    [fields, baseline],
+    () =>
+      JSON.stringify(persistTravelerSlice(fields, detached)) !==
+      JSON.stringify(persistTravelerSlice(baseline, baselineDetached)),
+    [fields, detached, baseline, baselineDetached],
   );
   fieldsRef.current = fields;
+  detachedRef.current = detached;
   dirtyRef.current = dirty;
+
+  const displayOf = useCallback(
+    (key: string) => {
+      if (isCardLinkedTravelerKey(key) && !detached.includes(key) && cardSource) {
+        const live = cardSource[key];
+        if (live !== undefined && live !== null) return live;
+      }
+      return fields[key];
+    },
+    [cardSource, detached, fields],
+  );
 
   const downloading = downloadFmt != null;
   const actionsLocked = downloading || previewing;
@@ -112,6 +137,9 @@ export function TravelerPanel({
       const trav = await api.getTraveler(poId, part);
       setFields(trav.fields);
       setBaseline(trav.fields);
+      const nextDetached = trav.detached ?? [];
+      setDetached(nextDetached);
+      setBaselineDetached(nextDetached);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load traveler");
     } finally {
@@ -126,7 +154,7 @@ export function TravelerPanel({
   useEffect(() => {
     return () => {
       if (dirtyRef.current && canEditDraft) {
-        void api.saveTraveler(poId, fieldsRef.current, part).catch(() => {
+        void api.saveTraveler(poId, fieldsRef.current, part, detachedRef.current).catch(() => {
           /* unmount flush — the next load is the source of truth */
         });
       }
@@ -216,20 +244,38 @@ export function TravelerPanel({
     }));
   };
 
+  const toggleOverride = (key: string) => {
+    if (!canEditDraft || !isCardLinkedTravelerKey(key)) return;
+    setNote(null);
+    if (detached.includes(key)) {
+      setDetached((prev) => prev.filter((k) => k !== key));
+      return;
+    }
+    setFields((prev) => ({ ...prev, [key]: displayOf(key) ?? "" }));
+    setDetached((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  };
+
   async function saveDraft() {
     if (!canEditDraft) return;
     const snap = fieldsRef.current;
+    const snapDetached = detachedRef.current;
     setSaving(true);
     setError(null);
     try {
-      const res = await api.saveTraveler(poId, snap, part);
-      if (JSON.stringify(fieldsRef.current) === JSON.stringify(snap)) {
+      const res = await api.saveTraveler(poId, snap, part, snapDetached);
+      if (
+        JSON.stringify(persistTravelerSlice(fieldsRef.current, detachedRef.current)) ===
+        JSON.stringify(persistTravelerSlice(snap, snapDetached))
+      ) {
         setFields(res.fields);
         setBaseline(res.fields);
+        const nextDetached = res.detached ?? [];
+        setDetached(nextDetached);
+        setBaselineDetached(nextDetached);
       } else {
         setBaseline(snap);
+        setBaselineDetached(snapDetached);
       }
-      setNote("Saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -263,10 +309,13 @@ export function TravelerPanel({
 
     try {
       if (canEditDraft && dirty) {
-        const res = await api.saveTraveler(poId, fields, part);
+        const res = await api.saveTraveler(poId, fields, part, detached);
         if (ac.signal.aborted) return;
         setFields(res.fields);
         setBaseline(res.fields);
+        const nextDetached = res.detached ?? [];
+        setDetached(nextDetached);
+        setBaselineDetached(nextDetached);
       }
       // GET /traveler/pdf → same template-overlay PDF as Download.
       const { blob } = await api.previewTraveler(poId, "pdf", { part, signal: ac.signal });
@@ -300,10 +349,14 @@ export function TravelerPanel({
         : `Preparing ${fmt.toUpperCase()}…`,
     );
     try {
+      const liveFields = { ...fields };
+      for (const key of Object.keys(cardSource ?? {})) {
+        if (!detached.includes(key)) liveFields[key] = displayOf(key) ?? liveFields[key];
+      }
       const { blob, filename } = await api.generateTraveler(
         poId,
         fmt,
-        { fields, persist: canEditDraft },
+        { fields: liveFields, detached, persist: canEditDraft },
         { part, signal: ac.signal },
       );
       if (ac.signal.aborted) return;
@@ -313,6 +366,9 @@ export function TravelerPanel({
         if (ac.signal.aborted) return;
         setFields(res.fields);
         setBaseline(res.fields);
+        const nextDetached = res.detached ?? [];
+        setDetached(nextDetached);
+        setBaselineDetached(nextDetached);
       }
       setNote(`Downloaded ${fmt.toUpperCase()} for ${jobNo}.`);
       onGenerated?.();
@@ -395,9 +451,9 @@ export function TravelerPanel({
         >
           Excel
         </button>
-        {canEditDraft && (
+        {canEditDraft && (dirty || saving) && (
           <span className="traveler-autosave" role="status">
-            {dirty || saving ? "Saving…" : "Saved."}
+            Saving…
           </span>
         )}
       </div>
@@ -428,34 +484,53 @@ export function TravelerPanel({
       )}
 
       <div className="traveler-grid">
-        {EDIT_FIELDS.map((f) => (
-          <label key={f.key} className={f.multiline ? "traveler-span" : undefined}>
-            <span>{f.label}</span>
-            {f.multiline ? (
-              <textarea
-                className="cell-input"
-                rows={3}
-                value={String(fields[f.key] ?? "")}
-                disabled={!canEditDraft}
-                onChange={(e) => patch(f.key, e.target.value)}
-              />
-            ) : f.key === "material" ? (
-              <MaterialCombobox
-                value={String(fields.material ?? "") || null}
-                disabled={!canEditDraft}
-                options={materialOptions}
-                onChange={(material) => patch("material", material ?? "")}
-              />
-            ) : (
-              <input
-                className="cell-input"
-                value={String(fields[f.key] ?? "")}
-                disabled={!canEditDraft}
-                onChange={(e) => patch(f.key, e.target.value)}
-              />
-            )}
-          </label>
-        ))}
+        {EDIT_FIELDS.map((f) => {
+          const linked = isCardLinkedTravelerKey(f.key);
+          const overridden = detached.includes(f.key);
+          const linkedToCard = linked && !overridden;
+          const value = String(displayOf(f.key) ?? "");
+          const locked = !canEditDraft || linkedToCard;
+          return (
+            <label key={f.key} className={f.multiline ? "traveler-span" : undefined}>
+              <span className="traveler-field-head">
+                <span>{f.label}</span>
+                {linked && canEditDraft && (
+                  <button
+                    type="button"
+                    className="traveler-override"
+                    data-on={overridden ? "true" : "false"}
+                    onClick={() => toggleOverride(f.key)}
+                  >
+                    {overridden ? "Follow card" : "Override"}
+                  </button>
+                )}
+              </span>
+              {f.multiline ? (
+                <textarea
+                  className="cell-input"
+                  rows={3}
+                  value={value}
+                  disabled={locked}
+                  onChange={(e) => patch(f.key, e.target.value)}
+                />
+              ) : f.key === "material" ? (
+                <MaterialCombobox
+                  value={value || null}
+                  disabled={locked}
+                  options={materialOptions}
+                  onChange={(material) => patch("material", material ?? "")}
+                />
+              ) : (
+                <input
+                  className="cell-input"
+                  value={value}
+                  disabled={locked}
+                  onChange={(e) => patch(f.key, e.target.value)}
+                />
+              )}
+            </label>
+          );
+        })}
       </div>
 
       {previewOpen &&

@@ -2,7 +2,13 @@
   python test_part_drafts.py
 """
 
-from app.traveler import part_draft, read_part_drafts, set_part_draft
+from app.traveler import (
+    compose_saved_draft,
+    draft_overrides,
+    part_draft,
+    read_part_drafts,
+    set_part_draft,
+)
 
 
 class FakePO:
@@ -29,10 +35,39 @@ def test_set_part_draft_does_not_clobber_sibling():
     assert part_draft(po, 1)["notes"] == "second"
 
 
+def test_legacy_draft_follows_card():
+    detached, values = draft_overrides({"certificates": "old", "programmer": "Pat"})
+    assert detached == []
+    assert values["certificates"] == "old"
+    assert values["programmer"] == "Pat"
+
+
+def test_compose_keeps_only_overrides():
+    stored = compose_saved_draft(
+        {
+            "certificates": "MAT CERT",
+            "material": "6061",
+            "programmer": "Alex",
+            "part_number": "X",
+        },
+        ["certificates"],
+    )
+    assert stored["detached"] == ["certificates"]
+    assert stored["certificates"] == "MAT CERT"
+    assert stored["programmer"] == "Alex"
+    assert "material" not in stored
+    assert "part_number" not in stored
+    detached, values = draft_overrides(stored)
+    assert detached == ["certificates"]
+    assert values["certificates"] == "MAT CERT"
+
+
 def main() -> None:
     test_legacy_flat_maps_to_part_zero()
     test_keyed_maps_stay_per_part()
     test_set_part_draft_does_not_clobber_sibling()
+    test_legacy_draft_follows_card()
+    test_compose_keeps_only_overrides()
     print("OK part drafts")
 
 

@@ -1231,7 +1231,8 @@ def get_traveler(
     selected_idx = _traveler_part_index(po, part)
     fields = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_idx)
     saved = traveler_svc.part_draft(po, selected_idx) or None
-    return TravelerDraftOut(fields=fields, saved=saved)
+    detached, _ = traveler_svc.draft_overrides(saved)
+    return TravelerDraftOut(fields=fields, saved=saved, detached=detached)
 
 
 @router.put("/{po_id}/traveler", response_model=TravelerDraftOut)
@@ -1247,11 +1248,14 @@ def put_traveler(
     _guard_locked(po, actor)
     selected_idx = _traveler_part_index(po, part)
     normalised = traveler_svc.normalize_draft(payload.fields)
-    traveler_svc.set_part_draft(po, selected_idx, normalised or None)
+    stored = traveler_svc.compose_saved_draft(normalised, payload.detached)
+    traveler_svc.set_part_draft(po, selected_idx, stored or None)
     db.commit()
     db.refresh(po)
     fields = traveler_svc.draft_from_po(db, po, actor=actor, selected_part_index=selected_idx)
-    return TravelerDraftOut(fields=fields, saved=traveler_svc.part_draft(po, selected_idx) or None)
+    saved = traveler_svc.part_draft(po, selected_idx) or None
+    detached, _ = traveler_svc.draft_overrides(saved)
+    return TravelerDraftOut(fields=fields, saved=saved, detached=detached)
 
 
 @router.get("/{po_id}/traveler/{fmt}")
@@ -1322,7 +1326,13 @@ def generate_traveler(
             )
         _guard_locked(po, actor)
         traveler_svc.set_part_draft(
-            po, selected_idx, traveler_svc.normalize_draft(body.fields) or None
+            po,
+            selected_idx,
+            traveler_svc.compose_saved_draft(
+                traveler_svc.normalize_draft(body.fields),
+                body.detached,
+            )
+            or None,
         )
     fields = _merged_traveler_fields(db, po, actor, body.fields, selected_part_index=selected_idx)
     _log(

@@ -13,6 +13,7 @@ import {
   useAuth,
 } from "@/lib/auth";
 import { changedFields } from "@/lib/dirty";
+import { cardToTravelerSource } from "@/lib/traveler";
 import type { ActivityItem, PODraft, PurchaseOrder, StatusMeta } from "@/lib/types";
 import { ActivityList } from "./ActivityList";
 import { CardEditor } from "./CardEditor";
@@ -454,11 +455,11 @@ export function PODrawer({
                 >
                   {busy ? "Saving…" : "Create PO"}
                 </button>
-              ) : (
-                <span role="status" style={{ fontSize: "0.75rem", color: "var(--go)" }}>
-                  {dirty ? "Saving…" : savedNote ?? "Saved."}
+              ) : dirty ? (
+                <span role="status" style={{ fontSize: "0.75rem", color: "var(--steel)" }}>
+                  Saving…
                 </span>
-              )}
+              ) : null}
               {modifiable && !creating && record && (
                 <button
                   className="btn btn-danger"
@@ -485,6 +486,11 @@ export function PODrawer({
                 part={selectedPartIndex != null ? selectedPartIndex + 1 : undefined}
                 partCount={Array.isArray(record.parts) ? record.parts.length : 0}
                 canEditDraft={modifiable}
+                cardSource={cardToTravelerSource(
+                  draft,
+                  selectedPartIndex,
+                  Array.isArray(record.parts) ? record.parts.length : 0,
+                )}
                 onGenerated={() => void loadActivity(record.id)}
               />
               <div className="section-label">
