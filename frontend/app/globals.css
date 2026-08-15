@@ -822,21 +822,20 @@ textarea {
 }
 
 .jobcard-body {
-  display: block;
+  display: flex;
+  gap: 0.6rem;
   padding: 0.6rem 0.75rem 0.75rem;
   min-width: 0;
-  overflow: auto;
 }
 
 .jobcard-thumb {
-  float: left;
-  width: 32%;
-  max-width: 11rem;
-  min-width: 4.75rem;
+  width: 42%;
+  flex: 0 0 42%;
+  max-width: 13.5rem;
+  min-width: 7.25rem;
   aspect-ratio: 1;
   height: auto;
-  min-height: 4.75rem;
-  margin: 0 0.65rem 0.4rem 0;
+  min-height: 7.25rem;
   border: 1px solid var(--rule-soft);
   border-radius: 3px;
   background:
@@ -847,6 +846,7 @@ textarea {
   font-family: var(--font-mono), monospace;
   font-size: 0.56rem;
   letter-spacing: 0.1em;
+  align-self: flex-start;
   object-fit: cover;
   position: relative;
 }
@@ -907,19 +907,17 @@ button.jobcard-thumb:focus-visible {
 }
 
 .spec {
-  display: block;
+  flex: 1 1 auto;
   min-width: 0;
+  display: grid;
+  /* Label track is wide enough for CERTIFICATES on one line. */
+  grid-template-columns: max-content minmax(0, 1fr);
   border-top: 1px solid var(--rule-soft);
 }
 
-/* Real rows (not display:contents) so they shrink beside a floated photo
-   and then take the full card width once they wrap under it. */
+/* Wrapper so field order can be mapped without breaking the 2-col grid. */
 .spec-pair {
-  display: flex;
-  align-items: flex-start;
-  overflow: hidden;
-  min-width: 0;
-  border-bottom: 1px solid var(--rule-soft);
+  display: contents;
 }
 
 .spec dt,
@@ -927,12 +925,12 @@ button.jobcard-thumb:focus-visible {
   margin: 0;
   min-width: 0;
   padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--rule-soft);
   font-size: 0.75rem;
   line-height: 1.35;
 }
 
 .spec dt {
-  flex: 0 0 auto;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -943,16 +941,17 @@ button.jobcard-thumb:focus-visible {
 }
 
 .spec dd {
-  flex: 1 1 auto;
   font-weight: 600;
   overflow-wrap: break-word;
-  word-break: normal;
-  white-space: normal;
   text-wrap: pretty;
 }
 
 /* narrow column (kanban, small screens): tighten type so values keep whole words */
 @container (max-width: 21rem) {
+  .spec {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
   .parts-list { display: none; }
 }
 
@@ -1006,12 +1005,13 @@ button.jobcard-thumb:focus-visible {
 /* the smallest zoom step of the all-cards view: below this the label track was
    claiming more room than the values it labels, so give the values the width */
 @container (max-width: 15rem) {
+  .spec {
+    grid-template-columns: minmax(2.4rem, 4.35rem) minmax(0, 1fr);
+  }
   .spec dt {
     letter-spacing: 0;
     padding-left: 0.22rem;
     padding-right: 0.22rem;
-    max-width: 4.35rem;
-    white-space: normal;
   }
   .spec dd {
     padding-left: 0.28rem;
@@ -1022,9 +1022,24 @@ button.jobcard-thumb:focus-visible {
   }
 }
 
+/* roomy column: let the labels breathe */
+@container (min-width: 30rem) {
+  .spec {
+    grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  @container (min-width: 21rem) and (max-width: 30rem) {
+    .spec {
+      grid-template-columns: minmax(3.4rem, 6.4rem) minmax(0, 1fr);
+    }
+  }
+}
+
 .drawer .spec,
 .card-stage .spec {
-  display: block;
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
 .drawer .spec dt,
@@ -2671,12 +2686,12 @@ button.jobcard-thumb:focus-visible {
   /* the one place the media column's width is stated; the size steps re-state
      it and both wells follow */
   --well: 5.25rem;
-  float: left;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  align-self: flex-start;
+  flex: 0 0 var(--well);
   width: var(--well);
-  margin: 0 0.65rem 0.4rem 0;
 }
 
 /* A strip rather than a second square: the model is identified by name and
@@ -3683,19 +3698,19 @@ button.jobcard-thumb:focus-visible {
    because a kanban card is now as wide on a phone as it is on a desktop, and its
    height belongs to the next card in the column, not to a hero image. */
 @media (max-width: 420px) {
+  :is(.board-all, .drawer, .card-stage) .jobcard-body {
+    flex-direction: column;
+  }
   :is(.board-all, .drawer, .card-stage) .jobcard-thumb {
-    float: none;
     width: 100%;
+    flex-basis: auto;
     max-width: none;
     min-width: 0;
     height: 9.5rem;
-    margin: 0 0 0.4rem;
   }
   .card-wells {
-    float: none;
     --well: 100%;
-    width: 100%;
-    margin: 0 0 0.4rem;
+    flex-basis: auto;
   }
   .card-wells .thumb-drop {
     height: 6.5rem;
@@ -4914,28 +4929,27 @@ button.jobcard-thumb:focus-visible {
   }
 
   .print-card-face .jobcard-body {
-    display: block;
-    overflow: auto;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.25rem;
     padding: 0.15rem 0.25rem 0.18rem;
   }
 
   .print-card-face .jobcard-thumb {
-    float: left;
     width: 28%;
+    flex: 0 0 28%;
     max-width: 22mm;
     min-width: 0;
     min-height: 0;
     aspect-ratio: 1;
-    margin: 0 0.3rem 0.2rem 0;
   }
 
   .print-card-face .spec {
-    display: block;
+    flex: 1 1 auto;
     min-width: 0;
-  }
-
-  .print-card-face .spec-pair {
-    overflow: hidden;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
   }
 
   .print-card-face .spec dt,
