@@ -1140,7 +1140,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         clip_x = x - width / 2 if align == "center" else x
         clip_y = 792 - (y1 + height / 2)
         c.saveState()
-        c.clipRect(clip_x, clip_y, width, height)
+        path = c.beginPath()
+        path.rect(clip_x, clip_y, width, height)
+        c.clipPath(path, stroke=0, fill=0)
         _draw_lines(rows, x, y1, font=font, size=size_try, width=width, align=align, leading=leading)
         c.restoreState()
 
@@ -1191,7 +1193,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             clip_x = x - width / 2
             clip_y = 792 - (y1 + height / 2)
             c.saveState()
-            c.clipRect(clip_x, clip_y, width, height)
+            path = c.beginPath()
+            path.rect(clip_x, clip_y, width, height)
+            c.clipPath(path, stroke=0, fill=0)
             _draw_lines(
                 shown,
                 x,
