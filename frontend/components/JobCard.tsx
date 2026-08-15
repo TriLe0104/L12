@@ -332,23 +332,29 @@ export function JobCard({
           )}
 
           <dl className="spec">
-            {displayFields.map((f) => (
-              <div key={f.key} className="spec-pair">
-                <dt>{f.label}</dt>
-                <dd className={f.kind === "builtin" ? builtinClass(f.key, face) : ""}>
-                  {f.kind === "builtin" && f.key === "priority" ? (
-                    <PriorityTag
-                      priority={face.priority}
-                      label={face.priority_label || face.priority.toUpperCase()}
-                    />
-                  ) : f.kind === "builtin" ? (
-                    builtinValue(face, f.key)
-                  ) : (
-                    customValue(face, f.key, customs.get(f.key))
-                  )}
-                </dd>
-              </div>
-            ))}
+            {displayFields.map((f) => {
+              const text =
+                f.kind === "builtin" && f.key === "priority"
+                  ? face.priority_label || face.priority.toUpperCase()
+                  : f.kind === "builtin"
+                    ? builtinValue(face, f.key)
+                    : customValue(face, f.key, customs.get(f.key));
+              return (
+                <div key={f.key} className="spec-pair">
+                  <dt>{f.label}</dt>
+                  <dd
+                    className={f.kind === "builtin" ? builtinClass(f.key, face) : ""}
+                    title={text || undefined}
+                  >
+                    {f.kind === "builtin" && f.key === "priority" ? (
+                      <PriorityTag priority={face.priority} label={text} />
+                    ) : (
+                      text
+                    )}
+                  </dd>
+                </div>
+              );
+            })}
           </dl>
         </div>
 

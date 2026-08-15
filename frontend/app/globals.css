@@ -853,7 +853,7 @@ button.jobcard-thumb:focus-visible {
 }
 
 .spec {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   display: grid;
   /* Label track is wide enough for CERTIFICATES on one line. */
@@ -888,8 +888,10 @@ button.jobcard-thumb:focus-visible {
 
 .spec dd {
   font-weight: 600;
-  overflow-wrap: break-word;
-  text-wrap: pretty;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 /* narrow column (kanban, small screens): tighten type so values keep whole words */
@@ -4809,11 +4811,12 @@ button.jobcard-thumb:focus-visible {
     padding: 0;
   }
 
-  /* ---------- task cards: two wide faces per landscape sheet ---------- */
+  /* ---------- task cards: two natural-size faces per landscape sheet ---------- */
   .print-card-sheet {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 5mm;
+    align-items: start;
     width: 100%;
   }
 
@@ -4822,100 +4825,23 @@ button.jobcard-thumb:focus-visible {
   }
 
   .print-card-face {
-    display: flex;
-    flex-direction: column;
-    /* Half a landscape letter/A4 content box minus the 5mm pair gap. */
-    min-height: 94mm;
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  .print-card-face:last-child:nth-child(odd) {
-    min-height: 193mm;
-  }
-
   .print-card-face .jobcard {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 100%;
-    height: 100%;
     box-shadow: none;
     border-color: #888;
-    overflow: visible;
-    break-inside: avoid;
-  }
-
-  .print-card-face .jobcard-head {
-    flex: none;
-    padding: 0.45rem 0.7rem;
-  }
-
-  .print-card-face .jobcard-job {
-    font-size: 16pt;
-  }
-
-  .print-card-face .jobcard-due {
-    font-size: 11pt;
-  }
-
-  .print-card-face .jobcard-body {
-    flex: 1 1 auto;
-    min-height: 0;
-    align-items: stretch;
-    gap: 0.75rem;
-    padding: 0.55rem 0.7rem 0.6rem;
-  }
-
-  /* Photo takes the leftover height so the part stays readable; contain
-     keeps the whole image, never a cropped sliver. */
-  .print-card-face .jobcard-thumb {
-    width: auto;
-    flex: 0 1 44%;
-    max-width: none;
-    min-width: 10rem;
-    min-height: 0;
     height: auto;
-    aspect-ratio: auto;
-    align-self: stretch;
   }
 
-  .print-card-face button.jobcard-thumb > img,
-  .print-card-face .jobcard-thumb > img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: center;
-    background: #eef1f4;
-  }
-
-  .print-card-face .spec {
-    flex: 1 1 56%;
-    min-width: 0;
-    align-content: start;
-    border-top: 0;
-    grid-template-columns: max-content minmax(0, 1fr);
+  .print-card-face .jobcard-thumb {
+    max-width: 11rem;
   }
 
   .print-card-face .spec dt,
   .print-card-face .spec dd {
-    font-size: 10pt;
-    line-height: 1.3;
-    padding: 0.2rem 0.45rem;
-  }
-
-  .print-card-face .jobcard-note {
-    flex: none;
     font-size: 9.5pt;
-    padding: 0.4rem 0.7rem;
-  }
-
-  .print-card-face .jobcard-status {
-    flex: none;
-  }
-
-  .print-card-face .jobcard-status b {
-    font-size: 10pt;
   }
 
   /* ---------- dashboard: every column, wrap instead of ellipsis ---------- */
