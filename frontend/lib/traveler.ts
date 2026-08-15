@@ -84,14 +84,14 @@ export function cardToTravelerSource(
 export function persistTravelerSlice(
   fields: TravelerFieldMap,
   detached: string[],
-): TravelerFieldMap & { detached: string[] } {
+): { detached: string[]; values: TravelerFieldMap } {
   const keys = detached.filter((k) => LINKED.has(k)).sort();
-  const out: TravelerFieldMap & { detached: string[] } = { detached: keys };
+  const values: TravelerFieldMap = {};
   for (const key of TRAVELER_ONLY_KEYS) {
-    out[key] = fields[key] ?? "";
+    values[key] = fields[key] ?? "";
   }
   for (const key of keys) {
-    out[key] = fields[key] ?? "";
+    values[key] = fields[key] ?? "";
   }
-  return out;
+  return { detached: keys, values };
 }
