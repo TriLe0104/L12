@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 5
+OVERLAY_VERSION = 6
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1178,9 +1178,11 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         width: float,
         height: float,
         size: float = 10.5,
+        cv: Any = None,
     ) -> str | None:
-        """Fill the page-1 Notes cell at a readable size. Leftover text is
-        returned so the caller can append extra pages."""
+        """Fill a Notes cell at a readable size. Leftover text is returned
+        so the caller can append another Notes box."""
+        target = cv or c
         text = _s(value)
         if not text:
             return None
@@ -1192,22 +1194,47 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         if shown:
             clip_x = x - width / 2
             clip_y = 792 - (y1 + height / 2)
-            c.saveState()
-            path = c.beginPath()
+            target.saveState()
+            path = target.beginPath()
             path.rect(clip_x, clip_y, width, height)
-            c.clipPath(path, stroke=0, fill=0)
-            _draw_lines(
-                shown,
-                x,
-                y1,
-                font=regular,
-                size=size,
-                width=width,
-                align="center",
-                leading=leading,
-            )
-            c.restoreState()
+            target.clipPath(path, stroke=0, fill=0)
+            block = leading * max(len(shown) - 1, 0)
+            start = y1 - block / 2
+            for index, row in enumerate(shown):
+                target.setFont(regular, size)
+                py = 792 - start - leading * index + size * 0.22
+                target.drawCentredString(x, py, row)
+            target.restoreState()
         return leftover or None
+
+    def draw_notes_sheet(cv: Any, leftover: str) -> str | None:
+        """Same Notes header + boxed cell as page 1, tall enough for a page."""
+        x0, x1 = 37.0, 575.1
+        header_top, header_h = 48.0, 28.0
+        value_top = header_top + header_h
+        value_bot = 750.0
+        box_w = x1 - x0
+        header_pdf_y = 792 - (header_top + header_h)
+        value_h = value_bot - value_top
+        value_pdf_y = 792 - value_bot
+        cv.setFillColorRGB(0.80, 0.80, 0.80)
+        cv.rect(x0, header_pdf_y, box_w, header_h, stroke=0, fill=1)
+        cv.setStrokeColorRGB(0, 0, 0)
+        cv.setLineWidth(0.9)
+        cv.rect(x0, header_pdf_y, box_w, header_h, stroke=1, fill=0)
+        cv.rect(x0, value_pdf_y, box_w, value_h, stroke=1, fill=0)
+        cv.setFillColorRGB(0, 0, 0)
+        cv.setFont(bold, 11)
+        cv.drawCentredString((x0 + x1) / 2, header_pdf_y + 9, "Notes")
+        return notes_in_box(
+            leftover,
+            (x0 + x1) / 2,
+            (value_top + value_bot) / 2,
+            width=box_w - 16,
+            height=value_h - 12,
+            size=10,
+            cv=cv,
+        )
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
     # column centres are taken from the rendered headings and every data value
@@ -1278,18 +1305,19 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.showPage()
 
-    # Excel Part 555. Every input cell here is centre-aligned in the workbook,
-    # so values are centred on the merged cell bounded by the printed rules.
-    center(fields.get("work_order"), 443.7, 67.94, size=10.56, width=112, height=16)
-    center(fields.get("po_number"), 391.3, 84.26, font=bold, size=11.52, width=105, height=16)
-    center(_traveler_date(fields.get("due_date")), 511.0, 84.26, size=11.52, width=68, height=16)
-    center(fields.get("part_number"), 404.9, 99.02, font=bold, size=11.52, width=132, height=16)
-    center(fields.get("qty"), 532.4, 99.50, font=bold, size=11.52, width=28, height=16)
-    center(fields.get("material"), 456.0, 120.74, font=bold, size=10.56, width=176, height=18)
-    center(fields.get("material_spec") or "Per Drawing", 456.0, 146.54, size=10.56, width=176, height=18)
+    # Excel Part 555 header cells are ~15pt tall. Keep type at 8.5pt and
+    # centre on the value cell, not the label baseline, so WORK ORDER / PO /
+    # Part / QTY stay inside the rules.
+    center(fields.get("work_order"), 443.7, 62.7, size=8.5, width=114, height=13)
+    center(fields.get("po_number"), 391.3, 78.0, font=bold, size=8.5, width=106, height=13)
+    center(_traveler_date(fields.get("due_date")), 511.5, 78.0, size=8.5, width=70, height=13)
+    center(fields.get("part_number"), 404.9, 93.2, font=bold, size=8.5, width=132, height=13)
+    center(fields.get("qty"), 532.6, 93.2, font=bold, size=9, width=28, height=13)
+    center(fields.get("material"), 456.5, 119.3, font=bold, size=9, width=176, height=20)
+    center(fields.get("material_spec") or "Per Drawing", 456.5, 141.3, size=9, width=176, height=18)
     program_date = _traveler_date(fields.get("program_date"))
     if program_date:
-        center(program_date, 516.4, 205.34, size=10.56, width=58, height=16)
+        center(program_date, 516.9, 199.7, size=8, width=58, height=13)
     center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120, height=14)
     c.showPage()
 
@@ -1317,45 +1345,14 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         page.merge_page(overlay_reader.pages[index])
         writer.add_page(page)
 
-    # If notes overflowed the page-1 cell, append as many continuation pages
-    # as needed so nothing is clipped.
-    if notes_overflow_text:
+    # Overflow notes get another Notes header + boxed cell on a new page,
+    # same treatment as page 1 — not a freeform continuation sheet.
+    leftover = notes_overflow_text
+    while leftover:
         extra_buf = io.BytesIO()
         ext_c = canvas.Canvas(extra_buf, pagesize=(612, 792))
-        font_size = 11
-        left_margin = 48
-        usable_width = 612 - left_margin * 2
-        wrapped_lines = _wrap_rows(notes_overflow_text, regular, font_size, usable_width)
-        leading = 15
-        job = _s(fields.get("work_order"))
-        part = _s(fields.get("part_number"))
-        po_number = _s(fields.get("po_number"))
-        idx = 0
-        page_no = 0
-        while idx < len(wrapped_lines):
-            page_no += 1
-            y = 792 - 48
-            ext_c.setFont(bold, 13)
-            ext_c.drawString(left_margin, y, "Notes (continued)")
-            y -= 16
-            ext_c.setFont(regular, 9)
-            meta = "  ·  ".join(p for p in (job, part, po_number) if p)
-            if meta:
-                ext_c.drawString(left_margin, y, meta)
-                y -= 10
-            ext_c.setStrokeColorRGB(0.75, 0.78, 0.82)
-            ext_c.line(left_margin, y, 612 - left_margin, y)
-            y -= 18
-            ext_c.setFillColorRGB(0, 0, 0)
-            ext_c.setFont(regular, font_size)
-            while idx < len(wrapped_lines) and y > 52:
-                ext_c.drawString(left_margin, y, wrapped_lines[idx])
-                y -= leading
-                idx += 1
-            ext_c.setFont(regular, 8)
-            ext_c.setFillColorRGB(0.35, 0.38, 0.42)
-            ext_c.drawRightString(612 - left_margin, 28, f"Notes page {page_no}")
-            ext_c.showPage()
+        leftover = draw_notes_sheet(ext_c, leftover)
+        ext_c.showPage()
         ext_c.save()
         extra_reader = PdfReader(io.BytesIO(extra_buf.getvalue()))
         for p in extra_reader.pages:
