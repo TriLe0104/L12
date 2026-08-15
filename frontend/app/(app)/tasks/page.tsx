@@ -471,7 +471,9 @@ export default function TasksPage() {
           const n = po.parts?.length ?? 0;
           const faces = n > 1 ? po.parts!.map((_, i) => poShowingPart(po, i)) : [po];
           return faces.map((face, i) => (
-            <JobCard key={`${po.id}:${i}`} po={face} hideParts />
+            <div key={`${po.id}:${i}`} className="print-card-face">
+              <JobCard po={face} hideParts density="l" />
+            </div>
           ));
         })}
       </div>

@@ -410,16 +410,23 @@
   }
 
   .dash-row-part td {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
+    padding-top: 0.28rem;
+    padding-bottom: 0.28rem;
     line-height: inherit;
     pointer-events: none;
   }
 
   .dash-part-clip {
-    grid-template-rows: 1fr;
+    display: block;
+    grid-template-rows: none;
     opacity: 1;
     transform: none;
+    overflow: visible;
+  }
+
+  .dash-part-inner {
+    min-height: 1.4rem;
+    overflow: visible;
   }
 }
 

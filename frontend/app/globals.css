@@ -4753,7 +4753,26 @@ button.jobcard-thumb:focus-visible {
   display: none;
 }
 
+/* Shop-floor print: landscape so a card's photo + spec table (or every
+   dashboard column) can use the sheet. */
+@page {
+  size: landscape;
+  margin: 7mm;
+}
+
 @media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
   .rail,
   .head-tools,
   .dash-filters,
@@ -4774,24 +4793,9 @@ button.jobcard-thumb:focus-visible {
     overflow: visible;
   }
 
-  .page-head {
-    margin-bottom: 0.75rem;
-  }
-
   .kanban,
   .board-all {
     display: none !important;
-  }
-
-  .print-card-sheet {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.7rem;
-  }
-
-  .print-card-sheet .jobcard {
-    break-inside: avoid;
-    box-shadow: none;
   }
 
   .jobcard-deck-back,
@@ -4805,16 +4809,200 @@ button.jobcard-thumb:focus-visible {
     padding: 0;
   }
 
-  .dash-panel {
-    box-shadow: none;
-    border-color: #bbb;
+  /* ---------- task cards: two wide faces per landscape sheet ---------- */
+  .print-card-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 5mm;
+    width: 100%;
   }
 
-  .dash-scroll {
+  body:has(.print-card-sheet) .page-head {
+    display: none !important;
+  }
+
+  .print-card-face {
+    display: flex;
+    flex-direction: column;
+    /* Half a landscape letter/A4 content box minus the 5mm pair gap. */
+    min-height: 94mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-card-face:last-child:nth-child(odd) {
+    min-height: 193mm;
+  }
+
+  .print-card-face .jobcard {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    height: 100%;
+    box-shadow: none;
+    border-color: #888;
+    overflow: visible;
+    break-inside: avoid;
+  }
+
+  .print-card-face .jobcard-head {
+    flex: none;
+    padding: 0.45rem 0.7rem;
+  }
+
+  .print-card-face .jobcard-job {
+    font-size: 16pt;
+  }
+
+  .print-card-face .jobcard-due {
+    font-size: 11pt;
+  }
+
+  .print-card-face .jobcard-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.55rem 0.7rem 0.6rem;
+  }
+
+  /* Photo takes the leftover height so the part stays readable; contain
+     keeps the whole image, never a cropped sliver. */
+  .print-card-face .jobcard-thumb {
+    width: auto;
+    flex: 0 1 44%;
+    max-width: none;
+    min-width: 10rem;
+    min-height: 0;
+    height: auto;
+    aspect-ratio: auto;
+    align-self: stretch;
+  }
+
+  .print-card-face button.jobcard-thumb > img,
+  .print-card-face .jobcard-thumb > img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    background: #eef1f4;
+  }
+
+  .print-card-face .spec {
+    flex: 1 1 56%;
+    min-width: 0;
+    align-content: start;
+    border-top: 0;
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .print-card-face .spec dt,
+  .print-card-face .spec dd {
+    font-size: 10pt;
+    line-height: 1.3;
+    padding: 0.2rem 0.45rem;
+  }
+
+  .print-card-face .jobcard-note {
+    flex: none;
+    font-size: 9.5pt;
+    padding: 0.4rem 0.7rem;
+  }
+
+  .print-card-face .jobcard-status {
+    flex: none;
+  }
+
+  .print-card-face .jobcard-status b {
+    font-size: 10pt;
+  }
+
+  /* ---------- dashboard: every column, wrap instead of ellipsis ---------- */
+  body:has(.dash-table) .page-head {
+    margin: 0 0 3mm;
+  }
+
+  body:has(.dash-table) .page-title {
+    font-size: 13pt;
+  }
+
+  .dash-panel {
+    box-shadow: none;
+    border-color: #999;
+    border-radius: 0;
     overflow: visible;
   }
 
+  .dash-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    container-type: normal;
+  }
+
   .dash-table {
+    width: 100% !important;
     min-width: 0 !important;
+    table-layout: auto;
+    font-size: 8.5pt;
+  }
+
+  .dash-table thead th {
+    position: static !important;
+    box-shadow: none !important;
+    background: #eceff2 !important;
+  }
+
+  .dash-table th,
+  .dash-table td {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    vertical-align: top;
+    padding: 0.22rem 0.3rem;
+  }
+
+  .dash-table th[data-col],
+  .dash-table td[data-col] {
+    display: table-cell !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  .dash-col-resizer,
+  .dash-parts-toggle {
+    display: none !important;
+  }
+
+  .dash-clamp {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible !important;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .dash-id-job,
+  .dash-id-sub,
+  .dash-mono,
+  .dash-person > span,
+  .dash-when,
+  .dash-status,
+  .dash-po-cell .dash-mono {
+    overflow: visible !important;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .dash-stage {
+    overflow: visible !important;
+    text-overflow: clip;
+    white-space: normal;
+    max-width: none;
+  }
+
+  .dash-comment-btn {
+    pointer-events: none;
   }
 }
