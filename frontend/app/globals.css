@@ -272,6 +272,60 @@ textarea {
   max-width: 15rem;
 }
 
+.print-menu {
+  position: relative;
+  flex: none;
+}
+
+.print-menu-caret {
+  width: 0.34rem;
+  height: 0.34rem;
+  margin-left: 0.05rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.print-menu-list {
+  position: absolute;
+  top: calc(100% + 0.28rem);
+  left: 0;
+  z-index: 40;
+  min-width: 15.5rem;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.print-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.38rem 0.55rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.print-menu-item:hover,
+.print-menu-item:focus-visible {
+  background: rgba(13, 17, 23, 0.06);
+}
+
+.print-menu-item[data-active="true"] {
+  background: var(--ink);
+  color: #fff;
+}
+
 /* ---------------- controls ---------------- */
 .field,
 .btn {

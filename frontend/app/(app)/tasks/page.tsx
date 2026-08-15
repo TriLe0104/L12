@@ -77,6 +77,8 @@ export default function TasksPage() {
   const [createStage, setCreateStage] = useState<Stage>("pending");
   const [sort, setSort] = useState<SortKey>("due_asc");
   const [printSort, setPrintSort] = useState<SortKey>("due_asc");
+  const [printOpen, setPrintOpen] = useState(false);
+  const printMenuRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>("board");
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [hideCompleted, setHideCompleted] = useState(false);
@@ -175,6 +177,28 @@ export default function TasksPage() {
     setPrintSort(next);
     window.localStorage.setItem(PRINT_SORT_STORAGE_KEY, next);
   };
+
+  const printWith = (next: SortKey) => {
+    changePrintSort(next);
+    setPrintOpen(false);
+    window.setTimeout(() => window.print(), 50);
+  };
+
+  useEffect(() => {
+    if (!printOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (!printMenuRef.current?.contains(event.target as Node)) setPrintOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPrintOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [printOpen]);
 
   const changeView = (next: View) => {
     setView(next);
@@ -301,22 +325,36 @@ export default function TasksPage() {
           </p>
         </div>
         <div className="head-tools">
-          <button type="button" className="btn" onClick={() => window.print()}>
-            Print cards
-          </button>
-          <select
-            className="field"
-            value={printSort}
-            onChange={(e) => changePrintSort(e.target.value as SortKey)}
-            aria-label="Print order"
-            title="Sort printed cards (completed jobs are skipped)"
-          >
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                Print · {s.label}
-              </option>
-            ))}
-          </select>
+          <div className="print-menu" ref={printMenuRef}>
+            <button
+              type="button"
+              className="btn"
+              aria-haspopup="menu"
+              aria-expanded={printOpen}
+              title="Print open jobs · completed are skipped"
+              onClick={() => setPrintOpen((open) => !open)}
+            >
+              Print cards
+              <span className="print-menu-caret" aria-hidden="true" />
+            </button>
+            {printOpen && (
+              <ul className="print-menu-list" role="menu" aria-label="Print order">
+                {SORTS.map((s) => (
+                  <li key={s.value} role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="print-menu-item"
+                      data-active={printSort === s.value}
+                      onClick={() => printWith(s.value)}
+                    >
+                      {s.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <input
             className="field"
             placeholder="Search job, PO, part, material…"
