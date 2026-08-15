@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 4
+OVERLAY_VERSION = 5
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1126,18 +1126,23 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             return
         min_size = 6.0
         one = fitted(text, font, size, width, min_size=min_size)
-        if pdfmetrics.stringWidth(text, font, one) <= width + 0.4:
-            _draw_lines([text], x, y1, font=font, size=one, width=width, align=align, leading=one)
-            return
-        size_try = size
-        max_lines = max(1, int(height / (min_size * 1.05)))
-        rows = _wrap_rows(text, font, size_try, width)
-        while len(rows) > max_lines and size_try > min_size:
-            size_try = max(min_size, size_try * 0.88)
+        size_try = one
+        rows = [text]
+        if pdfmetrics.stringWidth(text, font, one) > width + 0.4:
+            size_try = size
+            max_lines = max(1, int(height / (min_size * 1.12)))
             rows = _wrap_rows(text, font, size_try, width)
-        rows = rows[:max_lines]
+            while len(rows) > max_lines and size_try > min_size:
+                size_try = max(min_size, size_try * 0.88)
+                rows = _wrap_rows(text, font, size_try, width)
+            rows = rows[:max_lines]
         leading = min(size_try * 1.12, height / max(len(rows), 1))
+        clip_x = x - width / 2 if align == "center" else x
+        clip_y = 792 - (y1 + height / 2)
+        c.saveState()
+        c.clipRect(clip_x, clip_y, width, height)
         _draw_lines(rows, x, y1, font=font, size=size_try, width=width, align=align, leading=leading)
+        c.restoreState()
 
     def left(
         value: object,
@@ -1177,12 +1182,16 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         text = _s(value)
         if not text:
             return None
-        leading = size * 1.22
-        lines = max(1, int((height - 2) / leading))
+        leading = size * 1.18
+        lines = max(1, int(height / leading))
         rows = _wrap_rows(text, regular, size, width)
         shown = rows[:lines]
         leftover = "\n".join(rows[lines:]).strip()
         if shown:
+            clip_x = x - width / 2
+            clip_y = 792 - (y1 + height / 2)
+            c.saveState()
+            c.clipRect(clip_x, clip_y, width, height)
             _draw_lines(
                 shown,
                 x,
@@ -1193,6 +1202,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
                 align="center",
                 leading=leading,
             )
+            c.restoreState()
         return leftover or None
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
@@ -1246,17 +1256,20 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("finish"), col_left, 406.48, width=165, height=28)
     center(fields.get("inserts") or "No", col_mid, 406.48, width=165, height=28)
     center(fields.get("material"), col_right, 406.48, width=160, height=28)
-    center(_inspection_label(fields.get("inspection")), col_left, 496.74, width=165, height=90)
-    center(fields.get("part_marking") or "None", col_mid, 496.74, width=165, height=90)
-    center(fields.get("certificates"), col_right, 496.74, width=155, height=90)
-    # Notes sit in the last table cell (~48pt tall). Leftover continues on extra pages.
+    # Inspection / Part Marking / Certificates value row is 476–575 (header is
+    # the two-line Certificates title above it). Stay inside that row only.
+    center(_inspection_label(fields.get("inspection")), col_left, 525.25, width=168, height=92)
+    center(fields.get("part_marking") or "None", col_mid, 525.25, width=168, height=92)
+    center(fields.get("certificates"), col_right, 525.25, width=168, height=92)
+    # Notes value row is 623–659 under the Notes heading (~36pt). Leftover
+    # continues on extra pages instead of spilling the heading.
     notes_overflow_text = notes_in_box(
         fields.get("notes"),
         col_mid,
-        630.0,
-        width=520,
-        height=46,
-        size=10.5,
+        640.7,
+        width=526,
+        height=32,
+        size=9,
     )
 
     c.showPage()
