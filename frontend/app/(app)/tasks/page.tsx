@@ -32,6 +32,7 @@ const SORTS: { value: SortKey; label: string }[] = [
 ];
 
 const SORT_STORAGE_KEY = "po_calendar_task_sort";
+const PRINT_SORT_STORAGE_KEY = "po_calendar_print_sort";
 const VIEW_STORAGE_KEY = "po_calendar_task_view";
 const HIDE_COMPLETED_STORAGE_KEY = "po_calendar_task_hide_completed";
 
@@ -75,6 +76,7 @@ export default function TasksPage() {
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
   const [createStage, setCreateStage] = useState<Stage>("pending");
   const [sort, setSort] = useState<SortKey>("due_asc");
+  const [printSort, setPrintSort] = useState<SortKey>("due_asc");
   const [view, setView] = useState<View>("board");
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [hideCompleted, setHideCompleted] = useState(false);
@@ -158,12 +160,20 @@ export default function TasksPage() {
 
     const savedHide = window.localStorage.getItem(HIDE_COMPLETED_STORAGE_KEY);
     if (savedHide === "1" || savedHide === "true") setHideCompleted(true);
+
+    const savedPrint = window.localStorage.getItem(PRINT_SORT_STORAGE_KEY) as SortKey | null;
+    if (savedPrint && savedPrint in COMPARATORS) setPrintSort(savedPrint);
   }, []);
 
   const changeSort = (next: SortKey) => {
     rememberLayout();
     setSort(next);
     window.localStorage.setItem(SORT_STORAGE_KEY, next);
+  };
+
+  const changePrintSort = (next: SortKey) => {
+    setPrintSort(next);
+    window.localStorage.setItem(PRINT_SORT_STORAGE_KEY, next);
   };
 
   const changeView = (next: View) => {
@@ -219,6 +229,12 @@ export default function TasksPage() {
     view === "board"
       ? boardStages.reduce((n, s) => n + (byStage.get(s)?.length ?? 0), 0)
       : allCards.length;
+
+  /** Print sheet: never completed, ordered by the print sort (not the board). */
+  const printCards = useMemo(() => {
+    const open = pos.filter((p) => !completedKeys.has(p.stage));
+    return [...open].sort(COMPARATORS[printSort]);
+  }, [pos, printSort, completedKeys, COMPARATORS]);
 
   /** the board re-sorts behind the drawer; the drawer stays open on the saved card */
   const upsert = (saved: PurchaseOrder) => {
@@ -288,6 +304,19 @@ export default function TasksPage() {
           <button type="button" className="btn" onClick={() => window.print()}>
             Print cards
           </button>
+          <select
+            className="field"
+            value={printSort}
+            onChange={(e) => changePrintSort(e.target.value as SortKey)}
+            aria-label="Print order"
+            title="Sort printed cards (completed jobs are skipped)"
+          >
+            {SORTS.map((s) => (
+              <option key={s.value} value={s.value}>
+                Print · {s.label}
+              </option>
+            ))}
+          </select>
           <input
             className="field"
             placeholder="Search job, PO, part, material…"
@@ -467,7 +496,7 @@ export default function TasksPage() {
       )}
 
       <div className="print-card-sheet" aria-hidden="true">
-        {allCards.flatMap((po) => {
+        {printCards.flatMap((po) => {
           const n = po.parts?.length ?? 0;
           const faces = n > 1 ? po.parts!.map((_, i) => poShowingPart(po, i)) : [po];
           return faces.map((face, i) => (

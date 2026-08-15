@@ -173,7 +173,7 @@ export function JobCard({
   function foldDeal() {
     setSpread("fold");
     if (foldTimer.current) window.clearTimeout(foldTimer.current);
-    foldTimer.current = window.setTimeout(() => setSpread("stacked"), 520);
+    foldTimer.current = window.setTimeout(() => setSpread("stacked"), 400);
   }
 
   const shown = hideParts ? po : poShowingPart(po, isDeck ? faceIndex : serverIndex);
