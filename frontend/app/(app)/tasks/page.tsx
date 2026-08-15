@@ -192,10 +192,10 @@ export default function TasksPage() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPrintOpen(false);
     };
-    document.addEventListener("mousedown", onDoc);
+    window.document.addEventListener("mousedown", onDoc);
     window.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      window.document.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
     };
   }, [printOpen]);

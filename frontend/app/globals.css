@@ -829,13 +829,13 @@ textarea {
 }
 
 .jobcard-thumb {
-  width: 42%;
-  flex: 0 0 42%;
-  max-width: 13.5rem;
-  min-width: 7.25rem;
+  width: 34%;
+  flex: 0 1 34%;
+  max-width: 11rem;
+  min-width: 4.75rem;
   aspect-ratio: 1;
   height: auto;
-  min-height: 7.25rem;
+  min-height: 4.75rem;
   border: 1px solid var(--rule-soft);
   border-radius: 3px;
   background:
@@ -908,10 +908,10 @@ button.jobcard-thumb:focus-visible {
 
 .spec {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 7.5rem;
   display: grid;
   /* Label track is wide enough for CERTIFICATES on one line. */
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(4.5rem, 1fr);
   border-top: 1px solid var(--rule-soft);
 }
 
@@ -942,10 +942,10 @@ button.jobcard-thumb:focus-visible {
 
 .spec dd {
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  text-wrap: pretty;
 }
 
 /* narrow column (kanban, small screens): tighten type so values keep whole words */
@@ -4900,7 +4900,7 @@ button.jobcard-thumb:focus-visible {
   .print-card-sheet {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-auto-rows: calc((100vh - 10mm) / 6);
+    grid-auto-rows: auto;
     gap: 2mm;
     align-items: stretch;
     width: 100%;
@@ -4912,8 +4912,8 @@ button.jobcard-thumb:focus-visible {
 
   .print-card-face {
     min-height: 0;
-    height: 100%;
-    overflow: hidden;
+    height: auto;
+    overflow: visible;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -4923,10 +4923,10 @@ button.jobcard-thumb:focus-visible {
   }
 
   .print-card-face .jobcard {
-    height: 100%;
+    height: auto;
     box-shadow: none;
     border-color: #888;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .print-card-face .jobcard-head {
@@ -4945,6 +4945,9 @@ button.jobcard-thumb:focus-visible {
   }
 
   .print-card-face .jobcard-body {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
     flex: 1 1 auto;
     min-height: 0;
     gap: 0.25rem;
@@ -4960,19 +4963,27 @@ button.jobcard-thumb:focus-visible {
     aspect-ratio: 1;
   }
 
+  .print-card-face .spec {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .print-card-face .spec dt,
   .print-card-face .spec dd {
     font-size: 6pt;
     line-height: 1.15;
     padding: 0.04rem 0.16rem;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
   }
 
   .print-card-face .jobcard-note {
     font-size: 6pt;
     padding: 0.08rem 0.25rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
   }
 
   .print-card-face .jobcard-status {
