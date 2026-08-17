@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 6
+OVERLAY_VERSION = 7
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1341,12 +1341,14 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     overlay_reader = PdfReader(io.BytesIO(overlay_buf.getvalue()))
     writer = PdfWriter()
-    for index, page in enumerate(base_reader.pages):
+
+    def merge_template_page(index: int) -> None:
+        page = base_reader.pages[index]
         page.merge_page(overlay_reader.pages[index])
         writer.add_page(page)
 
-    # Overflow notes get another Notes header + boxed cell on a new page,
-    # same treatment as page 1 — not a freeform continuation sheet.
+    # Traveler page first, then any extra Notes boxes, then Work Order + Program.
+    merge_template_page(0)
     leftover = notes_overflow_text
     while leftover:
         extra_buf = io.BytesIO()
@@ -1357,6 +1359,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         extra_reader = PdfReader(io.BytesIO(extra_buf.getvalue()))
         for p in extra_reader.pages:
             writer.add_page(p)
+    for index in range(1, len(base_reader.pages)):
+        merge_template_page(index)
 
     out = io.BytesIO()
     writer.write(out)
