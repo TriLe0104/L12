@@ -995,7 +995,9 @@ export default function DashboardPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="dash-id-sub">{face.part_number}</div>
+                            {partsCount <= 1 && (
+                              <div className="dash-id-sub">{face.part_number}</div>
+                            )}
                           </td>
                         );
                       }
