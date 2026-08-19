@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 7
+OVERLAY_VERSION = 8
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1119,29 +1119,25 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         height: float,
         align: str,
     ) -> None:
-        """Draw one value centred in its cell. Shrinks, then wraps, then clips
-        so the glyphs cannot leave the box."""
+        """Draw one value centred in its cell. Shrinks until every line fits
+        the box — certificates and long values are never clipped."""
         text = _s(value)
         if not text or width <= 0 or height <= 0:
             return
-        min_size = 6.0
-        one = fitted(text, font, size, width, min_size=min_size)
-        size_try = one
-        rows = [text]
-        if pdfmetrics.stringWidth(text, font, one) > width + 0.4:
-            size_try = size
-            max_lines = max(1, int(height / (min_size * 1.12)))
-            rows = _wrap_rows(text, font, size_try, width)
-            while len(rows) > max_lines and size_try > min_size:
-                size_try = max(min_size, size_try * 0.88)
-                rows = _wrap_rows(text, font, size_try, width)
-            rows = rows[:max_lines]
-        leading = min(size_try * 1.12, height / max(len(rows), 1))
-        clip_x = x - width / 2 if align == "center" else x
-        clip_y = 792 - (y1 + height / 2)
+        min_size = 4.5
+        size_try = min(size, fitted(text, font, size, width, min_size=min_size))
+        rows = _wrap_rows(text, font, size_try, width) or [text]
+        leading = size_try * 1.12
+        while (len(rows) * leading > height + 0.4) and size_try > min_size:
+            size_try = max(min_size, size_try * 0.88)
+            rows = _wrap_rows(text, font, size_try, width) or [text]
+            leading = size_try * 1.12
+        leading = min(leading, height / max(len(rows), 1))
+        clip_x = (x - width / 2 if align == "center" else x) - 0.5
+        clip_y = 792 - (y1 + height / 2) - 0.5
         c.saveState()
         path = c.beginPath()
-        path.rect(clip_x, clip_y, width, height)
+        path.rect(clip_x, clip_y, width + 1, height + 1)
         c.clipPath(path, stroke=0, fill=0)
         _draw_lines(rows, x, y1, font=font, size=size_try, width=width, align=align, leading=leading)
         c.restoreState()
@@ -1245,9 +1241,12 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
 
-    # Draw PO thumbnail image if present. Uses internal storage loader which
-    # transparently reads local disk or object storage. The image is scaled to
-    # fit within a bounded box and placed near the drawing area.
+    # Uploaded part photo replaces the template drawing in the top-right slot
+    # (under Part ID, above "Part n of n"). Cover the stock artwork first.
+    photo_x0, photo_y0 = 398.0, 54.0
+    photo_w, photo_h = 170.0, 118.0
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(photo_x0, 792 - photo_y0 - photo_h, photo_w, photo_h, stroke=0, fill=1)
     try:
         thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
         if thumb_url:
@@ -1258,15 +1257,21 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
                     img = ImageReader(io.BytesIO(img_bytes))
                     iw, ih = img.getSize()
-                    max_w, max_h = 170, 140
-                    ratio = min(max_w / iw, max_h / ih, 1.0)
-                    draw_w, draw_h = iw * ratio, ih * ratio
-                    img_x = 36
-                    img_y_top = 170
-                    img_y = 792 - img_y_top - draw_h
-                    c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask='auto')
+                    if iw > 0 and ih > 0:
+                        ratio = min(photo_w / iw, photo_h / ih, 1.0)
+                        draw_w, draw_h = iw * ratio, ih * ratio
+                        img_x = photo_x0 + (photo_w - draw_w) / 2
+                        img_y = 792 - photo_y0 - photo_h + (photo_h - draw_h) / 2
+                        c.drawImage(
+                            img,
+                            img_x,
+                            img_y,
+                            width=draw_w,
+                            height=draw_h,
+                            preserveAspectRatio=True,
+                            mask="auto",
+                        )
                 except Exception:
-                    # Best-effort: if image handling fails, continue without it.
                     pass
     except Exception:
         pass
@@ -1291,7 +1296,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # the two-line Certificates title above it). Stay inside that row only.
     center(_inspection_label(fields.get("inspection")), col_left, 525.25, width=168, height=92)
     center(fields.get("part_marking") or "None", col_mid, 525.25, width=168, height=92)
-    center(fields.get("certificates"), col_right, 525.25, width=168, height=92)
+    center(fields.get("certificates"), col_right, 525.25, width=172, height=92)
     # Notes value row is 623–659 under the Notes heading (~36pt). Leftover
     # continues on extra pages instead of spilling the heading.
     notes_overflow_text = notes_in_box(
