@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 8
+OVERLAY_VERSION = 9
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1097,12 +1097,16 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         width: float,
         align: str,
         leading: float,
+        box_height: float,
     ) -> None:
-        block = leading * max(len(rows) - 1, 0)
-        start = y1 - block / 2
+        n = max(len(rows), 1)
+        block = leading * n
+        top = y1 - min(block, box_height) / 2
         for index, row in enumerate(rows):
             c.setFont(font, size)
-            py = 792 - start - leading * index + size * 0.22
+            # Baseline sits 80% down each line box so caps and descenders stay in.
+            baseline_from_top = top + index * leading + size * 0.8
+            py = 792 - baseline_from_top
             if align == "left":
                 c.drawString(x, py, row)
             else:
@@ -1119,28 +1123,40 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         height: float,
         align: str,
     ) -> None:
-        """Draw one value centred in its cell. Shrinks until every line fits
-        the box — certificates and long values are never clipped."""
+        """Draw one value centred in its cell. Wrap, then shrink until the
+        whole block fits — never slice lines or clip through glyphs."""
         text = _s(value)
         if not text or width <= 0 or height <= 0:
             return
-        min_size = 4.5
-        size_try = min(size, fitted(text, font, size, width, min_size=min_size))
+        min_size = 4.0
+        pad = 2.0
+        usable_h = max(height - pad * 2, min_size)
+        size_try = size
         rows = _wrap_rows(text, font, size_try, width) or [text]
-        leading = size_try * 1.12
-        while (len(rows) * leading > height + 0.4) and size_try > min_size:
-            size_try = max(min_size, size_try * 0.88)
+        while True:
+            leading = size_try * 1.18
+            if len(rows) * leading <= usable_h + 0.05 or size_try <= min_size:
+                break
+            size_try = max(min_size, round(size_try * 0.9, 2))
             rows = _wrap_rows(text, font, size_try, width) or [text]
-            leading = size_try * 1.12
-        leading = min(leading, height / max(len(rows), 1))
-        clip_x = (x - width / 2 if align == "center" else x) - 0.5
-        clip_y = 792 - (y1 + height / 2) - 0.5
-        c.saveState()
-        path = c.beginPath()
-        path.rect(clip_x, clip_y, width + 1, height + 1)
-        c.clipPath(path, stroke=0, fill=0)
-        _draw_lines(rows, x, y1, font=font, size=size_try, width=width, align=align, leading=leading)
-        c.restoreState()
+        n = max(len(rows), 1)
+        leading = size_try * 1.18
+        if n * leading > usable_h:
+            size_try = max(3.2, usable_h / (n * 1.18))
+            rows = _wrap_rows(text, font, size_try, width) or [text]
+            n = max(len(rows), 1)
+            leading = min(size_try * 1.18, usable_h / n)
+        _draw_lines(
+            rows,
+            x,
+            y1,
+            font=font,
+            size=size_try,
+            width=width,
+            align=align,
+            leading=leading,
+            box_height=usable_h,
+        )
 
     def left(
         value: object,
@@ -1296,7 +1312,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # the two-line Certificates title above it). Stay inside that row only.
     center(_inspection_label(fields.get("inspection")), col_left, 525.25, width=168, height=92)
     center(fields.get("part_marking") or "None", col_mid, 525.25, width=168, height=92)
-    center(fields.get("certificates"), col_right, 525.25, width=172, height=92)
+    center(fields.get("certificates"), col_right, 525.25, width=172, height=96)
     # Notes value row is 623–659 under the Notes heading (~36pt). Leftover
     # continues on extra pages instead of spilling the heading.
     notes_overflow_text = notes_in_box(
