@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 10
+OVERLAY_VERSION = 11
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1100,13 +1100,13 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         box_height: float,
     ) -> None:
         n = max(len(rows), 1)
-        # Ink from first cap-top to last baseline; centre that block in the cell.
-        block = (n - 1) * leading + size
-        top_of_ink = y1 - min(block, box_height) / 2
+        # Geometric centre of the line stack sits on y1. For one line the
+        # baseline is a little below centre so the cap-height looks centred.
+        span = (n - 1) * leading
+        first_baseline = y1 - span / 2 + size * 0.35
         for index, row in enumerate(rows):
             c.setFont(font, size)
-            baseline_from_top = top_of_ink + index * leading + size * 0.78
-            py = 792 - baseline_from_top
+            py = 792 - (first_baseline + index * leading)
             if align == "left":
                 c.drawString(x, py, row)
             else:
@@ -1206,12 +1206,11 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         leftover = "\n".join(rows[lines:]).strip()
         if shown:
             n = len(shown)
-            block = (n - 1) * leading + size
-            top_of_ink = y1 - min(block, height - 4) / 2
+            span = (n - 1) * leading
+            first_baseline = y1 - span / 2 + size * 0.35
             for index, row in enumerate(shown):
                 target.setFont(regular, size)
-                baseline_from_top = top_of_ink + index * leading + size * 0.78
-                target.drawCentredString(x, 792 - baseline_from_top, row)
+                target.drawCentredString(x, 792 - (first_baseline + index * leading), row)
         return leftover or None
 
     def draw_notes_sheet(cv: Any, leftover: str) -> str | None:
@@ -1252,40 +1251,37 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
 
-    # Uploaded part photo replaces the template drawing in the top-right slot
-    # (under Part ID, above "Part n of n"). Cover the stock artwork first.
-    photo_x0, photo_y0 = 398.0, 54.0
-    photo_w, photo_h = 170.0, 118.0
+    # Uploaded part photo in the top-right drawing slot (same band as the TVM
+    # logo). Cover the stock CAD artwork, then draw with the same bottom-left
+    # placement that used to work — mask=auto was swallowing JPEGs.
+    photo_x0 = 400.0
+    photo_y_top = 58.0
+    photo_w, photo_h = 160.0, 108.0
     c.setFillColorRGB(1, 1, 1)
-    c.rect(photo_x0, 792 - photo_y0 - photo_h, photo_w, photo_h, stroke=0, fill=1)
+    c.rect(photo_x0, 792 - photo_y_top - photo_h, photo_w, photo_h, stroke=0, fill=1)
     try:
         thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
-        if thumb_url:
-            img_bytes = load_bytes(thumb_url)
-            if img_bytes:
-                try:
-                    from reportlab.lib.utils import ImageReader
+        img_bytes = load_bytes(str(thumb_url)) if thumb_url else None
+        if img_bytes:
+            from reportlab.lib.utils import ImageReader
+            from PIL import Image as PILImage
 
-                    img = ImageReader(io.BytesIO(img_bytes))
-                    iw, ih = img.getSize()
-                    if iw > 0 and ih > 0:
-                        ratio = min(photo_w / iw, photo_h / ih, 1.0)
-                        draw_w, draw_h = iw * ratio, ih * ratio
-                        img_x = photo_x0 + (photo_w - draw_w) / 2
-                        img_y = 792 - photo_y0 - photo_h + (photo_h - draw_h) / 2
-                        c.drawImage(
-                            img,
-                            img_x,
-                            img_y,
-                            width=draw_w,
-                            height=draw_h,
-                            preserveAspectRatio=True,
-                            mask="auto",
-                        )
-                except Exception:
-                    pass
+            pil = PILImage.open(io.BytesIO(img_bytes))
+            if pil.mode not in ("RGB", "RGBA"):
+                pil = pil.convert("RGB")
+            png = io.BytesIO()
+            pil.save(png, format="PNG")
+            png.seek(0)
+            img = ImageReader(png)
+            iw, ih = img.getSize()
+            if iw > 0 and ih > 0:
+                ratio = min(photo_w / iw, photo_h / ih)
+                draw_w, draw_h = iw * ratio, ih * ratio
+                img_x = photo_x0 + (photo_w - draw_w) / 2
+                img_y = 792 - photo_y_top - draw_h - (photo_h - draw_h) / 2
+                c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h)
     except Exception:
-        pass
+        logger.exception("Traveler part photo overlay failed")
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
