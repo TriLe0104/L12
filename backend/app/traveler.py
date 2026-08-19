@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 9
+OVERLAY_VERSION = 10
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1100,12 +1100,12 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         box_height: float,
     ) -> None:
         n = max(len(rows), 1)
-        block = leading * n
-        top = y1 - min(block, box_height) / 2
+        # Ink from first cap-top to last baseline; centre that block in the cell.
+        block = (n - 1) * leading + size
+        top_of_ink = y1 - min(block, box_height) / 2
         for index, row in enumerate(rows):
             c.setFont(font, size)
-            # Baseline sits 80% down each line box so caps and descenders stay in.
-            baseline_from_top = top + index * leading + size * 0.8
+            baseline_from_top = top_of_ink + index * leading + size * 0.78
             py = 792 - baseline_from_top
             if align == "left":
                 c.drawString(x, py, row)
@@ -1199,24 +1199,19 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         if not text:
             return None
         leading = size * 1.18
-        lines = max(1, int(height / leading))
+        # Leave padding so the last line is not sliced by the cell rule.
+        lines = max(1, int((height - 4) / leading))
         rows = _wrap_rows(text, regular, size, width)
         shown = rows[:lines]
         leftover = "\n".join(rows[lines:]).strip()
         if shown:
-            clip_x = x - width / 2
-            clip_y = 792 - (y1 + height / 2)
-            target.saveState()
-            path = target.beginPath()
-            path.rect(clip_x, clip_y, width, height)
-            target.clipPath(path, stroke=0, fill=0)
-            block = leading * max(len(shown) - 1, 0)
-            start = y1 - block / 2
+            n = len(shown)
+            block = (n - 1) * leading + size
+            top_of_ink = y1 - min(block, height - 4) / 2
             for index, row in enumerate(shown):
                 target.setFont(regular, size)
-                py = 792 - start - leading * index + size * 0.22
-                target.drawCentredString(x, py, row)
-            target.restoreState()
+                baseline_from_top = top_of_ink + index * leading + size * 0.78
+                target.drawCentredString(x, 792 - baseline_from_top, row)
         return leftover or None
 
     def draw_notes_sheet(cv: Any, leftover: str) -> str | None:
@@ -1320,7 +1315,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         col_mid,
         640.7,
         width=526,
-        height=32,
+        height=34,
         size=9,
     )
 
@@ -1342,22 +1337,11 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120, height=14)
     c.showPage()
 
-    # Excel Program sheet. Unlike Part 555 this sheet left-aligns the PO, part
-    # and date cells and centres only QTY and Programer, so the overlay follows
-    # each cell's own alignment instead of centring everything.
-    left(fields.get("po_number"), 242.7, 99.83, font=bold, size=10.92, width=120, height=16)
-    left(fields.get("part_number"), 242.7, 125.99, font=bold, size=10.92, width=120, height=16)
-    center(fields.get("qty"), 491.4, 126.47, font=bold, size=10.92, width=110, height=16)
-    center(
-        fields.get("programmer"),
-        279.4,
-        156.71,
-        size=10.92,
-        width=190,
-        height=16,
-    )
-    if program_date:
-        left(program_date, 433.2, 157.19, size=10.92, width=80, height=16)
+    # Program sheet: PO / PART / QTY sit in the value cells (not on the label
+    # baseline). Programmer and Date stay blank.
+    left(fields.get("po_number"), 248.0, 94.35, font=bold, size=9.5, width=296, height=22)
+    left(fields.get("part_number"), 248.0, 120.5, font=bold, size=9.5, width=124, height=22)
+    center(fields.get("qty"), 491.9, 120.5, font=bold, size=9.5, width=114, height=22)
     c.save()
 
     overlay_reader = PdfReader(io.BytesIO(overlay_buf.getvalue()))
