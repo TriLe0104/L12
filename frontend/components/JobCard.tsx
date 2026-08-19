@@ -275,7 +275,7 @@ export function JobCard({
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {faceIndex + 1} of {parts.length} parts
+              {(opts.partIndex ?? faceIndex) + 1} of {parts.length} parts
             </button>
           )}
           {opts.current && isDeck && spread !== "stacked" && (
