@@ -54,7 +54,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 19
+OVERLAY_VERSION = 20
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1290,6 +1290,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # looks washed-out in Chrome next to Work Order / Due / Quantity.
     header_grey = 0.851
     excel_header_grey = 0.749
+    rule_grey = 0.651
 
     def fill_header(
         x0: float,
@@ -1308,6 +1309,11 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             stroke=0,
             fill=1,
         )
+
+    def h_rule(x0: float, y: float, x1: float, thickness: float = 1.0) -> None:
+        """Draw a table rule in the same DeviceGray as Work Order / Due Date."""
+        c.setFillGray(rule_grey)
+        c.rect(x0, 792 - (y + thickness), x1 - x0, thickness, stroke=0, fill=1)
 
     def labeled_header(
         text: str,
@@ -1389,6 +1395,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         size=10,
     )
     labeled_header("Notes", 37.0, 592.0, 575.1, 621.7)
+    # Word merged Material Dims + Sign values, so that bottom rule is 0.5pt /
+    # 0.749 grey. Redraw it at the 1pt / 0.651 weight of Work Order / Due.
+    h_rule(396.5, 237.9, 576.1)
+    h_rule(396.5, 264.4, 576.1)
     c.setFillColorRGB(0, 0, 0)
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
     center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
