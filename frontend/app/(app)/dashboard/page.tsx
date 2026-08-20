@@ -303,6 +303,10 @@ export default function DashboardPage() {
   const [expandAll, setExpandAll] = useState(true);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [openingIds, setOpeningIds] = useState<Set<string>>(() => new Set());
+  const [closingIds, setClosingIds] = useState<Set<string>>(() => new Set());
+  const partAnimTimers = useRef<Map<string, number>>(new Map());
+  const PART_ANIM_MS = 280;
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [drawerMode, setDrawerMode] = useState<"view" | "create" | null>(null);
   const [commentTarget, setCommentTarget] = useState<{
@@ -526,7 +530,71 @@ export default function DashboardPage() {
     window.addEventListener("pointerup", onUp);
   };
 
+  const clearPartAnim = (poId: string) => {
+    const prev = partAnimTimers.current.get(poId);
+    if (prev) window.clearTimeout(prev);
+    partAnimTimers.current.delete(poId);
+  };
+
+  const beginOpen = (poId: string) => {
+    clearPartAnim(poId);
+    setClosingIds((s) => {
+      if (!s.has(poId)) return s;
+      const n = new Set(s);
+      n.delete(poId);
+      return n;
+    });
+    setOpeningIds((s) => new Set(s).add(poId));
+    const t = window.setTimeout(() => {
+      partAnimTimers.current.delete(poId);
+      setOpeningIds((s) => {
+        if (!s.has(poId)) return s;
+        const n = new Set(s);
+        n.delete(poId);
+        return n;
+      });
+    }, 32);
+    partAnimTimers.current.set(poId, t);
+  };
+
+  const beginClose = (poId: string) => {
+    clearPartAnim(poId);
+    setOpeningIds((s) => {
+      if (!s.has(poId)) return s;
+      const n = new Set(s);
+      n.delete(poId);
+      return n;
+    });
+    setClosingIds((s) => new Set(s).add(poId));
+    const t = window.setTimeout(() => {
+      partAnimTimers.current.delete(poId);
+      setClosingIds((s) => {
+        if (!s.has(poId)) return s;
+        const n = new Set(s);
+        n.delete(poId);
+        return n;
+      });
+    }, PART_ANIM_MS);
+    partAnimTimers.current.set(poId, t);
+  };
+
+  useEffect(
+    () => () => {
+      partAnimTimers.current.forEach((id) => window.clearTimeout(id));
+      partAnimTimers.current.clear();
+    },
+    [],
+  );
+
   const persistExpandAll = (next: boolean) => {
+    if (next !== expandAll) {
+      for (const po of pos) {
+        if ((po.parts?.length ?? 0) <= 1) continue;
+        const currentlyOpen = expandAll ? !collapsedIds.has(po.id) : expandedIds.has(po.id);
+        if (next && !currentlyOpen) beginOpen(po.id);
+        if (!next && currentlyOpen) beginClose(po.id);
+      }
+    }
     setExpandAll(next);
     setCollapsedIds(new Set());
     setExpandedIds(new Set());
@@ -536,6 +604,8 @@ export default function DashboardPage() {
   const toggleParts = (poId: string) => {
     const partsCount = (pos.find((p) => p.id === poId)?.parts?.length ?? 0);
     const open = partsCount > 1 && (expandAll ? !collapsedIds.has(poId) : expandedIds.has(poId));
+    if (open) beginClose(poId);
+    else beginOpen(poId);
     if (expandAll) {
       setCollapsedIds((prev) => {
         const next = new Set(prev);
@@ -938,7 +1008,24 @@ export default function DashboardPage() {
                     className={entry.kind === "child" ? "dash-row dash-row-part" : "dash-row"}
                     data-job={po.job_no}
                     data-locked={po.locked}
-                    data-open={entry.kind === "child" ? (isOpen ? "true" : "false") : undefined}
+                    data-open={
+                      entry.kind === "child"
+                        ? isOpen && !openingIds.has(po.id)
+                          ? "true"
+                          : "false"
+                        : undefined
+                    }
+                    data-phase={
+                      entry.kind === "child"
+                        ? isOpen && openingIds.has(po.id)
+                          ? "opening"
+                          : isOpen
+                            ? "open"
+                            : closingIds.has(po.id)
+                              ? "closing"
+                              : "closed"
+                        : undefined
+                    }
                     style={
                       entry.kind === "child"
                         ? ({

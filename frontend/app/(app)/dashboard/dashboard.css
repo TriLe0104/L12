@@ -302,12 +302,17 @@
   transition: background var(--t-fast) var(--ease), border-color 320ms var(--ease);
 }
 
-.dash-row-part[data-open="false"] {
+.dash-row-part[data-phase="closed"] {
   visibility: collapse;
 }
 
-.dash-row-part[data-open="true"] {
+.dash-row-part[data-phase="opening"],
+.dash-row-part[data-phase="open"],
+.dash-row-part[data-phase="closing"] {
   visibility: visible;
+}
+
+.dash-row-part[data-open="true"] {
   border-top-width: 1px;
   border-top-color: var(--rule-soft);
 }
@@ -327,9 +332,8 @@
   border-top-color: transparent;
   pointer-events: none;
   transition:
-    padding 420ms var(--ease),
-    border-color 320ms var(--ease);
-  transition-delay: calc(var(--part-i, 0) * 36ms);
+    padding 280ms var(--ease),
+    border-color 220ms var(--ease);
 }
 
 .dash-row-part[data-open="true"] td {
@@ -348,18 +352,14 @@
   width: 100%;
   max-width: 100%;
   opacity: 0;
-  transform: translateY(-8px);
   transition:
-    grid-template-rows 420ms var(--ease),
-    opacity 320ms var(--ease),
-    transform 420ms var(--ease);
-  transition-delay: calc(var(--part-i, 0) * 36ms);
+    grid-template-rows 280ms var(--ease),
+    opacity 200ms var(--ease);
 }
 
 .dash-row-part[data-open="true"] .dash-part-clip {
   grid-template-rows: 1fr;
   opacity: 1;
-  transform: none;
 }
 
 .dash-part-inner {
@@ -382,11 +382,6 @@
   min-height: 2.1rem;
 }
 
-.dash-row-part[data-open="false"] td,
-.dash-row-part[data-open="false"] .dash-part-clip {
-  transition-delay: calc((var(--part-n, 6) - var(--part-i, 0)) * 22ms);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .dash-row-part,
   .dash-row-part td,
@@ -403,7 +398,8 @@
 
 @media print {
   .dash-row-part,
-  .dash-row-part[data-open="false"] {
+  .dash-row-part[data-open="false"],
+  .dash-row-part[data-phase="closed"] {
     visibility: visible;
     border-top-width: 1px;
     border-top-color: var(--rule-soft);
@@ -469,7 +465,7 @@
   border-bottom: 1.5px solid currentColor;
   transform: rotate(-45deg);
   transform-origin: 60% 60%;
-  transition: transform 360ms var(--ease);
+  transition: transform 280ms var(--ease);
 }
 
 .dash-parts-caret[data-open="true"] {
