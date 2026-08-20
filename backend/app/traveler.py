@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 14
+OVERLAY_VERSION = 15
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -201,6 +201,20 @@ def _traveler_printed_at(now: datetime | None = None) -> tuple[str, str]:
     zone = stamp.tzname() or ""
     when = f"{day} {clock}" + (f" {zone}" if zone else "")
     return day, when
+
+def _traveler_page_logo_bytes() -> bytes | None:
+    """The TVM mark as it appears on traveler page 1 (not the squat Excel bitmap)."""
+    try:
+        from pypdf import PdfReader
+
+        images = PdfReader(str(TEMPLATE_BASE_PDF)).pages[0].images
+        if images and images[0].data:
+            return images[0].data
+    except Exception:
+        logger.exception("Could not extract traveler page TVM logo")
+    path = TEMPLATES_DIR / "tvm-logo.png"
+    return path.read_bytes() if path.is_file() else None
+
 
 def _filename_part(value: object | None, fallback: str) -> str:
     safe = re.sub(r'[\/\\:*?"<>|\s]+', "_", _s(value)).strip("._")
@@ -1270,6 +1284,19 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     col_mat_dims, col_sign = 450.4, 540.3
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
+    header_grey = (0.847, 0.851, 0.847)
+
+    def fill_header(x0: float, y_top: float, x1: float, y_bot: float) -> None:
+        pad = 0.7
+        c.setFillColorRGB(*header_grey)
+        c.rect(
+            x0 + pad,
+            792 - (y_bot - pad),
+            (x1 - x0) - 2 * pad,
+            (y_bot - y_top) - 2 * pad,
+            stroke=0,
+            fill=1,
+        )
 
     # Uploaded part photo in the top-right drawing slot (same band as the TVM
     # logo). Cover the stock CAD artwork, then draw with the same bottom-left
@@ -1305,6 +1332,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
+    # Material Dims / Sign headings render lighter than Work Order / Due — paint
+    # the same header grey as the rest of the row.
+    fill_header(396.5, 212.4, 512.5, 237.9)
+    fill_header(512.5, 212.4, 575.1, 237.9)
     c.setFillColorRGB(0, 0, 0)
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
     center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
@@ -1337,37 +1368,38 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.showPage()
 
-    # Excel embeds a squat TVM bitmap. Cover it and draw the real logo
-    # at its native aspect, same size band as the traveler page.
+    # Cover the squat Excel TVM bitmap and draw the same logo as traveler page 1.
     c.setFillColorRGB(1, 1, 1)
     c.rect(64.0, 792 - 54.0 - 80.0, 210.0, 80.0, stroke=0, fill=1)
     try:
-        logo_path = TEMPLATES_DIR / "tvm-logo.png"
-        if logo_path.is_file():
+        logo_bytes = _traveler_page_logo_bytes()
+        if logo_bytes:
             from reportlab.lib.utils import ImageReader
             from PIL import Image as PILImage
 
-            logo_pil = PILImage.open(logo_path)
-            if logo_pil.mode == "RGBA":
-                bg = PILImage.new("RGB", logo_pil.size, (255, 255, 255))
-                bg.paste(logo_pil, mask=logo_pil.split()[-1])
-                logo_pil = bg
-            elif logo_pil.mode != "RGB":
+            logo_pil = PILImage.open(io.BytesIO(logo_bytes))
+            if logo_pil.mode != "RGB":
                 logo_pil = logo_pil.convert("RGB")
             logo_buf = io.BytesIO()
             logo_pil.save(logo_buf, format="PNG")
             logo_buf.seek(0)
             logo = ImageReader(logo_buf)
             lw, lh = logo.getSize()
-            box_w, box_h = 136.0, 78.0
+            # Same box as traveler page 1: 36,61 → 171.7,138.5
+            box_w, box_h = 135.7, 77.5
             if lw > 0 and lh > 0:
                 ratio = min(box_w / lw, box_h / lh)
                 dw, dh = lw * ratio, lh * ratio
                 lx = 66.0
-                ly = 792 - 56.0 - dh
+                ly = 792 - 61.0 - dh
                 c.drawImage(logo, lx, ly, width=dw, height=dh)
     except Exception:
         logger.exception("Work-order TVM logo overlay failed")
+    # Material Type / Specification labels are unshaded in Excel — match the
+    # grey header cells on WORK ORDER / PO / Part.
+    fill_header(287.3, 108.0, 363.8, 130.5)
+    fill_header(287.3, 130.5, 363.8, 152.1)
+    c.setFillColorRGB(0, 0, 0)
 
     # Excel Part 555 header cells are ~15pt tall. Keep type at 8.5pt and
     # centre on the value cell, not the label baseline, so WORK ORDER / PO /
