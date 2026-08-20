@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 11
+OVERLAY_VERSION = 12
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1100,10 +1100,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         box_height: float,
     ) -> None:
         n = max(len(rows), 1)
-        # Geometric centre of the line stack sits on y1. For one line the
-        # baseline is a little below centre so the cap-height looks centred.
-        span = (n - 1) * leading
-        first_baseline = y1 - span / 2 + size * 0.35
+        # Centre the cap-height block on y1 (the value-cell midline).
+        visual_h = (n - 1) * leading + size * 0.7
+        first_baseline = y1 - visual_h / 2 + size * 0.7
         for index, row in enumerate(rows):
             c.setFont(font, size)
             py = 792 - (first_baseline + index * leading)
@@ -1206,8 +1205,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         leftover = "\n".join(rows[lines:]).strip()
         if shown:
             n = len(shown)
-            span = (n - 1) * leading
-            first_baseline = y1 - span / 2 + size * 0.35
+            visual_h = (n - 1) * leading + size * 0.7
+            first_baseline = y1 - visual_h / 2 + size * 0.7
             for index, row in enumerate(shown):
                 target.setFont(regular, size)
                 target.drawCentredString(x, 792 - (first_baseline + index * leading), row)
@@ -1289,21 +1288,21 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
     center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
     center(fields.get("dims"), body_tab, 193.24, size=12, width=130, height=14)
-    center(fields.get("work_order"), col_left, 258.25, width=165, height=20)
-    center(_traveler_date(fields.get("due_date")), col_mid, 258.25, width=170, height=20)
-    center(fields.get("mat_dim"), col_mat_dims, 259.48, size=12, width=110, height=20)
-    center(fields.get("sign"), col_sign, 259.48, size=12, width=88, height=20)
-    center(fields.get("po_number"), col_left, 335.68, width=165, height=16)
-    center(fields.get("part_name") or fields.get("part_number"), col_mid, 335.68, width=175, height=16)
-    center(fields.get("qty"), col_right, 335.68, width=160, height=16)
-    center(fields.get("finish"), col_left, 406.48, width=165, height=28)
-    center(fields.get("inserts") or "No", col_mid, 406.48, width=165, height=28)
-    center(fields.get("material"), col_right, 406.48, width=160, height=28)
-    # Inspection / Part Marking / Certificates value row is 476–575 (header is
-    # the two-line Certificates title above it). Stay inside that row only.
-    center(_inspection_label(fields.get("inspection")), col_left, 525.25, width=168, height=92)
-    center(fields.get("part_marking") or "None", col_mid, 525.25, width=168, height=92)
-    center(fields.get("certificates"), col_right, 525.25, width=172, height=96)
+    # y is the midline of the VALUE row (not the header baseline).
+    center(fields.get("work_order"), col_left, 251.6, width=168, height=22)
+    center(_traveler_date(fields.get("due_date")), col_mid, 251.6, width=168, height=22)
+    center(fields.get("mat_dim"), 454.5, 251.6, size=11, width=108, height=22)
+    center(fields.get("sign"), 543.8, 251.6, size=11, width=56, height=22)
+    center(fields.get("po_number"), col_left, 327.7, width=168, height=22)
+    center(fields.get("part_name") or fields.get("part_number"), col_mid, 327.7, width=168, height=22)
+    center(fields.get("qty"), col_right, 327.7, width=168, height=22)
+    center(fields.get("finish"), col_left, 401.6, width=168, height=28)
+    center(fields.get("inserts") or "No", col_mid, 401.6, width=168, height=28)
+    center(fields.get("material"), col_right, 401.6, width=168, height=28)
+    # Inspection / Part Marking / Certificates value row is 476–574.5.
+    center(_inspection_label(fields.get("inspection")), col_left, 525.25, width=168, height=94)
+    center(fields.get("part_marking") or "None", col_mid, 525.25, width=168, height=94)
+    center(fields.get("certificates"), col_right, 525.25, width=168, height=94)
     # Notes value row is 623–659 under the Notes heading (~36pt). Leftover
     # continues on extra pages instead of spilling the heading.
     notes_overflow_text = notes_in_box(
