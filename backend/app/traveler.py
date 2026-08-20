@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 13
+OVERLAY_VERSION = 14
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -191,6 +191,16 @@ def _traveler_date(value: object | None) -> str:
         return _s(value)
     # Use mm/dd/yy format per user preference (e.g., 08/13/26)
     return f"{parsed.month:02d}/{parsed.day:02d}/{parsed.year % 100:02d}"
+
+
+def _traveler_printed_at(now: datetime | None = None) -> tuple[str, str]:
+    """Return (mm/dd/yy, 'mm/dd/yy h:mm AM TZ') for the moment the packet is built."""
+    stamp = now or datetime.now().astimezone()
+    day = _traveler_date(stamp)
+    clock = stamp.strftime("%I:%M %p").lstrip("0")
+    zone = stamp.tzname() or ""
+    when = f"{day} {clock}" + (f" {zone}" if zone else "")
+    return day, when
 
 def _filename_part(value: object | None, fallback: str) -> str:
     safe = re.sub(r'[\/\\:*?"<>|\s]+', "_", _s(value)).strip("._")
@@ -1363,9 +1373,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("qty"), 532.6, 93.2, font=bold, size=9, width=28, height=13)
     center(fields.get("material"), 456.5, 119.3, font=bold, size=9, width=176, height=20)
     center(fields.get("material_spec") or "Per Drawing", 456.5, 141.3, size=9, width=176, height=18)
-    program_date = _traveler_date(fields.get("program_date"))
-    if program_date:
-        center(program_date, 516.9, 199.7, size=8, width=58, height=13)
+    printed_day, printed_when = _traveler_printed_at()
+    center(printed_day, 516.9, 199.7, size=8, width=58, height=13)
     center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120, height=14)
     c.showPage()
 
@@ -1398,6 +1407,25 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             writer.add_page(p)
     for index in range(1, len(base_reader.pages)):
         merge_template_page(index)
+
+    created_by = _s(fields.get("generated_by")) or _s(fields.get("created_by")) or "—"
+    header_buf = io.BytesIO()
+    head_c = canvas.Canvas(header_buf, pagesize=(612, 792))
+    page_count = len(writer.pages)
+    for index in range(page_count):
+        head_c.setFillColorRGB(0.32, 0.36, 0.40)
+        head_c.setFont(regular, 7.5)
+        head_c.drawString(
+            36,
+            780,
+            f"Traveler created {printed_when} by {created_by}",
+        )
+        head_c.drawRightString(576, 780, f"{index + 1} / {page_count}")
+        head_c.showPage()
+    head_c.save()
+    header_reader = PdfReader(io.BytesIO(header_buf.getvalue()))
+    for index, page in enumerate(writer.pages):
+        page.merge_page(header_reader.pages[index])
 
     out = io.BytesIO()
     writer.write(out)
