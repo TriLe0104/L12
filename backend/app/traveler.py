@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 16
+OVERLAY_VERSION = 17
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1284,19 +1284,20 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     col_mat_dims, col_sign = 450.4, 540.3
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
-    header_grey = (0.851, 0.851, 0.851)
-    # Excel grid / WORK ORDER header rules on the work-order page.
-    excel_header_grey = (0.749, 0.749, 0.749)
+    # Word headers are DeviceGray 0.851. Painting DeviceRGB of the same number
+    # looks washed-out in Chrome next to Work Order / Due / Quantity.
+    header_grey = 0.851
+    excel_header_grey = 0.749
 
     def fill_header(
         x0: float,
         y_top: float,
         x1: float,
         y_bot: float,
-        grey: tuple[float, float, float] = header_grey,
+        grey: float = header_grey,
     ) -> None:
-        pad = 0.35
-        c.setFillColorRGB(*grey)
+        pad = 0.2
+        c.setFillGray(grey)
         c.rect(
             x0 + pad,
             792 - (y_bot - pad),
@@ -1316,7 +1317,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         size: float = 11,
         font: str = bold,
         align: str = "center",
-        grey: tuple[float, float, float] = header_grey,
+        grey: float = header_grey,
     ) -> None:
         """Paint the header cell, then put the label back on top of the fill."""
         fill_header(x0, y_top, x1, y_bot, grey=grey)
