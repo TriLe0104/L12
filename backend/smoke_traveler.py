@@ -225,10 +225,13 @@ def check_fill() -> None:
     for index, text in enumerate(pages, start=1):
         assert_clean(f"pdf page {index}", text)
 
-    assert "20AUG26" in pages[0], "page 1 is missing the DDMMMYY due date"
-    assert "20AUG26" in pages[1], "page 2 is missing the DDMMMYY due date"
-    assert "06AUG26" in pages[2], "page 3 is missing the DDMMMYY program date"
+    assert "08/20/26" in pages[0], "page 1 is missing the mm/dd/yy due date"
+    assert "08/20/26" in pages[1], "page 2 is missing the mm/dd/yy due date"
     assert "SMOKE_PART" in pages[0], "page 1 is missing the part name"
+    assert "Material Dims" in pages[0], "page 1 is missing the Material Dims header"
+    assert re.search(r"\bSign\b", pages[0]), "page 1 is missing the Sign header"
+    assert "Material Type" in pages[1], "page 2 is missing the Material Type header"
+    assert "Specification" in pages[1], "page 2 is missing the Material Specification header"
     check_columns(pdf)
 
     for fmt in FORMATS:

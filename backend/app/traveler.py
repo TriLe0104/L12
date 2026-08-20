@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 15
+OVERLAY_VERSION = 16
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1284,11 +1284,19 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     col_mat_dims, col_sign = 450.4, 540.3
     # The two lines under the drawing are laid out by a centre tab stop.
     body_tab = 468.1
-    header_grey = (0.847, 0.851, 0.847)
+    header_grey = (0.851, 0.851, 0.851)
+    # Excel grid / WORK ORDER header rules on the work-order page.
+    excel_header_grey = (0.749, 0.749, 0.749)
 
-    def fill_header(x0: float, y_top: float, x1: float, y_bot: float) -> None:
-        pad = 0.7
-        c.setFillColorRGB(*header_grey)
+    def fill_header(
+        x0: float,
+        y_top: float,
+        x1: float,
+        y_bot: float,
+        grey: tuple[float, float, float] = header_grey,
+    ) -> None:
+        pad = 0.35
+        c.setFillColorRGB(*grey)
         c.rect(
             x0 + pad,
             792 - (y_bot - pad),
@@ -1297,6 +1305,29 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             stroke=0,
             fill=1,
         )
+
+    def labeled_header(
+        text: str,
+        x0: float,
+        y_top: float,
+        x1: float,
+        y_bot: float,
+        *,
+        size: float = 11,
+        font: str = bold,
+        align: str = "center",
+        grey: tuple[float, float, float] = header_grey,
+    ) -> None:
+        """Paint the header cell, then put the label back on top of the fill."""
+        fill_header(x0, y_top, x1, y_bot, grey=grey)
+        c.setFillColorRGB(0, 0, 0)
+        mid_y = (y_top + y_bot) / 2
+        width = (x1 - x0) - 6
+        height = (y_bot - y_top) - 2
+        if align == "left":
+            left(text, x0 + 2.2, mid_y, font=font, size=size, width=width, height=height)
+        else:
+            center(text, (x0 + x1) / 2, mid_y, font=font, size=size, width=width, height=height)
 
     # Uploaded part photo in the top-right drawing slot (same band as the TVM
     # logo). Cover the stock CAD artwork, then draw with the same bottom-left
@@ -1332,10 +1363,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
-    # Material Dims / Sign headings render lighter than Work Order / Due — paint
-    # the same header grey as the rest of the row.
-    fill_header(396.5, 212.4, 512.5, 237.9)
-    fill_header(512.5, 212.4, 575.1, 237.9)
+    # Cover the washed-out Material Dims / Sign heading cells, then redraw
+    # the labels so the boxes match Work Order / Due / Quantity / Material.
+    labeled_header("Material Dims:", 396.5, 212.4, 512.5, 237.9)
+    labeled_header("Sign:", 512.5, 212.4, 575.1, 237.9)
     c.setFillColorRGB(0, 0, 0)
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
     center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
@@ -1395,10 +1426,30 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
                 c.drawImage(logo, lx, ly, width=dw, height=dh)
     except Exception:
         logger.exception("Work-order TVM logo overlay failed")
-    # Material Type / Specification labels are unshaded in Excel — match the
-    # grey header cells on WORK ORDER / PO / Part.
-    fill_header(287.3, 108.0, 363.8, 130.5)
-    fill_header(287.3, 130.5, 363.8, 152.1)
+    # Material Type / Specification sit on a white Excel fill. Paint the same
+    # grey as the WORK ORDER / PO / Part rules and put the labels back.
+    labeled_header(
+        "Material Type:",
+        287.3,
+        108.0,
+        363.8,
+        130.5,
+        size=9.6,
+        font=regular,
+        align="left",
+        grey=excel_header_grey,
+    )
+    labeled_header(
+        "Material\nSpecification:",
+        287.3,
+        130.5,
+        363.8,
+        152.1,
+        size=9.6,
+        font=regular,
+        align="left",
+        grey=excel_header_grey,
+    )
     c.setFillColorRGB(0, 0, 0)
 
     # Excel Part 555 header cells are ~15pt tall. Keep type at 8.5pt and
