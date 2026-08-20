@@ -220,9 +220,18 @@ def check_fill() -> None:
     for sheet, coord in ((part, "A4"), (part, "Z56"), (program, "A2")):
         value = sheet[coord].value
         assert value in (None, ""), f"{sheet.title}!{coord} should be blank, got {value!r}"
+    assert part["W5"].alignment.horizontal == "center"
+    assert part["W5"].alignment.vertical == "center"
 
     assert_clean("docx", docx_text(docx))
     assert_clean("xlsx", xlsx_text(xlsx))
+    word = Document(BytesIO(docx))
+    dims_cell = word.tables[1].rows[1].cells[2]
+    sign_cell = word.tables[1].rows[1].cells[3]
+    assert dims_cell._tc is not sign_cell._tc, "Material Dims and Sign are still merged in the Word packet"
+    assert FIELDS["mat_dim"] in dims_cell.text, dims_cell.text
+    assert FIELDS["sign"] in sign_cell.text, sign_cell.text
+    assert FIELDS["mat_dim"] not in sign_cell.text
     for index, text in enumerate(pages, start=1):
         assert_clean(f"pdf page {index}", text)
 

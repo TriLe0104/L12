@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
 from sqlalchemy import select
@@ -257,6 +260,103 @@ def _set_cell_text(cell, text: str) -> None:
         first.text = text
     for para in paragraphs[1:]:
         para.text = ""
+    _center_cell(cell)
+
+
+def _center_cell(cell) -> None:
+    """Centre value cells horizontally and vertically like the PDF overlay."""
+    tc_pr = cell._tc.get_or_add_tcPr()
+    v_align = tc_pr.find(qn("w:vAlign"))
+    if v_align is None:
+        v_align = OxmlElement("w:vAlign")
+        tc_pr.append(v_align)
+    v_align.set(qn("w:val"), "center")
+    for para in cell.paragraphs:
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _tc_width_dxa(cell) -> str | None:
+    tc_pr = cell._tc.find(qn("w:tcPr"))
+    if tc_pr is None:
+        return None
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        return None
+    return tc_w.get(qn("w:w"))
+
+
+def _set_tc_width(tc, dxa: str) -> None:
+    tc_pr = tc.get_or_add_tcPr()
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        tc_w = OxmlElement("w:tcW")
+        tc_pr.append(tc_w)
+    tc_w.set(qn("w:w"), str(dxa))
+    tc_w.set(qn("w:type"), "dxa")
+
+
+def _split_spanned_cell(row, index: int, widths: list[str]) -> None:
+    """Unmerge a gridSpan value cell so each header column has its own box."""
+    from copy import deepcopy
+
+    cell = row.cells[index]
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    grid_span = tc_pr.find(qn("w:gridSpan"))
+    if grid_span is None:
+        return
+    span = int(grid_span.get(qn("w:val")) or "1")
+    if span < 2:
+        return
+    tc_pr.remove(grid_span)
+    if widths:
+        _set_tc_width(tc, widths[0])
+    cursor = tc
+    for offset in range(1, span):
+        new_tc = deepcopy(tc)
+        for text_el in new_tc.iter(qn("w:t")):
+            text_el.text = ""
+        if offset < len(widths):
+            new_pr = new_tc.find(qn("w:tcPr"))
+            if new_pr is None:
+                new_pr = OxmlElement("w:tcPr")
+                new_tc.insert(0, new_pr)
+            tc_w = new_pr.find(qn("w:tcW"))
+            if tc_w is None:
+                tc_w = OxmlElement("w:tcW")
+                new_pr.append(tc_w)
+            tc_w.set(qn("w:w"), str(widths[offset]))
+            tc_w.set(qn("w:type"), "dxa")
+        cursor.addnext(new_tc)
+        cursor = new_tc
+
+
+def _replace_docx_part_photo(doc: Document, image_bytes: bytes | None) -> None:
+    """Swap the static CAD drawing for the card's uploaded part photo."""
+    if not image_bytes:
+        return
+    from PIL import Image as PILImage
+
+    try:
+        pil = PILImage.open(io.BytesIO(image_bytes))
+    except Exception:
+        logger.exception("Word traveler part photo could not be opened")
+        return
+    if pil.mode == "RGBA":
+        bg = PILImage.new("RGB", pil.size, (255, 255, 255))
+        bg.paste(pil, mask=pil.split()[-1])
+        pil = bg
+    elif pil.mode != "RGB":
+        pil = pil.convert("RGB")
+    jpeg = io.BytesIO()
+    pil.save(jpeg, format="JPEG", quality=90)
+    blob = jpeg.getvalue()
+    image_rels = [rel for rel in doc.part.rels.values() if "image" in rel.reltype]
+    if not image_rels:
+        return
+    # Logo is the smaller JPEG; the part drawing is the larger floating picture.
+    target = max(image_rels, key=lambda rel: len(rel.target_part.blob))
+    target.target_part._blob = blob
 
 def _set_paragraph_text(paragraph, text: str) -> None:
     text = text if text is not None else ""
@@ -631,17 +731,15 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     _set_cell_text(tables[0].rows[0].cells[0], f"           Part ID: {_s(fields.get('part_number'))}")
 
     t1 = tables[1]
+    header_widths = [
+        w for w in (_tc_width_dxa(t1.rows[0].cells[2]), _tc_width_dxa(t1.rows[0].cells[3])) if w
+    ]
+    _split_spanned_cell(t1.rows[1], 2, header_widths)
     _set_cell_text(t1.rows[1].cells[0], _s(fields.get("work_order")))
     due = _traveler_date(fields.get("due_date"))
     _set_cell_text(t1.rows[1].cells[1], due)
-    material_dims = _s(fields.get("mat_dim"))
-    sign = _s(fields.get("sign"))
-    if t1.rows[1].cells[2]._tc is t1.rows[1].cells[3]._tc:
-        shared_value = "    ".join(part for part in (material_dims, sign) if part)
-        _set_cell_text(t1.rows[1].cells[2], shared_value)
-    else:
-        _set_cell_text(t1.rows[1].cells[2], material_dims)
-        _set_cell_text(t1.rows[1].cells[3], sign)
+    _set_cell_text(t1.rows[1].cells[2], _s(fields.get("mat_dim")))
+    _set_cell_text(t1.rows[1].cells[3], _s(fields.get("sign")))
 
     t2 = tables[2]
     _set_cell_text(t2.rows[1].cells[0], _s(fields.get("po_number")))
@@ -669,12 +767,20 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     if len(paras) >= 2:
         _set_paragraph_text(paras[1], f"\t{_s(fields.get('dims'))}")
 
+    thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
+    photo_bytes = load_bytes(str(thumb_url)) if thumb_url else None
+    _replace_docx_part_photo(doc, photo_bytes)
+
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
 
 def _xlsx_set(ws, coord: str, value: object) -> None:
     ws[coord] = value if value is not None and value != "" else None
+
+
+def _xlsx_center(ws, coord: str) -> None:
+    ws[coord].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 def _clear_workbook_artifacts(part, prog) -> None:
     """Blank template cells that cannot survive an openpyxl round-trip.
@@ -717,7 +823,9 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
     except (TypeError, ValueError):
         _xlsx_set(part, "AE3", _s(qty))
     _xlsx_set(part, "W5", _s(fields.get("material")))
+    _xlsx_center(part, "W5")
     _xlsx_set(part, "W6", _s(fields.get("material_spec")) or "Per Drawing")
+    _xlsx_center(part, "W6")
     # Order release date: only the explicit program date. Empty by default.
     # AC13 ships as =TODAY(); replace it so a live formula cannot bake in.
     _xlsx_set(part, "AC13", _traveler_date(fields.get("program_date")) or "")
