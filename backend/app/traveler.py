@@ -299,25 +299,39 @@ def resolve_created_by(db: Session, po: PurchaseOrder) -> str:
 
 MODEL_FILE_SUFFIXES = frozenset(
     {
-        ".3dxml", ".3mf", ".asm", ".catpart", ".catproduct", ".dwg", ".dxf",
-        ".iges", ".igs", ".ipt", ".jt", ".obj", ".par", ".prt", ".sat",
-        ".sldasm", ".sldprt", ".step", ".stl", ".stp", ".x_b", ".x_t",
+        ".3dm", ".3dxml", ".3mf", ".asm", ".catpart", ".catproduct", ".dwg",
+        ".dxf", ".fbx", ".iges", ".igs", ".ipt", ".jt", ".obj", ".par", ".prt",
+        ".sat", ".sldasm", ".sldprt", ".step", ".stl", ".stp", ".x_b", ".x_t",
     }
 )
 
 def _part_name_from_model(filename: object | None) -> str:
-    """Part name from the uploaded 3D model file, minus the CAD extension.
-
-    PurchaseOrder has no dedicated part-name column, so the model filename is
-    the only source. Only known CAD suffixes are stripped, otherwise a part
-    number that legitimately contains a dot would be truncated. The traveler
-    draft stays editable, so a different name can still be typed per PO.
-    """
+    """Stem of an uploaded 3D model filename, minus a known CAD extension."""
     raw = _s(filename)
     stem, dot, suffix = raw.rpartition(".")
     if dot and f".{suffix.lower()}" in MODEL_FILE_SUFFIXES:
         return stem.strip()
     return raw
+
+
+def _is_model_filename(value: object | None, model_filename: object | None = None) -> bool:
+    """True when *value* is the CAD upload name rather than a card part number."""
+    raw = _s(value)
+    if not raw:
+        return False
+    stem, dot, suffix = raw.rpartition(".")
+    if dot and f".{suffix.lower()}" in MODEL_FILE_SUFFIXES:
+        return True
+    model = _s(model_filename)
+    if model and raw in {model, _part_name_from_model(model)}:
+        return True
+    return False
+
+
+def _card_part_number(po: PurchaseOrder, first_part: dict[str, Any] | None) -> str:
+    if first_part and first_part.get("part_number"):
+        return _s(first_part.get("part_number"))
+    return _s(po.part_number)
 
 def _inspection_label(value: object) -> str:
     raw = _s(value).lower()
@@ -523,14 +537,8 @@ def draft_from_po(
         "mat_dim": _s(_part_field(first_part, "mat_dim", po.mat_dim or "")),
         "sign": created_by,
         "po_number": po.po_number,
-        "part_name": (
-            _s(first_part.get("part_name")) if first_part and first_part.get("part_name")
-            else _part_name_from_model(po.model_filename) or po.part_number
-        ),
-        "part_number": (
-            _s(first_part.get("part_number")) if first_part and first_part.get("part_number")
-            else po.part_number
-        ),
+        "part_number": _card_part_number(po, first_part),
+        "part_name": _card_part_number(po, first_part),
         "qty": (
             first_part.get("qty")
             if first_part and first_part.get("qty") is not None
@@ -572,9 +580,14 @@ def draft_from_po(
         if k not in skip_meta and (k in TRAVELER_ONLY_KEYS or k in detached)
     }
     merged = {**base, **editable}
-    # Drafts saved before part names were cleaned still hold the raw upload name,
-    # so strip the CAD extension on the merged value rather than only the base.
-    merged["part_name"] = _part_name_from_model(merged.get("part_name")) or base["part_name"]
+    model_file = None
+    if first_part:
+        model_file = first_part.get("model_filename")
+    model_file = model_file or getattr(po, "model_filename", None)
+    # Old drafts stored the CAD upload as Part Name. Always prefer the card
+    # part number unless the traveler field was typed as something else.
+    if _is_model_filename(merged.get("part_name"), model_file):
+        merged["part_name"] = base["part_name"]
     merged["created_by"] = created_by
     # Sign defaults to the creator only when the part has never saved a sign.
     if "sign" not in editable:

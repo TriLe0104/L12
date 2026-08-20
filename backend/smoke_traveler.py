@@ -189,6 +189,7 @@ def check_columns(payload: bytes) -> None:
 def check_part_names() -> None:
     assert _part_name_from_model("BOTTLE HIGH POLY.SLDPRT") == "BOTTLE HIGH POLY"
     assert _part_name_from_model("SMOKE_PART.stp") == "SMOKE_PART"
+    assert _part_name_from_model("BOTTLE HIGH POLY.fbx") == "BOTTLE HIGH POLY"
     # A part number that legitimately contains a dot must survive intact.
     assert _part_name_from_model("PN-1.25-REVB") == "PN-1.25-REVB"
     assert _part_name_from_model("") == ""
@@ -272,7 +273,7 @@ def check_api() -> None:
     fields = json.loads(raw)["fields"]
     assert fields.get("generated_by"), "traveler draft is missing generated_by"
     part_name = fields.get("part_name") or ""
-    assert not re.search(r"\.(sldprt|step|stp|iges|igs|x_t|3dm)$", part_name, re.I), (
+    assert not re.search(r"\.(sldprt|step|stp|iges|igs|x_t|3dm|fbx|obj)$", part_name, re.I), (
         f"part name still carries a CAD extension: {part_name!r}"
     )
 

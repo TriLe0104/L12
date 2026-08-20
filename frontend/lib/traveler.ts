@@ -60,13 +60,12 @@ export function cardToTravelerSource(
 ): TravelerFieldMap {
   const total = partCount > 0 ? partCount : 1;
   const partNo = partIndex != null ? partIndex + 1 : 1;
-  const partName = (draft as { part_name?: string }).part_name;
   return {
     work_order: draft.job_no ?? "",
     due_date: draft.due_date ?? "",
     mat_dim: draft.mat_dim ?? "",
     po_number: draft.po_number ?? "",
-    part_name: partName || draft.part_number || "",
+    part_name: draft.part_number ?? "",
     part_number: draft.part_number ?? "",
     qty: draft.qty ?? "",
     finish: draft.finish ?? "",
