@@ -278,6 +278,11 @@ export function JobCard({
               {(opts.partIndex ?? faceIndex) + 1} of {parts.length} parts
             </button>
           )}
+          {hideParts && parts.length > 1 && (
+            <span className="jobcard-print-part">
+              {(opts.partIndex ?? displayPartIndex(po)) + 1} of {parts.length}
+            </span>
+          )}
           {opts.current && isDeck && spread !== "stacked" && (
             <span className="jobcard-current-tag">Current</span>
           )}
@@ -410,7 +415,11 @@ export function JobCard({
   }
 
   const body = !isDeck ? (
-    renderFace(shown, { openDrawer: true, current: true, partIndex: 0 })
+    renderFace(shown, {
+      openDrawer: true,
+      current: true,
+      partIndex: hideParts ? displayPartIndex(shown) : 0,
+    })
   ) : spread !== "stacked" ? (
     <div className="jobcard-deal" data-count={parts.length} data-phase={spread}>
       {parts.map((_, i) => {

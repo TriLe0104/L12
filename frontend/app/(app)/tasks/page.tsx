@@ -536,9 +536,10 @@ export default function TasksPage() {
       <div className="print-card-sheet" aria-hidden="true">
         {printCards.flatMap((po) => {
           const n = po.parts?.length ?? 0;
-          const faces = n > 1 ? po.parts!.map((_, i) => poShowingPart(po, i)) : [po];
+          const faces =
+            n > 1 ? po.parts!.map((_, i) => poShowingPart(po, i)) : [po];
           return faces.map((face, i) => (
-            <div key={`${po.id}:${i}`} className="print-card-face">
+            <div key={`${po.id}:${n > 1 ? i : "solo"}`} className="print-card-face">
               <JobCard po={face} hideParts density="l" />
             </div>
           ));
