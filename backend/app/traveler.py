@@ -28,6 +28,7 @@ from typing import Any
 
 from docx import Document
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -53,7 +54,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 17
+OVERLAY_VERSION = 18
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -709,6 +710,7 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
     _xlsx_set(part, "AC13", _traveler_date(fields.get("program_date")) or "")
     finish = _s(fields.get("finish"))
     _xlsx_set(part, "D44", finish.lower() if finish.lower() in {"none", ""} else finish or "none")
+    part["D44"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     prog = wb[PROGRAM_SHEET]
     # Labels live in A4 / E4; values go beside them.
@@ -1465,7 +1467,20 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("material_spec") or "Per Drawing", 456.5, 141.3, size=9, width=176, height=18)
     printed_day, printed_when = _traveler_printed_at()
     center(printed_day, 516.9, 199.7, size=8, width=58, height=13)
-    center(fields.get("finish") or "none", 172.9, 607.18, font=bold, size=7.68, width=120, height=14)
+    # Finishing is D44:M45 (two short Excel rows). Cover the template's
+    # top-aligned "none" and centre in the full merged box, same as OP# 08.
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(111.1, 792 - 609.8, 124.5, 14.4, stroke=0, fill=1)
+    c.setFillColorRGB(0, 0, 0)
+    center(
+        fields.get("finish") or "none",
+        173.35,
+        602.6,
+        font=bold,
+        size=8,
+        width=118,
+        height=13,
+    )
     c.showPage()
 
     # Program sheet: PO / PART / QTY sit in the value cells (not on the label
