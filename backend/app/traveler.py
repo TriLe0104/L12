@@ -213,12 +213,18 @@ def traveler_filename(
     job_no: str,
     generated_at: datetime | None = None,
 ) -> str:
-    """Build a safe Traveler_{job}_{po}_{DDMMMYY}_{HHMMSS} filename."""
-    job = _filename_part(job_no or fields.get("work_order"), "Job")
+    """PO#, part#, download date, and (Part x of x) when the order has multiple parts."""
+    del job_no
     po_number = _filename_part(fields.get("po_number"), "PO")
+    part_number = _filename_part(fields.get("part_number"), "Part")
     stamp = generated_at or datetime.now().astimezone()
-    generated = f"{_traveler_date(stamp)}_{stamp:%H%M%S}"
-    return f"Traveler_{job}_{po_number}_{generated}.{extension}"
+    day = _traveler_date(stamp).replace("/", "-")
+    bits = [po_number, part_number, day]
+    part_of = _s(fields.get("part_of"))
+    match = re.match(r"Part\s+(\d+)\s+of\s+(\d+)", part_of, flags=re.IGNORECASE)
+    if match and int(match.group(2)) > 1:
+        bits.append(f"(Part {match.group(1)} of {match.group(2)})")
+    return f"{'_'.join(bits)}.{extension}"
 
 def _set_cell_text(cell, text: str) -> None:
     """Replace a Word table cell's visible text, keeping the first paragraph."""

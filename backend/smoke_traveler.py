@@ -14,7 +14,7 @@ caught by a byte-size check:
   * Material Dims and Sign drawn in their own columns, not one merged cell
 
 Part 2 hits the API on :8000 as admin and asserts the
-``Traveler_{job}_{po}_{DDMMMYY}_{HHMMSS}.{ext}`` download filename plus the
+``{po}_{part}_{mm-dd-yy}.ext`` download filename plus the
 activity trail. It only reads one PO (never J-55) and never persists a draft.
 """
 
@@ -95,10 +95,13 @@ FIELDS = {
 
 
 def name_pattern(job: str, po_number: str, extension: str) -> re.Pattern[str]:
-    """Traveler_{job}_{po}_{DDMMMYY}_{HHMMSS}.{ext}, sanitised parts escaped."""
+    """{po}_{part}_{mm-dd-yy}[_(Part x of n)].ext"""
+    del job
     return re.compile(
-        rf"^Traveler_{re.escape(job)}_{re.escape(po_number)}"
-        rf"_\d{{2}}[A-Z]{{3}}\d{{2}}_\d{{6}}\.{re.escape(extension)}$"
+        rf"^{re.escape(po_number)}_.+"
+        rf"_\d{{2}}-\d{{2}}-\d{{2}}"
+        rf"(?:_\(Part \d+ of \d+\))?"
+        rf"\.{re.escape(extension)}$"
     )
 
 
@@ -237,15 +240,13 @@ def check_fill() -> None:
     # Unsafe path characters collapse to underscores, and the HHMMSS suffix keeps
     # two downloads on the same day from overwriting each other.
     stamp = datetime(2026, 8, 6, 14, 30, 5).astimezone()
-    odd = {**FIELDS, "po_number": "PO / 123"}
+    odd = {**FIELDS, "po_number": "PO / 123", "part_of": "Part 2 of 4"}
     assert (
         traveler_filename(odd, "pdf", job_no="J 60", generated_at=stamp)
-        == "Traveler_J_60_PO_123_06AUG26_143005.pdf"
+        == "PO_123_SMOKE-001_08-06-26_(Part 2 of 4).pdf"
     )
-    later = datetime(2026, 8, 6, 14, 30, 6).astimezone()
-    assert traveler_filename(odd, "pdf", job_no="J 60", generated_at=later) != traveler_filename(
-        odd, "pdf", job_no="J 60", generated_at=stamp
-    )
+    single = traveler_filename(FIELDS, "pdf", job_no="J 60", generated_at=stamp)
+    assert single == "PO-SMOKE-1_SMOKE-001_08-06-26.pdf"
     print("OK in-process traveler fill")
 
 
