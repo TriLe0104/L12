@@ -53,7 +53,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 12
+OVERLAY_VERSION = 13
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1190,6 +1190,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         height: float,
         size: float = 10.5,
         cv: Any = None,
+        valign: str = "center",
     ) -> str | None:
         """Fill a Notes cell at a readable size. Leftover text is returned
         so the caller can append another Notes box."""
@@ -1206,7 +1207,10 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         if shown:
             n = len(shown)
             visual_h = (n - 1) * leading + size * 0.7
-            first_baseline = y1 - visual_h / 2 + size * 0.7
+            if valign == "top":
+                first_baseline = (y1 - height / 2) + 10 + size * 0.7
+            else:
+                first_baseline = y1 - visual_h / 2 + size * 0.7
             for index, row in enumerate(shown):
                 target.setFont(regular, size)
                 target.drawCentredString(x, 792 - (first_baseline + index * leading), row)
@@ -1239,6 +1243,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
             height=value_h - 12,
             size=10,
             cv=cv,
+            valign="top",
         )
 
     # Word Traveler. Every table cell in this template is centre-aligned, so the
@@ -1315,6 +1320,38 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     )
 
     c.showPage()
+
+    # Excel embeds a squat TVM bitmap. Cover it and draw the real logo
+    # at its native aspect, same size band as the traveler page.
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(64.0, 792 - 54.0 - 80.0, 210.0, 80.0, stroke=0, fill=1)
+    try:
+        logo_path = TEMPLATES_DIR / "tvm-logo.png"
+        if logo_path.is_file():
+            from reportlab.lib.utils import ImageReader
+            from PIL import Image as PILImage
+
+            logo_pil = PILImage.open(logo_path)
+            if logo_pil.mode == "RGBA":
+                bg = PILImage.new("RGB", logo_pil.size, (255, 255, 255))
+                bg.paste(logo_pil, mask=logo_pil.split()[-1])
+                logo_pil = bg
+            elif logo_pil.mode != "RGB":
+                logo_pil = logo_pil.convert("RGB")
+            logo_buf = io.BytesIO()
+            logo_pil.save(logo_buf, format="PNG")
+            logo_buf.seek(0)
+            logo = ImageReader(logo_buf)
+            lw, lh = logo.getSize()
+            box_w, box_h = 136.0, 78.0
+            if lw > 0 and lh > 0:
+                ratio = min(box_w / lw, box_h / lh)
+                dw, dh = lw * ratio, lh * ratio
+                lx = 66.0
+                ly = 792 - 56.0 - dh
+                c.drawImage(logo, lx, ly, width=dw, height=dh)
+    except Exception:
+        logger.exception("Work-order TVM logo overlay failed")
 
     # Excel Part 555 header cells are ~15pt tall. Keep type at 8.5pt and
     # centre on the value cell, not the label baseline, so WORK ORDER / PO /
