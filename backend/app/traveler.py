@@ -54,7 +54,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 18
+OVERLAY_VERSION = 19
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -1298,7 +1298,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         y_bot: float,
         grey: float = header_grey,
     ) -> None:
-        pad = 0.2
+        pad = 0.8
         c.setFillGray(grey)
         c.rect(
             x0 + pad,
@@ -1366,10 +1366,29 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
-    # Cover the washed-out Material Dims / Sign heading cells, then redraw
-    # the labels so the boxes match Work Order / Due / Quantity / Material.
+    # Paint every header with the same DeviceGray so Material Dims cannot
+    # render lighter than Work Order / Due / Quantity in Chrome.
+    labeled_header("Work Order #", 37.0, 212.4, 215.6, 237.9)
+    labeled_header("Due Date", 216.5, 212.4, 395.6, 237.9)
     labeled_header("Material Dims:", 396.5, 212.4, 512.5, 237.9)
     labeled_header("Sign:", 512.5, 212.4, 575.1, 237.9)
+    labeled_header("Customer PO #", 37.0, 286.0, 215.6, 311.3)
+    labeled_header("Part Name", 216.5, 286.0, 395.6, 311.3)
+    labeled_header("Quantity", 396.5, 286.0, 575.1, 311.3)
+    labeled_header("Finish", 37.0, 359.5, 215.7, 384.9)
+    labeled_header("Inserts", 216.6, 359.5, 395.3, 384.9)
+    labeled_header("Material", 396.4, 359.5, 575.1, 384.9)
+    labeled_header("Inspection", 37.0, 442.9, 215.6, 468.3)
+    labeled_header("Part Marking", 216.5, 442.9, 395.6, 468.3)
+    labeled_header(
+        "Certificates And\nSupplier Qualifications",
+        396.5,
+        436.1,
+        575.6,
+        475.0,
+        size=10,
+    )
+    labeled_header("Notes", 37.0, 592.0, 575.1, 621.7)
     c.setFillColorRGB(0, 0, 0)
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
     center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
@@ -1467,19 +1486,29 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     center(fields.get("material_spec") or "Per Drawing", 456.5, 141.3, size=9, width=176, height=18)
     printed_day, printed_when = _traveler_printed_at()
     center(printed_day, 516.9, 199.7, size=8, width=58, height=13)
-    # Finishing is D44:M45 (two short Excel rows). Cover the template's
-    # top-aligned "none" and centre in the full merged box, same as OP# 08.
+    # Finishing is D44:M45. Wipe the template "none" inside the rules so the
+    # box border stays intact, then centre the value in the full merged cell.
+    finish_x0, finish_x1 = 111.1, 235.6
+    finish_top, finish_bot = 595.4, 609.8
+    finish_pad = 1.3
     c.setFillColorRGB(1, 1, 1)
-    c.rect(111.1, 792 - 609.8, 124.5, 14.4, stroke=0, fill=1)
+    c.rect(
+        finish_x0 + finish_pad,
+        792 - (finish_bot - finish_pad),
+        (finish_x1 - finish_x0) - 2 * finish_pad,
+        (finish_bot - finish_top) - 2 * finish_pad,
+        stroke=0,
+        fill=1,
+    )
     c.setFillColorRGB(0, 0, 0)
     center(
         fields.get("finish") or "none",
-        173.35,
-        602.6,
+        (finish_x0 + finish_x1) / 2,
+        (finish_top + finish_bot) / 2,
         font=bold,
         size=8,
-        width=118,
-        height=13,
+        width=(finish_x1 - finish_x0) - 8,
+        height=(finish_bot - finish_top) - 3,
     )
     c.showPage()
 
