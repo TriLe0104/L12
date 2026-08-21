@@ -1226,23 +1226,29 @@ export default function DashboardPage() {
                         }
                         const partStatus = face.status ?? po.status;
                         const label = statusByKey.get(partStatus)?.label ?? partStatus;
+                        const secondary = face.secondary_status?.trim() || "";
                         return (
                           <td
                             key="status"
                             data-col="status"
                             style={widthStyle}
-                            title={label}
+                            title={secondary ? `${label} · ${secondary}` : label}
                           >
-                            <span
-                              className="dash-status"
-                              style={{
-                                ["--tone" as string]: resolveToneColor(
-                                  statusByKey.get(partStatus)?.tone ?? TONE_BY_STATUS[partStatus],
-                                ),
-                              }}
-                            >
-                              {label}
-                            </span>
+                            <div className="dash-status-stack">
+                              <span
+                                className="dash-status"
+                                style={{
+                                  ["--tone" as string]: resolveToneColor(
+                                    statusByKey.get(partStatus)?.tone ?? TONE_BY_STATUS[partStatus],
+                                  ),
+                                }}
+                              >
+                                {label}
+                              </span>
+                              {secondary && (
+                                <span className="dash-status-2">{secondary}</span>
+                              )}
+                            </div>
                           </td>
                         );
                       }
