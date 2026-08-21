@@ -117,7 +117,7 @@ export default function TaskCalendarPage() {
   const subtitle =
     scope === "everyone"
       ? `${allDoneCount}/${tasks.length} all assignments`
-      : `${mineTasks.length} of ${tasks.length} total · ${mineDoneCount}/${mineTasks.length} your current tasks`;
+      : `${mineDoneCount}/${mineTasks.length} my assignments`;
 
   const upsert = (saved: StaffTask) => {
     setTasks((prev) =>
