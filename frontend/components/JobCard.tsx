@@ -379,6 +379,11 @@ export function JobCard({
         <footer className="jobcard-status">
           <span>Status:</span>
           <b>{statusByKey.get(face.status ?? po.status)?.label ?? po.status_label}</b>
+          {face.secondary_status?.trim() && (
+            <em className="jobcard-status-2" title="Secondary status">
+              {face.secondary_status.trim()}
+            </em>
+          )}
           {!hideParts && (
             <button
               type="button"

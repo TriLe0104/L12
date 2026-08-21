@@ -76,6 +76,11 @@ export function poShowingPart(po: PurchaseOrder, index?: number): PurchaseOrder 
       : i === 0
         ? (po.body_color ?? null)
         : null,
+    secondary_status: Object.prototype.hasOwnProperty.call(p, "secondary_status")
+      ? (p.secondary_status ?? null)
+      : i === 0
+        ? (po.secondary_status ?? null)
+        : null,
     display_part_index: i,
   };
 }

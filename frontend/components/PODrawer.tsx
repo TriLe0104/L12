@@ -172,6 +172,11 @@ export function PODrawer({
         : idx === 0
           ? ((rec as PurchaseOrder).body_color ?? null)
           : null,
+      secondary_status: Object.prototype.hasOwnProperty.call(p, "secondary_status")
+        ? (p.secondary_status ?? null)
+        : idx === 0
+          ? ((rec as PurchaseOrder).secondary_status ?? null)
+          : null,
     } as PODraft;
   }
 
@@ -291,6 +296,7 @@ export function PODrawer({
               model_filename: d.model_filename ?? null,
               model_size: d.model_size ?? null,
               body_color: d.body_color ?? null,
+              secondary_status: d.secondary_status ?? null,
             };
             const poFields = {
               job_no: d.job_no,

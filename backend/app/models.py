@@ -151,6 +151,8 @@ class PurchaseOrder(Base):
     # single-part card (multi-part faces store their own on each parts[] dict).
     header_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     body_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Extra gray status line, per part (PO-level is the single-part fallback).
+    secondary_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates

@@ -104,6 +104,7 @@ export interface PurchaseOrder {
     note?: string | null;
     comment_count?: number;
     body_color?: string | null;
+    secondary_status?: string | null;
   }>;
   /** Which part the board cards show for everyone. Zero-based. */
   display_part_index?: number;
@@ -118,6 +119,8 @@ export interface PurchaseOrder {
   header_color?: string | null;
   /** Middle/spec fill. On multi-part orders each part can override this. */
   body_color?: string | null;
+  /** Gray extra status line, per part. */
+  secondary_status?: string | null;
   created_at: string;
   updated_at: string;
   /** Null only when no attributable change to the order exists in the trail. */

@@ -81,6 +81,7 @@ class POBase(BaseModel):
     custom_fields: dict[str, str | int | float | None] | None = None
     header_color: str | None = None
     body_color: str | None = None
+    secondary_status: str | None = None
 
 
 class POCreate(POBase):
@@ -107,6 +108,7 @@ class PartCreate(BaseModel):
     model_filename: str | None = None
     model_size: int | None = None
     body_color: str | None = None
+    secondary_status: str | None = None
 
 
 class PartUpdate(BaseModel):
@@ -129,6 +131,7 @@ class PartUpdate(BaseModel):
     model_filename: str | None = None
     model_size: int | None = None
     body_color: str | None = None
+    secondary_status: str | None = None
 
 
 class POUpdate(BaseModel):
@@ -161,6 +164,7 @@ class POUpdate(BaseModel):
     custom_fields: dict[str, str | int | float | None] | None = None
     header_color: str | None = None
     body_color: str | None = None
+    secondary_status: str | None = None
 
 
 class OwnerBrief(ORMModel):
@@ -229,6 +233,7 @@ class POOut(ORMModel):
     traveler_draft: dict[str, Any] | None = None
     header_color: str | None = None
     body_color: str | None = None
+    secondary_status: str | None = None
     created_at: datetime
     updated_at: datetime
     # Absent unless the route bothered to derive it; the list and every write

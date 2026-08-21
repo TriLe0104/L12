@@ -98,6 +98,9 @@ def _sanitize_color_fields(data: dict[str, Any]) -> None:
     for key in ("header_color", "body_color"):
         if key in data:
             data[key] = _norm_hex_color(data[key])
+    if "secondary_status" in data:
+        raw = str(data.get("secondary_status") or "").strip()
+        data["secondary_status"] = raw[:80] or None
 
 
 def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
@@ -126,6 +129,7 @@ def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
         "status": po.status,
         "note": po.note,
         "body_color": po.body_color,
+        "secondary_status": po.secondary_status,
     }
 
 
@@ -150,6 +154,7 @@ def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
         "status": payload.status or "need_material_size",
         "note": payload.note or "",
         "body_color": _norm_hex_color(payload.body_color),
+        "secondary_status": (payload.secondary_status or "").strip()[:80] or None,
     }
 
 

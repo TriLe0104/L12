@@ -676,6 +676,16 @@ export function CardEditor({
             </option>
           ))}
         </select>
+        <input
+          className="cell-input jobcard-status-2-input"
+          placeholder="Secondary status"
+          aria-label="Secondary status for this part"
+          title="Gray secondary status — this part only"
+          value={value.secondary_status ?? ""}
+          disabled={disabled}
+          maxLength={80}
+          onChange={(e) => onChange({ secondary_status: e.target.value || null })}
+        />
       </footer>
     </article>
   );

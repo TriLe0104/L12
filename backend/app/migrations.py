@@ -35,6 +35,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "certificates": "VARCHAR(500)",
         "header_color": "VARCHAR(7)",
         "body_color": "VARCHAR(7)",
+        "secondary_status": "VARCHAR(80)",
     },
     "users": {
         "avatar_url": "VARCHAR(1000)",

@@ -1184,6 +1184,27 @@ button.jobcard-thumb:focus-visible {
   min-width: 0;
 }
 
+.jobcard-status-2 {
+  min-width: 0;
+  max-width: 40%;
+  font-size: clamp(0.5rem, 4.2cqi + 0.05rem, 0.72rem);
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--steel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobcard-status-2-input {
+  flex: 1 1 6rem;
+  min-width: 5rem;
+  max-width: 11rem;
+  color: var(--steel);
+  font-weight: 700;
+}
+
 .jobcard-status span {
   font-size: 0.62rem;
   letter-spacing: 0.12em;
@@ -5064,7 +5085,8 @@ button.jobcard-thumb:focus-visible {
   }
 
   .print-card-face .jobcard-status b,
-  .print-card-face .jobcard-status span {
+  .print-card-face .jobcard-status span,
+  .print-card-face .jobcard-status-2 {
     font-size: 6pt;
   }
 
