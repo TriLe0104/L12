@@ -1042,7 +1042,7 @@ function KanbanEditor({
   return (
     <section className="settings-panel">
       <p className="muted">
-        Progress columns on Task cards. Each status belongs to exactly one column; dragging a card
+        Progress columns on Order cards. Each status belongs to exactly one column; dragging a card
         into a column sets its status to that column&apos;s first mapped status.
       </p>
       <ul ref={reorder.rootRef} className="settings-list settings-kanban-list">

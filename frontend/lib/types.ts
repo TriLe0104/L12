@@ -173,3 +173,31 @@ export interface StageMeta {
   tone: string;
   statuses: string[];
 }
+
+export interface StaffChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+export interface StaffTask {
+  id: string;
+  title: string;
+  description: string | null;
+  due_date: string;
+  done: boolean;
+  checklist: StaffChecklistItem[];
+  assignee: OwnerBrief;
+  creator: OwnerBrief;
+  created_at: string;
+  updated_at: string;
+}
+
+export type StaffTaskDraft = {
+  title: string;
+  description: string;
+  due_date: string;
+  assignee_id: string;
+  checklist: StaffChecklistItem[];
+  done?: boolean;
+};

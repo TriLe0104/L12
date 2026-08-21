@@ -312,7 +312,7 @@ export default function TasksPage() {
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Task cards</h1>
+          <h1 className="page-title">Order cards</h1>
           <p className="page-sub">
             {visibleCount} jobs{" "}
             {view === "board"

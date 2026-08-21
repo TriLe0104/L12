@@ -259,6 +259,42 @@ class TravelerDraftUpdate(BaseModel):
     detached: list[str] | None = None
 
 
+class ChecklistItem(BaseModel):
+    id: str
+    text: str
+    done: bool = False
+
+
+class StaffTaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    due_date: date
+    assignee_id: str
+    checklist: list[dict[str, Any]] | None = None
+
+
+class StaffTaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    due_date: date | None = None
+    assignee_id: str | None = None
+    checklist: list[dict[str, Any]] | None = None
+    done: bool | None = None
+
+
+class StaffTaskOut(ORMModel):
+    id: str
+    title: str
+    description: str | None
+    due_date: date
+    done: bool
+    checklist: list[ChecklistItem]
+    assignee: OwnerBrief
+    creator: OwnerBrief
+    created_at: datetime
+    updated_at: datetime
+
+
 class TravelerGenerateBody(BaseModel):
     """Optional field overrides when downloading a packet; may also persist."""
 

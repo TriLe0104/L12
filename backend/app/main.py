@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, meta, purchase_orders, uploads, users
+from .routers import auth, meta, purchase_orders, staff_tasks, uploads, users
 from .routers import settings as settings_router
 from .seed import seed
 from .storage import UPLOAD_DIR, object_storage_configured, serve_upload
@@ -56,6 +56,7 @@ app.include_router(users.router)
 app.include_router(meta.router)
 app.include_router(settings_router.router)
 app.include_router(uploads.router)
+app.include_router(staff_tasks.router)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 

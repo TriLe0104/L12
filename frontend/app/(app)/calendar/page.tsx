@@ -133,7 +133,7 @@ export default function CalendarPage() {
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Shop calendar</h1>
+          <h1 className="page-title">Order calendar</h1>
           <p className="page-sub">
             {pos.length} open purchase orders ·{" "}
             {yearView ? "click a day to open that month" : "drag a card to move its due date"}

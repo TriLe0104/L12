@@ -1,0 +1,140 @@
+.staff-task-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.12rem 0.35rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.staff-task-chip[data-mine="true"] {
+  border-color: color-mix(in srgb, var(--signal) 55%, var(--rule));
+  background: var(--signal-wash);
+}
+
+.staff-task-chip[data-done="true"] {
+  opacity: 0.55;
+}
+
+.staff-task-chip[data-done="true"] .staff-task-chip-title {
+  text-decoration: line-through;
+}
+
+.staff-task-chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-task-chip-who {
+  flex: none;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--steel);
+}
+
+.staff-task-error {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--stop) 35%, var(--rule));
+  background: color-mix(in srgb, var(--stop) 8%, #fff);
+  color: var(--stop);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.staff-task-notes {
+  height: auto;
+  min-height: 6rem;
+  padding: 0.5rem 0.625rem;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.staff-task-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel);
+}
+
+.staff-task-check ul {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.staff-task-check li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.staff-task-check li > label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.staff-task-check li span[data-done="true"] {
+  color: var(--steel);
+  text-decoration: line-through;
+}
+
+.staff-task-remove {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--steel);
+  cursor: pointer;
+}
+
+.staff-task-add {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.staff-task-add .field {
+  flex: 1;
+}
+
+.staff-task-done {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.staff-task-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--steel);
+}

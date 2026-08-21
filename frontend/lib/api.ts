@@ -4,6 +4,8 @@ import type {
   POComment,
   PODraft,
   PurchaseOrder,
+  StaffTask,
+  StaffTaskDraft,
   StageMeta,
   StatusMeta,
   User,
@@ -129,6 +131,25 @@ export const api = {
   orgs: () => request<string[]>("/api/users/orgs"),
   /** Just enough about each person to draw the owner picker. */
   assignableUsers: () => request<Assignee[]>("/api/users/assignable"),
+
+  listStaffTasks: (params: Record<string, string | undefined> = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v) as [string, string][],
+    ).toString();
+    return request<StaffTask[]>(`/api/staff-tasks${qs ? `?${qs}` : ""}`);
+  },
+  createStaffTask: (payload: StaffTaskDraft) =>
+    request<StaffTask>("/api/staff-tasks", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateStaffTask: (id: string, payload: Partial<StaffTaskDraft>) =>
+    request<StaffTask>(`/api/staff-tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteStaffTask: (id: string) =>
+    request<void>(`/api/staff-tasks/${id}`, { method: "DELETE" }),
 
   statuses: () => request<StatusMeta[]>("/api/meta/statuses"),
   stages: () => request<StageMeta[]>("/api/meta/stages"),

@@ -257,6 +257,26 @@ class Activity(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
 
 
+class StaffTask(Base):
+    """A one-off assignment from a manager/admin to a person, shown on Task calendar."""
+
+    __tablename__ = "staff_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[date] = mapped_column(Date, index=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    checklist: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    creator_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    assignee: Mapped[User] = relationship(foreign_keys=[assignee_id])
+    creator: Mapped[User] = relationship(foreign_keys=[creator_id])
+
+
 # The role hierarchy, written down exactly once. Higher number = more authority.
 # Every permission check in the app is derived from this table, so adding or
 # reordering a rung is a one-line change here plus its label below.
