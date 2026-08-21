@@ -11,9 +11,9 @@ import type { User } from "@/lib/types";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/task-calendar", label: "Task calendar" },
   { href: "/calendar", label: "Order calendar" },
   { href: "/tasks", label: "Order cards" },
-  { href: "/task-calendar", label: "Task calendar" },
 ];
 
 /** `/users` is the directory for the ranks that administer accounts and your own
