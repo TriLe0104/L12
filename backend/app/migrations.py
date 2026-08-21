@@ -33,6 +33,8 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "parts": "JSON",
         "display_part_index": "INTEGER NOT NULL DEFAULT 0",
         "certificates": "VARCHAR(500)",
+        "header_color": "VARCHAR(7)",
+        "body_color": "VARCHAR(7)",
     },
     "users": {
         "avatar_url": "VARCHAR(1000)",

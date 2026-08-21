@@ -79,6 +79,8 @@ class POBase(BaseModel):
     parts: list[dict[str, Any]] | None = None
     # Admin-defined attributes; keys match board settings customFields.
     custom_fields: dict[str, str | int | float | None] | None = None
+    header_color: str | None = None
+    body_color: str | None = None
 
 
 class POCreate(POBase):
@@ -104,6 +106,7 @@ class PartCreate(BaseModel):
     model_url: str | None = None
     model_filename: str | None = None
     model_size: int | None = None
+    body_color: str | None = None
 
 
 class PartUpdate(BaseModel):
@@ -125,6 +128,7 @@ class PartUpdate(BaseModel):
     model_url: str | None = None
     model_filename: str | None = None
     model_size: int | None = None
+    body_color: str | None = None
 
 
 class POUpdate(BaseModel):
@@ -155,6 +159,8 @@ class POUpdate(BaseModel):
     model_size: int | None = None
     owner_id: str | None = None
     custom_fields: dict[str, str | int | float | None] | None = None
+    header_color: str | None = None
+    body_color: str | None = None
 
 
 class OwnerBrief(ORMModel):
@@ -221,6 +227,8 @@ class POOut(ORMModel):
     # Editable traveler packet overrides. Legacy rows are a flat field map;
     # multi-part orders store `{ "0": {...}, "1": {...} }` keyed by part index.
     traveler_draft: dict[str, Any] | None = None
+    header_color: str | None = None
+    body_color: str | None = None
     created_at: datetime
     updated_at: datetime
     # Absent unless the route bothered to derive it; the list and every write

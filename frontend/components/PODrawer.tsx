@@ -167,6 +167,11 @@ export function PODrawer({
       model_url: media("model_url"),
       model_filename: media("model_filename"),
       model_size: media("model_size"),
+      body_color: Object.prototype.hasOwnProperty.call(p, "body_color")
+        ? (p.body_color ?? null)
+        : idx === 0
+          ? ((rec as PurchaseOrder).body_color ?? null)
+          : null,
     } as PODraft;
   }
 
@@ -285,6 +290,7 @@ export function PODrawer({
               model_url: d.model_url ?? null,
               model_filename: d.model_filename ?? null,
               model_size: d.model_size ?? null,
+              body_color: d.body_color ?? null,
             };
             const poFields = {
               job_no: d.job_no,
@@ -294,6 +300,7 @@ export function PODrawer({
               customer: d.customer,
               note: d.note,
               owner_id: d.owner_id,
+              header_color: d.header_color ?? null,
             };
             saved = await api.updatePOWithPart(record.id, poFields, selectedPartIndex, partPayload);
         } else {

@@ -147,6 +147,10 @@ class PurchaseOrder(Base):
     parts: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Which part the board cards show. Everyone sees this index; 0 is the first.
     display_part_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Job header bar color for the whole order; body/middle color for a
+    # single-part card (multi-part faces store their own on each parts[] dict).
+    header_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    body_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
 
     # 3D model slot: one per order, sitting beside the photo. The URL points at the
     # file exactly as uploaded -- no server-side conversion; the browser translates

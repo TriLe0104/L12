@@ -39,7 +39,38 @@ import { Avatar } from "./Avatar";
 import { ImageViewer } from "./ImageViewer";
 import { MaterialCombobox } from "./MaterialCombobox";
 import { ModelViewer } from "./ModelViewer";
+import { contrastInk, normalizeHex } from "@/lib/cardColors";
 import { LockGlyph, TONE_BY_PRIORITY, toneStyle } from "./JobCard";
+
+function ColorWell({
+  label,
+  value,
+  fallback,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string | null | undefined;
+  fallback: string;
+  disabled?: boolean;
+  onChange: (next: string | null) => void;
+}) {
+  const hex = normalizeHex(value) ?? fallback;
+  return (
+    <span className="card-color-well">
+      <input
+        type="color"
+        aria-label={label}
+        title={label}
+        value={hex}
+        disabled={disabled}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </span>
+  );
+}
 
 function hardwareOptionTruthy(option: string): boolean {
   const key = option.trim().toLowerCase();
@@ -324,8 +355,22 @@ export function CardEditor({
     }
   }
 
+  const headHex = normalizeHex(value.header_color);
+  const bodyHex = normalizeHex(value.body_color);
+  const colorVars = {
+    ...(headHex
+      ? { ["--card-head-bg" as string]: headHex, ["--card-head-ink" as string]: contrastInk(headHex) }
+      : {}),
+    ...(bodyHex ? { ["--card-body-bg" as string]: bodyHex } : {}),
+  };
+
   return (
-    <article className="jobcard jobcard-edit" style={toneStyle(value.status ?? "need_material_size", statusTone)}>
+    <article
+      className="jobcard jobcard-edit"
+      data-custom-head={headHex ? "true" : undefined}
+      data-custom-body={bodyHex ? "true" : undefined}
+      style={{ ...toneStyle(value.status ?? "need_material_size", statusTone), ...colorVars }}
+    >
       <header className="jobcard-head">
         <input
           className="cell-input job-input"
@@ -334,6 +379,13 @@ export function CardEditor({
           value={value.job_no ?? ""}
           disabled={disabled}
           onChange={(e) => onChange({ job_no: e.target.value })}
+        />
+        <ColorWell
+          label="Job header color — whole order"
+          value={value.header_color}
+          fallback="#e9eef2"
+          disabled={disabled}
+          onChange={(next) => onChange({ header_color: next })}
         />
         {lockable && (
           <button
@@ -368,6 +420,13 @@ export function CardEditor({
       </header>
 
       <div className="jobcard-body">
+        <ColorWell
+          label="Middle section color — this part"
+          value={value.body_color}
+          fallback="#ffffff"
+          disabled={disabled}
+          onChange={(next) => onChange({ body_color: next })}
+        />
         {/* Photo and model stack in one column so the model slot sits beside the
             spec grid rather than stealing a second column from it. */}
         <div className="card-wells">

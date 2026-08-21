@@ -21,6 +21,7 @@ import {
   MODEL_FORMAT_LABEL,
 } from "@/lib/model-format";
 import { resolveToneColor } from "@/lib/boardTypes";
+import { contrastInk, normalizeHex } from "@/lib/cardColors";
 import { displayPartIndex, poShowingPart } from "@/lib/parts";
 import type { PurchaseOrder } from "@/lib/types";
 import { CommentBubbleIcon, CommentThread } from "./CommentThread";
@@ -217,13 +218,23 @@ export function JobCard({
     const faceModel = assetUrl(face.model_url);
     const faceFormat = detectModelFormat(face.model_filename ?? face.model_url);
     const faceSize = formatModelSize(face.model_size);
+    const headHex = normalizeHex(po.header_color);
+    const bodyHex = normalizeHex(face.body_color);
+    const colorVars = {
+      ...(headHex
+        ? { ["--card-head-bg" as string]: headHex, ["--card-head-ink" as string]: contrastInk(headHex) }
+        : {}),
+      ...(bodyHex ? { ["--card-body-bg" as string]: bodyHex } : {}),
+    } as CSSProperties;
     return (
       <article
         className="jobcard"
         data-locked={po.locked}
         data-current={opts.current ? "true" : undefined}
         data-has-model={!!faceModel}
-        style={toneStyle(face.status ?? po.status, faceTone)}
+        data-custom-head={headHex ? "true" : undefined}
+        data-custom-body={bodyHex ? "true" : undefined}
+        style={{ ...toneStyle(face.status ?? po.status, faceTone), ...colorVars }}
         onClick={() => {
           if (opts.openDrawer) onClick?.(face);
         }}

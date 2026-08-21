@@ -103,6 +103,7 @@ export interface PurchaseOrder {
     status?: string;
     note?: string | null;
     comment_count?: number;
+    body_color?: string | null;
   }>;
   /** Which part the board cards show for everyone. Zero-based. */
   display_part_index?: number;
@@ -113,6 +114,10 @@ export interface PurchaseOrder {
   custom_fields: Record<string, string | number | null> | null;
   /** Editable traveler packet overrides persisted on the PO. */
   traveler_draft?: Record<string, string | number | null> | null;
+  /** Job header bar — one color for the whole order. */
+  header_color?: string | null;
+  /** Middle/spec fill. On multi-part orders each part can override this. */
+  body_color?: string | null;
   created_at: string;
   updated_at: string;
   /** Null only when no attributable change to the order exists in the trail. */

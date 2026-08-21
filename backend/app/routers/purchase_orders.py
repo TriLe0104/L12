@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import re
 import time
 from collections.abc import Sequence
 from datetime import date
@@ -79,6 +80,26 @@ def _as_parts_list(po: PurchaseOrder) -> list[dict[str, Any]]:
     return [dict(p) if isinstance(p, dict) else p for p in raw]
 
 
+_HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _norm_hex_color(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    raw = str(value).strip()
+    if not _HEX_COLOR.fullmatch(raw):
+        return None
+    if len(raw) == 4:
+        return ("#" + "".join(ch * 2 for ch in raw[1:])).lower()
+    return raw.lower()
+
+
+def _sanitize_color_fields(data: dict[str, Any]) -> None:
+    for key in ("header_color", "body_color"):
+        if key in data:
+            data[key] = _norm_hex_color(data[key])
+
+
 def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
     return {
         "part_number": po.part_number,
@@ -104,6 +125,7 @@ def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
         "model_size": po.model_size,
         "status": po.status,
         "note": po.note,
+        "body_color": po.body_color,
     }
 
 
@@ -127,12 +149,14 @@ def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
         "model_size": payload.model_size,
         "status": payload.status or "need_material_size",
         "note": payload.note or "",
+        "body_color": _norm_hex_color(payload.body_color),
     }
 
 
 def _apply_part_update(part: dict[str, Any], payload: PartUpdate) -> dict[str, Any]:
     """Apply only fields the client actually sent, including explicit nulls."""
     data = payload.model_dump(exclude_unset=True)
+    _sanitize_color_fields(data)
     if "part_number" in data and isinstance(data["part_number"], str):
         data["part_number"] = data["part_number"].strip()
     if "qty" in data and data["qty"] is not None:
@@ -594,6 +618,7 @@ def create_po(
     board_service.assert_known_priority(db, payload.priority)
     board_service.assert_known_custom_selects(db, payload.custom_fields)
     data = payload.model_dump()
+    _sanitize_color_fields(data)
     if data.get("custom_fields") is None:
         data["custom_fields"] = {}
     # Normalize textual fields that affect identity/matching so creating a new
@@ -886,6 +911,7 @@ def update_po_with_part(
         if "status" in changes:
             _assert_known_status(db, _status_key(changes["status"]))
 
+        _sanitize_color_fields(changes)
         # Apply simple attribute updates
         for key, val in changes.items():
             if hasattr(po, key):
@@ -1012,6 +1038,7 @@ def update_po(
     # Only the moved fields are assigned, which is also what leaves `updated_at`
     # alone on a save that changed nothing: SQLAlchemy issues no UPDATE for a row
     # it finds unmodified, so the stamp cannot claim an edit the trail denies.
+    _sanitize_color_fields(changed)
     for field, value in changed.items():
         setattr(po, field, value)
 

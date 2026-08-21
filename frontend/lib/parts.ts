@@ -71,6 +71,11 @@ export function poShowingPart(po: PurchaseOrder, index?: number): PurchaseOrder 
     model_url: inheritModel ? po.model_url : (p.model_url ?? null),
     model_filename: inheritModel ? po.model_filename : (p.model_filename ?? null),
     model_size: inheritModel ? po.model_size : (p.model_size ?? null),
+    body_color: Object.prototype.hasOwnProperty.call(p, "body_color")
+      ? (p.body_color ?? null)
+      : i === 0
+        ? (po.body_color ?? null)
+        : null,
     display_part_index: i,
   };
 }

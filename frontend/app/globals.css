@@ -511,7 +511,18 @@ textarea {
   flex-wrap: wrap;
   padding: 0.55rem 0.75rem;
   border-bottom: 1px solid var(--rule);
-  background: linear-gradient(180deg, #f4f7f9, #e9eef2);
+  background: var(--card-head-bg, linear-gradient(180deg, #f4f7f9, #e9eef2));
+  color: var(--card-head-ink, inherit);
+}
+
+.jobcard-head .jobcard-due:not([data-late="true"]) {
+  color: inherit;
+}
+
+.jobcard[data-custom-head="true"] .jobcard-head .cell-input,
+.jobcard[data-custom-head="true"] .jobcard-head .job-input {
+  color: inherit;
+  background: color-mix(in srgb, #fff 22%, transparent);
 }
 
 .jobcard-job {
@@ -826,6 +837,41 @@ textarea {
   gap: 0.6rem;
   padding: 0.6rem 0.75rem 0.75rem;
   min-width: 0;
+  position: relative;
+  background: var(--card-body-bg, transparent);
+}
+
+.jobcard[data-custom-body="true"] .spec dt,
+.jobcard[data-custom-body="true"] .spec dd {
+  background: color-mix(in srgb, var(--card-body-bg) 86%, transparent);
+}
+
+.card-color-well {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.jobcard-body > .card-color-well {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  z-index: 3;
+}
+
+.card-color-well input[type="color"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.card-color-well input[type="color"]:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .jobcard-thumb {
