@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import { canEdit, useAuth } from "@/lib/auth";
@@ -49,9 +49,10 @@ export function StaffTaskDrawer({
 }) {
   const { user } = useAuth();
   const isEditor = canEdit(user);
+  const isNew = !task;
   const isCreator = !!task && user?.id === task.creator.id;
   const isAssignee = !!task && user?.id === task.assignee.id;
-  const canEditAll = isEditor || isCreator;
+  const canEditAll = isEditor || isCreator || isNew;
   const canCheck = canEditAll || isAssignee;
 
   const [title, setTitle] = useState(task?.title ?? "");
@@ -68,6 +69,7 @@ export function StaffTaskDrawer({
   const [draftItem, setDraftItem] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const skipAutosave = useRef(true);
 
   const doneCount = useMemo(
     () => checklist.filter((item) => item.done).length,
@@ -95,9 +97,8 @@ export function StaffTaskDrawer({
     setDraftItem("");
   }
 
-  async function save() {
-    if (!canEditAll && !task) return;
-    if (canEditAll && (!title.trim() || !assigneeId)) {
+  async function persist(closeAfterCreate = false) {
+    if (isNew && (!title.trim() || !assigneeId)) {
       setError("Title and assignee are required");
       return;
     }
@@ -115,13 +116,27 @@ export function StaffTaskDrawer({
         ? await api.updateStaffTask(task.id, canEditAll ? payload : { checklist })
         : await api.createStaffTask(payload);
       onSaved(saved);
-      if (!task) onClose();
+      if (closeAfterCreate && isNew) onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the task");
     } finally {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (isNew) return;
+    if (skipAutosave.current) {
+      skipAutosave.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void persist();
+    }, 400);
+    return () => window.clearTimeout(timer);
+    // persist reads the latest state from this render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, dueDate, assigneeId, checklist]);
 
   async function remove() {
     if (!task || !isEditor) return;
@@ -139,21 +154,14 @@ export function StaffTaskDrawer({
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <aside className="drawer staff-task-drawer" role="dialog" aria-label={task ? "Task" : "New task"}>
+      <aside className="drawer staff-task-drawer" role="dialog" aria-label={isNew ? "New task" : "Task"}>
         <header className="drawer-head">
-          <strong>{task ? "Task" : "New task"}</strong>
+          <strong>{isNew ? "New task" : "Task"}</strong>
           <div className="drawer-head-actions">
+            {!isNew && busy && <span className="staff-task-saving">Saving…</span>}
             {task && isEditor && (
               <button className="btn" onClick={() => void remove()} disabled={busy}>
                 Delete
-              </button>
-            )}
-            <button className="btn" onClick={onClose}>
-              Close
-            </button>
-            {(canEditAll || (task && canCheck)) && (
-              <button className="btn btn-primary" onClick={() => void save()} disabled={busy}>
-                {busy ? "Saving…" : "Save"}
               </button>
             )}
           </div>
@@ -288,16 +296,25 @@ export function StaffTaskDrawer({
 
           {checklist.length > 0 && (
             <p className="staff-task-complete" data-done={allDone}>
-              {allDone ? "Task complete — every checklist item is done" : "Task completes automatically when every item is checked"}
+              {allDone
+                ? "Task complete — every checklist item is done"
+                : "Task completes automatically when every item is checked"}
             </p>
           )}
 
-          {task && (
-            <p className="staff-task-meta">
-              Created by {task.creator.name}
-            </p>
-          )}
+          {task && <p className="staff-task-meta">Created by {task.creator.name}</p>}
         </div>
+        {isNew && (
+          <footer className="staff-task-foot">
+            <button
+              className="btn btn-primary"
+              onClick={() => void persist(true)}
+              disabled={busy}
+            >
+              {busy ? "Creating…" : "Create"}
+            </button>
+          </footer>
+        )}
       </aside>
     </>
   );
