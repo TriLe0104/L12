@@ -66,9 +66,8 @@ export default function TaskCalendarPage() {
   const load = useCallback(async () => {
     const params: Record<string, string | undefined> = {};
     if (query.trim()) params.q = query.trim();
-    if (scope === "mine") params.mine = "true";
     setTasks(await api.listStaffTasks(params));
-  }, [query, scope]);
+  }, [query]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -82,9 +81,15 @@ export default function TaskCalendarPage() {
     api.assignableUsers().then(setPeople).catch(() => setPeople([]));
   }, [canAssign]);
 
+  const mineTasks = useMemo(
+    () => tasks.filter((task) => task.assignee.id === user?.id),
+    [tasks, user?.id],
+  );
+  const visibleTasks = scope === "mine" ? mineTasks : tasks;
+
   const events = useMemo(
     () =>
-      tasks.map((task) => ({
+      visibleTasks.map((task) => ({
         id: task.id,
         start: task.due_date,
         allDay: true,
@@ -93,21 +98,26 @@ export default function TaskCalendarPage() {
         durationEditable: false,
         extendedProps: { task },
       })),
-    [tasks, canAssign],
+    [visibleTasks, canAssign],
   );
 
   const byDay = useMemo(() => {
     const map = new Map<string, { total: number; done: number }>();
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       const cur = map.get(task.due_date) ?? { total: 0, done: 0 };
       cur.total += 1;
       if (task.done) cur.done += 1;
       map.set(task.due_date, cur);
     }
     return map;
-  }, [tasks]);
+  }, [visibleTasks]);
 
-  const completeCount = useMemo(() => tasks.filter((task) => task.done).length, [tasks]);
+  const allDoneCount = useMemo(() => tasks.filter((task) => task.done).length, [tasks]);
+  const mineDoneCount = useMemo(() => mineTasks.filter((task) => task.done).length, [mineTasks]);
+  const subtitle =
+    scope === "everyone"
+      ? `${allDoneCount}/${tasks.length} all assignments`
+      : `${mineTasks.length} of ${tasks.length} total · ${mineDoneCount}/${mineTasks.length} your current tasks`;
 
   const upsert = (saved: StaffTask) => {
     setTasks((prev) =>
@@ -133,11 +143,7 @@ export default function TaskCalendarPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Task calendar</h1>
-          <p className="page-sub">
-            {completeCount}/{tasks.length || 0} completed
-            {scope === "mine" ? " · assigned to you" : ""} ·{" "}
-            {canAssign ? "managers assign people a due date, notes, and a checklist" : "your assignments"}
-          </p>
+          <p className="page-sub">{subtitle}</p>
         </div>
         <div className="head-tools">
           <input
