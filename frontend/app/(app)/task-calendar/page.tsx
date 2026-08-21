@@ -115,8 +115,8 @@ export default function TaskCalendarPage() {
         ? prev.map((row) => (row.id === saved.id ? saved : row))
         : [...prev, saved],
     );
-    setSelected(saved);
     setCreating(false);
+    setSelected((cur) => (cur ? saved : null));
   };
 
   const openCreate = (due?: string) => {

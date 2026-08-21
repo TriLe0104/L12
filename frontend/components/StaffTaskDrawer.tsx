@@ -115,6 +115,7 @@ export function StaffTaskDrawer({
         ? await api.updateStaffTask(task.id, canEditAll ? payload : { checklist })
         : await api.createStaffTask(payload);
       onSaved(saved);
+      if (!task) onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the task");
     } finally {
