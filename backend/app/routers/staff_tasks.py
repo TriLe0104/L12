@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -19,6 +19,11 @@ router = APIRouter(prefix="/api/staff-tasks", tags=["staff-tasks"])
 
 CHECKLIST_MAX = 40
 ITEM_TEXT_MAX = 200
+COMMENT_MAX = 1000
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _norm_checklist(raw: object) -> list[dict[str, Any]]:
@@ -26,6 +31,8 @@ def _norm_checklist(raw: object) -> list[dict[str, Any]]:
         return []
     items: list[dict[str, Any]] = []
     for entry in raw:
+        comment = ""
+        completed_at = None
         if isinstance(entry, str):
             text = entry.strip()
             done = False
@@ -35,14 +42,31 @@ def _norm_checklist(raw: object) -> list[dict[str, Any]]:
             done = bool(entry.get("done"))
             raw_id = str(entry.get("id") or "").strip()
             item_id = raw_id or str(uuid.uuid4())
+            comment = str(entry.get("comment") or "").strip()[:COMMENT_MAX]
+            stamp = str(entry.get("completed_at") or "").strip() or None
+            completed_at = stamp if done else None
+            if done and not completed_at:
+                completed_at = _now_iso()
         else:
             continue
         if not text:
             continue
-        items.append({"id": item_id, "text": text[:ITEM_TEXT_MAX], "done": done})
+        items.append(
+            {
+                "id": item_id,
+                "text": text[:ITEM_TEXT_MAX],
+                "done": done,
+                "comment": comment,
+                "completed_at": completed_at,
+            }
+        )
         if len(items) >= CHECKLIST_MAX:
             break
     return items
+
+
+def _checklist_done(items: list[dict[str, Any]]) -> bool:
+    return bool(items) and all(bool(item.get("done")) for item in items)
 
 
 def _to_out(row: StaffTask) -> StaffTaskOut:
@@ -130,6 +154,7 @@ def create_task(
         creator_id=actor.id,
         checklist=_norm_checklist(payload.checklist),
     )
+    row.done = _checklist_done(row.checklist or [])
     db.add(row)
     db.commit()
     return _to_out(_load(db, row.id))
@@ -159,7 +184,7 @@ def update_task(
             status.HTTP_403_FORBIDDEN,
             "Only a manager or the person who created this task can edit it",
         )
-    if ("checklist" in data or "done" in data) and not _can_check_off(actor, row):
+    if "checklist" in data and not _can_check_off(actor, row):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Only the assignee or a manager can update the checklist",
@@ -178,8 +203,7 @@ def update_task(
         row.assignee_id = data["assignee_id"]
     if "checklist" in data:
         row.checklist = _norm_checklist(data["checklist"])
-    if "done" in data and data["done"] is not None:
-        row.done = bool(data["done"])
+    row.done = _checklist_done(_norm_checklist(row.checklist))
     db.commit()
     return _to_out(_load(db, row.id))
 

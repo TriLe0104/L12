@@ -32,11 +32,27 @@
   white-space: nowrap;
 }
 
+.staff-task-chip-progress {
+  flex: none;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--steel);
+}
+
 .staff-task-chip-who {
   flex: none;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  color: var(--steel);
+}
+
+.staff-task-day-count {
+  margin: 0.1rem 0 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--steel);
 }
 
@@ -79,11 +95,19 @@
 
 .staff-task-check li {
   display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.staff-task-item-top {
+  display: flex;
   align-items: center;
   gap: 0.4rem;
 }
 
-.staff-task-check li > label {
+.staff-task-check li > .staff-task-item-top > label {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -94,6 +118,23 @@
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink);
+}
+
+.staff-task-item-note {
+  height: auto;
+  min-height: 2.6rem;
+  padding: 0.35rem 0.5rem;
+  resize: vertical;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.staff-task-stamp {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--steel);
 }
 
 .staff-task-check li span[data-done="true"] {
@@ -122,15 +163,15 @@
   flex: 1;
 }
 
-.staff-task-done {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--ink);
+.staff-task-complete {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--steel);
+}
+
+.staff-task-complete[data-done="true"] {
+  color: var(--go);
 }
 
 .staff-task-meta {

@@ -17,10 +17,26 @@ const FILTER_KEY = "po_calendar_task_cal_filter";
 
 type Scope = "everyone" | "mine";
 
+function isoDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function progress(task: StaffTask) {
+  const total = task.checklist?.length ?? 0;
+  const done = (task.checklist ?? []).filter((item) => item.done).length;
+  return { done, total };
+}
+
 function TaskChip({ task, mine }: { task: StaffTask; mine: boolean }) {
+  const { done, total } = progress(task);
   return (
     <span className="staff-task-chip" data-mine={mine} data-done={task.done}>
       <span className="staff-task-chip-title">{task.title}</span>
+      {total > 0 && (
+        <span className="staff-task-chip-progress">
+          {done}/{total}
+        </span>
+      )}
       <span className="staff-task-chip-who">{task.assignee.initials}</span>
     </span>
   );
@@ -80,6 +96,19 @@ export default function TaskCalendarPage() {
     [tasks, canAssign],
   );
 
+  const byDay = useMemo(() => {
+    const map = new Map<string, { total: number; done: number }>();
+    for (const task of tasks) {
+      const cur = map.get(task.due_date) ?? { total: 0, done: 0 };
+      cur.total += 1;
+      if (task.done) cur.done += 1;
+      map.set(task.due_date, cur);
+    }
+    return map;
+  }, [tasks]);
+
+  const completeCount = useMemo(() => tasks.filter((task) => task.done).length, [tasks]);
+
   const upsert = (saved: StaffTask) => {
     setTasks((prev) =>
       prev.some((row) => row.id === saved.id)
@@ -105,7 +134,8 @@ export default function TaskCalendarPage() {
         <div>
           <h1 className="page-title">Task calendar</h1>
           <p className="page-sub">
-            {tasks.length} {scope === "mine" ? "assigned to you" : "tasks"} ·{" "}
+            {completeCount}/{tasks.length || 0} completed
+            {scope === "mine" ? " · assigned to you" : ""} ·{" "}
             {canAssign ? "managers assign people a due date, notes, and a checklist" : "your assignments"}
           </p>
         </div>
@@ -147,6 +177,19 @@ export default function TaskCalendarPage() {
           height="auto"
           dayMaxEvents={4}
           firstDay={0}
+          dayCellContent={(arg) => {
+            const stats = byDay.get(isoDay(arg.date));
+            return (
+              <>
+                <div className="fc-daygrid-day-number">{arg.dayNumberText}</div>
+                {stats && (
+                  <div className="staff-task-day-count">
+                    {stats.done}/{stats.total} completed
+                  </div>
+                )}
+              </>
+            );
+          }}
           dateClick={(arg) => {
             if (canAssign) openCreate(arg.dateStr.slice(0, 10));
           }}

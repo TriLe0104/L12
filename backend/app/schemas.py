@@ -263,6 +263,8 @@ class ChecklistItem(BaseModel):
     id: str
     text: str
     done: bool = False
+    comment: str = ""
+    completed_at: str | None = None
 
 
 class StaffTaskCreate(BaseModel):

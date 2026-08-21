@@ -178,6 +178,8 @@ export interface StaffChecklistItem {
   id: string;
   text: string;
   done: boolean;
+  comment: string;
+  completed_at: string | null;
 }
 
 export interface StaffTask {
@@ -199,5 +201,4 @@ export type StaffTaskDraft = {
   due_date: string;
   assignee_id: string;
   checklist: StaffChecklistItem[];
-  done?: boolean;
 };

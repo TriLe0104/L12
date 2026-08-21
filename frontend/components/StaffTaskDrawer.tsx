@@ -16,7 +16,20 @@ function newItem(text = ""): StaffChecklistItem {
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `c-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return { id, text, done: false };
+  return { id, text, done: false, comment: "", completed_at: null };
+}
+
+function formatCompleted(iso: string | null) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export function StaffTaskDrawer({
@@ -46,10 +59,13 @@ export function StaffTaskDrawer({
   const [dueDate, setDueDate] = useState(task?.due_date ?? defaultDue ?? todayIso());
   const [assigneeId, setAssigneeId] = useState(task?.assignee.id ?? people[0]?.id ?? "");
   const [checklist, setChecklist] = useState<StaffChecklistItem[]>(
-    task?.checklist?.length ? task.checklist : [],
+    (task?.checklist ?? []).map((item) => ({
+      ...item,
+      comment: item.comment ?? "",
+      completed_at: item.completed_at ?? null,
+    })),
   );
   const [draftItem, setDraftItem] = useState("");
-  const [done, setDone] = useState(!!task?.done);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -57,6 +73,20 @@ export function StaffTaskDrawer({
     () => checklist.filter((item) => item.done).length,
     [checklist],
   );
+  const allDone = checklist.length > 0 && doneCount === checklist.length;
+
+  function setItem(id: string, patch: Partial<StaffChecklistItem>) {
+    setChecklist((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const next = { ...row, ...patch };
+        if (Object.prototype.hasOwnProperty.call(patch, "done")) {
+          next.completed_at = next.done ? patch.completed_at ?? new Date().toISOString() : null;
+        }
+        return next;
+      }),
+    );
+  }
 
   function addItem() {
     const text = draftItem.trim();
@@ -80,15 +110,9 @@ export function StaffTaskDrawer({
         due_date: dueDate,
         assignee_id: assigneeId,
         checklist,
-        done,
       };
       const saved = task
-        ? await api.updateStaffTask(
-            task.id,
-            canEditAll
-              ? payload
-              : { checklist, done },
-          )
+        ? await api.updateStaffTask(task.id, canEditAll ? payload : { checklist })
         : await api.createStaffTask(payload);
       onSaved(saved);
     } catch (err) {
@@ -201,32 +225,41 @@ export function StaffTaskDrawer({
             <ul>
               {checklist.map((item) => (
                 <li key={item.id}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      disabled={!canCheck}
-                      onChange={(e) =>
-                        setChecklist((prev) =>
-                          prev.map((row) =>
-                            row.id === item.id ? { ...row, done: e.target.checked } : row,
-                          ),
-                        )
-                      }
-                    />
-                    <span data-done={item.done}>{item.text}</span>
-                  </label>
-                  {canEditAll && (
-                    <button
-                      type="button"
-                      className="staff-task-remove"
-                      aria-label="Remove item"
-                      onClick={() =>
-                        setChecklist((prev) => prev.filter((row) => row.id !== item.id))
-                      }
-                    >
-                      ×
-                    </button>
+                  <div className="staff-task-item-top">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={item.done}
+                        disabled={!canCheck}
+                        onChange={(e) => setItem(item.id, { done: e.target.checked })}
+                      />
+                      <span data-done={item.done}>{item.text}</span>
+                    </label>
+                    {canEditAll && (
+                      <button
+                        type="button"
+                        className="staff-task-remove"
+                        aria-label="Remove item"
+                        onClick={() =>
+                          setChecklist((prev) => prev.filter((row) => row.id !== item.id))
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    className="field staff-task-item-note"
+                    rows={2}
+                    value={item.comment}
+                    disabled={!canCheck}
+                    placeholder="Comment on this item"
+                    onChange={(e) => setItem(item.id, { comment: e.target.value })}
+                  />
+                  {item.done && item.completed_at && (
+                    <div className="staff-task-stamp">
+                      Completed {formatCompleted(item.completed_at)}
+                    </div>
                   )}
                 </li>
               ))}
@@ -252,16 +285,10 @@ export function StaffTaskDrawer({
             )}
           </section>
 
-          {task && (
-            <label className="staff-task-done">
-              <input
-                type="checkbox"
-                checked={done}
-                disabled={!canCheck}
-                onChange={(e) => setDone(e.target.checked)}
-              />
-              Mark task complete
-            </label>
+          {checklist.length > 0 && (
+            <p className="staff-task-complete" data-done={allDone}>
+              {allDone ? "Task complete — every checklist item is done" : "Task completes automatically when every item is checked"}
+            </p>
           )}
 
           {task && (
