@@ -31,7 +31,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter, range_boundaries
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -57,7 +59,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 20
+OVERLAY_VERSION = 21
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -206,18 +208,66 @@ def _traveler_printed_at(now: datetime | None = None) -> tuple[str, str]:
     when = f"{day} {clock}" + (f" {zone}" if zone else "")
     return day, when
 
-def _traveler_page_logo_bytes() -> bytes | None:
-    """The TVM mark as it appears on traveler page 1 (not the squat Excel bitmap)."""
-    try:
-        from pypdf import PdfReader
+def _photo_bytes(fields: dict[str, Any] | None) -> bytes | None:
+    """Card photo for traveler / work-order / program-sheet slots."""
+    if not isinstance(fields, dict):
+        return None
+    thumb_url = fields.get("thumbnail_url")
+    return load_bytes(str(thumb_url)) if thumb_url else None
 
-        images = PdfReader(str(TEMPLATE_BASE_PDF)).pages[0].images
-        if images and images[0].data:
-            return images[0].data
+
+def _pil_rgb(img_bytes: bytes):
+    from PIL import Image as PILImage
+
+    pil = PILImage.open(io.BytesIO(img_bytes))
+    if pil.mode == "RGBA":
+        bg = PILImage.new("RGB", pil.size, (255, 255, 255))
+        bg.paste(pil, mask=pil.split()[-1])
+        return bg
+    if pil.mode != "RGB":
+        return pil.convert("RGB")
+    return pil
+
+
+def _overlay_draw_photo(
+    c,
+    img_bytes: bytes | None,
+    x: float,
+    y_top: float,
+    w: float,
+    h: float,
+    *,
+    wipe: bool = False,
+) -> None:
+    """Fit a photo inside a PDF box. y_top is from the top of the page."""
+    pad = 1.4
+    inner_x = x + pad
+    inner_y_top = y_top + pad
+    inner_w = max(w - 2 * pad, 1.0)
+    inner_h = max(h - 2 * pad, 1.0)
+    if wipe:
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(x, 792 - y_top - h, w, h, stroke=0, fill=1)
+    if not img_bytes:
+        return
+    try:
+        from reportlab.lib.utils import ImageReader
+
+        pil = _pil_rgb(img_bytes)
+        png = io.BytesIO()
+        pil.save(png, format="PNG")
+        png.seek(0)
+        img = ImageReader(png)
+        iw, ih = img.getSize()
+        if iw <= 0 or ih <= 0:
+            return
+        ratio = min(inner_w / iw, inner_h / ih)
+        draw_w, draw_h = iw * ratio, ih * ratio
+        img_x = inner_x + (inner_w - draw_w) / 2
+        img_y = 792 - inner_y_top - draw_h - (inner_h - draw_h) / 2
+        c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h)
     except Exception:
-        logger.exception("Could not extract traveler page TVM logo")
-    path = TEMPLATES_DIR / "tvm-logo.png"
-    return path.read_bytes() if path.is_file() else None
+        logger.exception("Traveler photo overlay failed")
 
 
 def _filename_part(value: object | None, fallback: str) -> str:
@@ -404,6 +454,7 @@ MODEL_FILE_SUFFIXES = frozenset(
         ".sat", ".sldasm", ".sldprt", ".step", ".stl", ".stp", ".x_b", ".x_t",
     }
 )
+STEP_FILE_SUFFIXES = frozenset({".stp", ".step"})
 
 def _part_name_from_model(filename: object | None) -> str:
     """Stem of an uploaded 3D model filename, minus a known CAD extension."""
@@ -412,6 +463,15 @@ def _part_name_from_model(filename: object | None) -> str:
     if dot and f".{suffix.lower()}" in MODEL_FILE_SUFFIXES:
         return stem.strip()
     return raw
+
+
+def _part_name_from_stp(filename: object | None) -> str:
+    """Traveler Part Name: STEP/STP stem only. Other CAD uploads are ignored."""
+    raw = _s(filename)
+    stem, dot, suffix = raw.rpartition(".")
+    if dot and f".{suffix.lower()}" in STEP_FILE_SUFFIXES:
+        return stem.strip()
+    return ""
 
 
 def _is_model_filename(value: object | None, model_filename: object | None = None) -> bool:
@@ -638,7 +698,13 @@ def draft_from_po(
         "sign": created_by,
         "po_number": po.po_number,
         "part_number": _card_part_number(po, first_part),
-        "part_name": _card_part_number(po, first_part),
+        "part_name": (
+            _part_name_from_stp(
+                (first_part.get("model_filename") if first_part else None)
+                or getattr(po, "model_filename", None)
+            )
+            or _card_part_number(po, first_part)
+        ),
         "qty": (
             first_part.get("qty")
             if first_part and first_part.get("qty") is not None
@@ -684,8 +750,9 @@ def draft_from_po(
     if first_part:
         model_file = first_part.get("model_filename")
     model_file = model_file or getattr(po, "model_filename", None)
-    # Old drafts stored the CAD upload as Part Name. Always prefer the card
-    # part number unless the traveler field was typed as something else.
+    # Old drafts stored a CAD upload (often .fbx) as Part Name. Prefer the
+    # STEP/STP stem when one is on the card, else the card part number,
+    # unless the traveler field was typed as something else.
     if _is_model_filename(merged.get("part_name"), model_file):
         merged["part_name"] = base["part_name"]
     merged["created_by"] = created_by
@@ -767,9 +834,7 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     if len(paras) >= 2:
         _set_paragraph_text(paras[1], f"\t{_s(fields.get('dims'))}")
 
-    thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
-    photo_bytes = load_bytes(str(thumb_url)) if thumb_url else None
-    _replace_docx_part_photo(doc, photo_bytes)
+    _replace_docx_part_photo(doc, _photo_bytes(fields))
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -781,6 +846,52 @@ def _xlsx_set(ws, coord: str, value: object) -> None:
 
 def _xlsx_center(ws, coord: str) -> None:
     ws[coord].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def _xlsx_merged_box_px(ws, cell_range: str) -> tuple[int, int]:
+    """Approximate pixel size of a merged range for a floating picture."""
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    width_px = 0
+    for col in range(min_col, max_col + 1):
+        letter = get_column_letter(col)
+        raw = ws.column_dimensions[letter].width
+        width_px += int((raw if raw is not None else 8.43) * 7)
+    height_px = 0
+    for row in range(min_row, max_row + 1):
+        raw = ws.row_dimensions[row].height
+        height_px += int((raw if raw is not None else 15.0) * 96 / 72)
+    return max(width_px, 8), max(height_px, 8)
+
+
+def _xlsx_embed_photo(ws, cell_range: str, img_bytes: bytes | None, keep: list) -> None:
+    """Place the card photo in a merged cell (A4 under the logo, A2 above Programmer)."""
+    if not img_bytes:
+        return
+    try:
+        from PIL import Image as PILImage
+
+        box_w, box_h = _xlsx_merged_box_px(ws, cell_range)
+        pil = _pil_rgb(img_bytes)
+        iw, ih = pil.size
+        if iw <= 0 or ih <= 0:
+            return
+        ratio = min(box_w / iw, box_h / ih)
+        draw_w = max(1, int(iw * ratio))
+        draw_h = max(1, int(ih * ratio))
+        canvas_img = PILImage.new("RGB", (box_w, box_h), (255, 255, 255))
+        canvas_img.paste(pil.resize((draw_w, draw_h), PILImage.LANCZOS), ((box_w - draw_w) // 2, (box_h - draw_h) // 2))
+        buf = io.BytesIO()
+        canvas_img.save(buf, format="PNG")
+        buf.seek(0)
+        buf.name = "part.png"
+        keep.append(buf)
+        xl_img = XLImage(buf)
+        xl_img.width = box_w
+        xl_img.height = box_h
+        ws.add_image(xl_img, cell_range.split(":")[0])
+    except Exception:
+        logger.exception("Excel traveler photo embed failed")
+
 
 def _clear_workbook_artifacts(part, prog) -> None:
     """Blank template cells that cannot survive an openpyxl round-trip.
@@ -840,6 +951,10 @@ def fill_xlsx(fields: dict[str, Any]) -> bytes:
     _xlsx_set(prog, "B4", _s(fields.get("programmer")))
     _xlsx_set(prog, "F4", _traveler_date(fields.get("program_date")) or "")
     _clear_workbook_artifacts(part, prog)
+    photo_bytes = _photo_bytes(fields)
+    embedded: list = []
+    _xlsx_embed_photo(part, "A4:O8", photo_bytes, embedded)
+    _xlsx_embed_photo(prog, "A2:A3", photo_bytes, embedded)
 
     # Excel otherwise tiles the wide shop form across multiple PDF pages even
     # though each template sheet is designed as one printed packet page.
@@ -1462,34 +1577,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     # Uploaded part photo in the top-right drawing slot (same band as the TVM
     # logo). Cover the stock CAD artwork, then draw with the same bottom-left
     # placement that used to work — mask=auto was swallowing JPEGs.
-    photo_x0 = 400.0
-    photo_y_top = 58.0
-    photo_w, photo_h = 160.0, 108.0
-    c.setFillColorRGB(1, 1, 1)
-    c.rect(photo_x0, 792 - photo_y_top - photo_h, photo_w, photo_h, stroke=0, fill=1)
-    try:
-        thumb_url = fields.get("thumbnail_url") if isinstance(fields, dict) else None
-        img_bytes = load_bytes(str(thumb_url)) if thumb_url else None
-        if img_bytes:
-            from reportlab.lib.utils import ImageReader
-            from PIL import Image as PILImage
-
-            pil = PILImage.open(io.BytesIO(img_bytes))
-            if pil.mode not in ("RGB", "RGBA"):
-                pil = pil.convert("RGB")
-            png = io.BytesIO()
-            pil.save(png, format="PNG")
-            png.seek(0)
-            img = ImageReader(png)
-            iw, ih = img.getSize()
-            if iw > 0 and ih > 0:
-                ratio = min(photo_w / iw, photo_h / ih)
-                draw_w, draw_h = iw * ratio, ih * ratio
-                img_x = photo_x0 + (photo_w - draw_w) / 2
-                img_y = 792 - photo_y_top - draw_h - (photo_h - draw_h) / 2
-                c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h)
-    except Exception:
-        logger.exception("Traveler part photo overlay failed")
+    photo_bytes = _photo_bytes(fields)
+    _overlay_draw_photo(c, photo_bytes, 400.0, 58.0, 160.0, 108.0, wipe=True)
 
     c.setFillColorRGB(1, 1, 1)
     c.rect(380, 792 - 52, 170, 22, stroke=0, fill=1)
@@ -1552,33 +1641,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.showPage()
 
-    # Cover the squat Excel TVM bitmap and draw the same logo as traveler page 1.
-    c.setFillColorRGB(1, 1, 1)
-    c.rect(64.0, 792 - 54.0 - 80.0, 210.0, 80.0, stroke=0, fill=1)
-    try:
-        logo_bytes = _traveler_page_logo_bytes()
-        if logo_bytes:
-            from reportlab.lib.utils import ImageReader
-            from PIL import Image as PILImage
-
-            logo_pil = PILImage.open(io.BytesIO(logo_bytes))
-            if logo_pil.mode != "RGB":
-                logo_pil = logo_pil.convert("RGB")
-            logo_buf = io.BytesIO()
-            logo_pil.save(logo_buf, format="PNG")
-            logo_buf.seek(0)
-            logo = ImageReader(logo_buf)
-            lw, lh = logo.getSize()
-            # Same box as traveler page 1: 36,61 → 171.7,138.5
-            box_w, box_h = 135.7, 77.5
-            if lw > 0 and lh > 0:
-                ratio = min(box_w / lw, box_h / lh)
-                dw, dh = lw * ratio, lh * ratio
-                lx = 66.0
-                ly = 792 - 61.0 - dh
-                c.drawImage(logo, lx, ly, width=dw, height=dh)
-    except Exception:
-        logger.exception("Work-order TVM logo overlay failed")
+    # Leave the Excel-rendered TVM lockup alone — it is the wide/stretched
+    # header mark. The card photo sits in A4:O8, the merged box under it.
+    _overlay_draw_photo(c, photo_bytes, 66.0, 100.5, 218.0, 50.5)
     # Material Type / Specification sit on a white Excel fill. Paint the same
     # grey as the WORK ORDER / PO / Part rules and put the labels back.
     labeled_header(
@@ -1644,7 +1709,9 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     c.showPage()
 
     # Program sheet: PO / PART / QTY sit in the value cells (not on the label
-    # baseline). Programmer and Date stay blank.
+    # baseline). Programmer and Date stay blank. Card photo goes in A2:A3,
+    # the merged cell above Programmer / left of PO# and PART #.
+    _overlay_draw_photo(c, photo_bytes, 52.0, 97.0, 128.0, 54.0)
     left(fields.get("po_number"), 248.0, 94.35, font=bold, size=9.5, width=296, height=22)
     left(fields.get("part_number"), 248.0, 120.5, font=bold, size=9.5, width=124, height=22)
     center(fields.get("qty"), 491.9, 120.5, font=bold, size=9.5, width=114, height=22)

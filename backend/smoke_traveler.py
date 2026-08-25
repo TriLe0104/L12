@@ -43,6 +43,7 @@ from app.traveler import (  # noqa: E402
     TEMPLATE_BASE_PDF,
     XLSX_TEMPLATE,
     _part_name_from_model,
+    _part_name_from_stp,
     build_preview_pdf,
     content_for_format,
     fill_docx,
@@ -186,6 +187,40 @@ def check_columns(payload: bytes) -> None:
     print(f"  columns: dims x={dims_x:.1f} sign x={sign_x:.1f} (divider {SIGN_COLUMN_X})")
 
 
+def check_photos() -> None:
+    """Card photo lands under the work-order logo and above Programmer."""
+    from PIL import Image as PILImage
+
+    from app.storage import UPLOAD_DIR
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    name = "smoke_part_photo.png"
+    path = UPLOAD_DIR / name
+    PILImage.new("RGB", (80, 60), (200, 30, 30)).save(path)
+    fields = {**FIELDS, "thumbnail_url": f"/uploads/{name}"}
+    xlsx = fill_xlsx(fields)
+    workbook = load_workbook(BytesIO(xlsx))
+    part, program = workbook[PART_SHEET], workbook[PROGRAM_SHEET]
+    assert len(part._images) >= 2, (
+        f"work order should keep the TVM logo and add the part photo, got {len(part._images)}"
+    )
+    assert len(program._images) >= 1, (
+        f"program sheet missing the part photo, got {len(program._images)}"
+    )
+    pdf, _source = build_preview_pdf(fields, po_id="smoke-photo")
+    pages = PdfReader(BytesIO(pdf)).pages
+    assert len(pages[1].images) >= 2, (
+        f"pdf work order should show stretched logo + part photo, got {len(pages[1].images)}"
+    )
+    assert len(pages[2].images) >= 1, (
+        f"pdf program sheet missing the part photo, got {len(pages[2].images)}"
+    )
+    print(
+        f"  photos: xlsx work-order={len(part._images)} program={len(program._images)} "
+        f"pdf wo={len(pages[1].images)} prog={len(pages[2].images)}"
+    )
+
+
 def check_part_names() -> None:
     assert _part_name_from_model("BOTTLE HIGH POLY.SLDPRT") == "BOTTLE HIGH POLY"
     assert _part_name_from_model("SMOKE_PART.stp") == "SMOKE_PART"
@@ -193,6 +228,12 @@ def check_part_names() -> None:
     # A part number that legitimately contains a dot must survive intact.
     assert _part_name_from_model("PN-1.25-REVB") == "PN-1.25-REVB"
     assert _part_name_from_model("") == ""
+    # Traveler Part Name follows the STEP/STP stem only, not FBX/OBJ uploads.
+    assert _part_name_from_stp("BOTTLE HIGH POLY.stp") == "BOTTLE HIGH POLY"
+    assert _part_name_from_stp("housing.STEP") == "housing"
+    assert _part_name_from_stp("BOTTLE HIGH POLY.fbx") == ""
+    assert _part_name_from_stp("PN-1.25-REVB") == ""
+    assert _part_name_from_stp("") == ""
 
 
 def check_fill() -> None:
@@ -243,6 +284,7 @@ def check_fill() -> None:
     assert "Material Type" in pages[1], "page 2 is missing the Material Type header"
     assert "Specification" in pages[1], "page 2 is missing the Material Specification header"
     check_columns(pdf)
+    check_photos()
 
     for fmt in FORMATS:
         data, media, name = content_for_format(fmt, FIELDS, job_no="J-SMOKE")
