@@ -59,7 +59,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 21
+OVERLAY_VERSION = 22
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -216,17 +216,35 @@ def _photo_bytes(fields: dict[str, Any] | None) -> bytes | None:
     return load_bytes(str(thumb_url)) if thumb_url else None
 
 
-def _pil_rgb(img_bytes: bytes):
+def _prepare_photo(img_bytes: bytes):
+    """Decode a card photo, keeping an alpha channel when the file has one.
+
+    Palette / greyscale transparency (PNG, GIF, WebP) is promoted to RGBA.
+    Fully-opaque alpha is dropped so JPEG-style drawing stays unchanged.
+    """
     from PIL import Image as PILImage
 
     pil = PILImage.open(io.BytesIO(img_bytes))
-    if pil.mode == "RGBA":
-        bg = PILImage.new("RGB", pil.size, (255, 255, 255))
-        bg.paste(pil, mask=pil.split()[-1])
-        return bg
-    if pil.mode != "RGB":
-        return pil.convert("RGB")
-    return pil
+    pil.load()
+    has_alpha = False
+    if pil.mode in {"RGBA", "LA", "PA"}:
+        pil = pil.convert("RGBA")
+        has_alpha = True
+    elif pil.mode == "P" and "transparency" in pil.info:
+        pil = pil.convert("RGBA")
+        has_alpha = True
+    elif pil.mode != "RGB":
+        if "A" in pil.mode:
+            pil = pil.convert("RGBA")
+            has_alpha = True
+        else:
+            pil = pil.convert("RGB")
+    if has_alpha:
+        extrema = pil.getchannel("A").getextrema()
+        if extrema == (255, 255):
+            pil = pil.convert("RGB")
+            has_alpha = False
+    return pil, has_alpha
 
 
 def _overlay_draw_photo(
@@ -253,7 +271,7 @@ def _overlay_draw_photo(
     try:
         from reportlab.lib.utils import ImageReader
 
-        pil = _pil_rgb(img_bytes)
+        pil, has_alpha = _prepare_photo(img_bytes)
         png = io.BytesIO()
         pil.save(png, format="PNG")
         png.seek(0)
@@ -265,7 +283,10 @@ def _overlay_draw_photo(
         draw_w, draw_h = iw * ratio, ih * ratio
         img_x = inner_x + (inner_w - draw_w) / 2
         img_y = 792 - inner_y_top - draw_h - (inner_h - draw_h) / 2
-        c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h)
+        # mask='auto' is what keeps PNG/WebP alpha. It also ate JPEGs when we
+        # used it unconditionally, so only set it when the photo has a hole.
+        kwargs = {"mask": "auto"} if has_alpha else {}
+        c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h, **kwargs)
     except Exception:
         logger.exception("Traveler photo overlay failed")
 
@@ -385,28 +406,31 @@ def _replace_docx_part_photo(doc: Document, image_bytes: bytes | None) -> None:
     """Swap the static CAD drawing for the card's uploaded part photo."""
     if not image_bytes:
         return
-    from PIL import Image as PILImage
-
     try:
-        pil = PILImage.open(io.BytesIO(image_bytes))
+        pil, has_alpha = _prepare_photo(image_bytes)
     except Exception:
         logger.exception("Word traveler part photo could not be opened")
         return
-    if pil.mode == "RGBA":
-        bg = PILImage.new("RGB", pil.size, (255, 255, 255))
-        bg.paste(pil, mask=pil.split()[-1])
-        pil = bg
-    elif pil.mode != "RGB":
-        pil = pil.convert("RGB")
-    jpeg = io.BytesIO()
-    pil.save(jpeg, format="JPEG", quality=90)
-    blob = jpeg.getvalue()
+    out = io.BytesIO()
+    if has_alpha:
+        pil.save(out, format="PNG")
+        content_type = "image/png"
+    else:
+        if pil.mode != "RGB":
+            pil = pil.convert("RGB")
+        pil.save(out, format="JPEG", quality=90)
+        content_type = "image/jpeg"
+    blob = out.getvalue()
     image_rels = [rel for rel in doc.part.rels.values() if "image" in rel.reltype]
     if not image_rels:
         return
     # Logo is the smaller JPEG; the part drawing is the larger floating picture.
     target = max(image_rels, key=lambda rel: len(rel.target_part.blob))
-    target.target_part._blob = blob
+    part = target.target_part
+    part._blob = blob
+    part._content_type = content_type
+    if hasattr(part, "_image"):
+        part._image = None
 
 def _set_paragraph_text(paragraph, text: str) -> None:
     text = text if text is not None else ""
@@ -871,15 +895,21 @@ def _xlsx_embed_photo(ws, cell_range: str, img_bytes: bytes | None, keep: list) 
         from PIL import Image as PILImage
 
         box_w, box_h = _xlsx_merged_box_px(ws, cell_range)
-        pil = _pil_rgb(img_bytes)
+        pil, has_alpha = _prepare_photo(img_bytes)
         iw, ih = pil.size
         if iw <= 0 or ih <= 0:
             return
         ratio = min(box_w / iw, box_h / ih)
         draw_w = max(1, int(iw * ratio))
         draw_h = max(1, int(ih * ratio))
-        canvas_img = PILImage.new("RGB", (box_w, box_h), (255, 255, 255))
-        canvas_img.paste(pil.resize((draw_w, draw_h), PILImage.LANCZOS), ((box_w - draw_w) // 2, (box_h - draw_h) // 2))
+        resized = pil.resize((draw_w, draw_h), PILImage.LANCZOS)
+        origin = ((box_w - draw_w) // 2, (box_h - draw_h) // 2)
+        if has_alpha:
+            canvas_img = PILImage.new("RGBA", (box_w, box_h), (255, 255, 255, 0))
+            canvas_img.paste(resized, origin, resized)
+        else:
+            canvas_img = PILImage.new("RGB", (box_w, box_h), (255, 255, 255))
+            canvas_img.paste(resized, origin)
         buf = io.BytesIO()
         canvas_img.save(buf, format="PNG")
         buf.seek(0)

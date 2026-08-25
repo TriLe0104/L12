@@ -44,6 +44,7 @@ from app.traveler import (  # noqa: E402
     XLSX_TEMPLATE,
     _part_name_from_model,
     _part_name_from_stp,
+    _prepare_photo,
     build_preview_pdf,
     content_for_format,
     fill_docx,
@@ -219,6 +220,61 @@ def check_photos() -> None:
         f"  photos: xlsx work-order={len(part._images)} program={len(program._images)} "
         f"pdf wo={len(pages[1].images)} prog={len(pages[2].images)}"
     )
+    check_photo_alpha()
+
+
+def _rgba_cutout() -> bytes:
+    from PIL import Image as PILImage
+
+    img = PILImage.new("RGBA", (80, 60), (0, 0, 0, 0))
+    for x in range(20, 60):
+        for y in range(10, 50):
+            img.putpixel((x, y), (200, 30, 30, 255))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def check_photo_alpha() -> None:
+    """Transparent uploads must stay transparent in Word, Excel, and the helpers."""
+    from PIL import Image as PILImage
+
+    from app.storage import UPLOAD_DIR
+
+    raw = _rgba_cutout()
+    pil, has_alpha = _prepare_photo(raw)
+    assert has_alpha and pil.mode == "RGBA", (has_alpha, pil.mode)
+    assert pil.getpixel((0, 0))[3] == 0, "transparent corner was flattened"
+    assert pil.getpixel((40, 30))[3] == 255
+
+    opaque = PILImage.new("RGB", (16, 16), (10, 20, 30))
+    jpeg = BytesIO()
+    opaque.save(jpeg, format="JPEG", quality=90)
+    rgb, jpeg_alpha = _prepare_photo(jpeg.getvalue())
+    assert not jpeg_alpha and rgb.mode == "RGB", (jpeg_alpha, rgb.mode)
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    name = "smoke_part_alpha.png"
+    (UPLOAD_DIR / name).write_bytes(raw)
+    fields = {**FIELDS, "thumbnail_url": f"/uploads/{name}"}
+
+    docx = fill_docx(fields)
+    word = Document(BytesIO(docx))
+    blobs = [rel.target_part.blob for rel in word.part.rels.values() if "image" in rel.reltype]
+    assert any(b.startswith(b"\x89PNG") for b in blobs), "Word flattened the transparent photo to JPEG"
+
+    xlsx = fill_xlsx(fields)
+    workbook = load_workbook(BytesIO(xlsx))
+    program = workbook[PROGRAM_SHEET]
+    assert program._images, "program sheet missing alpha photo"
+    embedded = program._images[0]._data()
+    if callable(embedded):
+        embedded = embedded()
+    sheet_photo = PILImage.open(BytesIO(embedded))
+    assert "A" in sheet_photo.mode, sheet_photo.mode
+    corner = sheet_photo.getpixel((0, 0))
+    assert len(corner) == 4 and corner[3] == 0, f"Excel photo lost alpha: {corner}"
+    print("  alpha: helper+Word PNG+Excel RGBA ok")
 
 
 def check_part_names() -> None:
