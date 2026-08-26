@@ -32,6 +32,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter, range_boundaries
 from sqlalchemy import select
@@ -59,7 +60,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 22
+OVERLAY_VERSION = 23
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -286,7 +287,12 @@ def _overlay_draw_photo(
         # mask='auto' is what keeps PNG/WebP alpha. It also ate JPEGs when we
         # used it unconditionally, so only set it when the photo has a hole.
         kwargs = {"mask": "auto"} if has_alpha else {}
+        c.saveState()
+        clip = c.beginPath()
+        clip.rect(inner_x, 792 - inner_y_top - inner_h, inner_w, inner_h)
+        c.clipPath(clip, stroke=0, fill=0)
         c.drawImage(img, img_x, img_y, width=draw_w, height=draw_h, **kwargs)
+        c.restoreState()
     except Exception:
         logger.exception("Traveler photo overlay failed")
 
@@ -918,7 +924,16 @@ def _xlsx_embed_photo(ws, cell_range: str, img_bytes: bytes | None, keep: list) 
         xl_img = XLImage(buf)
         xl_img.width = box_w
         xl_img.height = box_h
-        ws.add_image(xl_img, cell_range.split(":")[0])
+        # Pin to the merged cell so Excel cannot scale the picture out of the
+        # box (OneCellAnchor + pixel size overflowed the Program sheet).
+        min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+        inset = 8000  # ~0.85px, keeps the picture off the grid rules
+        xl_img.anchor = TwoCellAnchor(
+            editAs="twoCell",
+            _from=AnchorMarker(col=min_col - 1, colOff=inset, row=min_row - 1, rowOff=inset),
+            to=AnchorMarker(col=max_col, colOff=-inset, row=max_row, rowOff=-inset),
+        )
+        ws.add_image(xl_img)
     except Exception:
         logger.exception("Excel traveler photo embed failed")
 
@@ -1739,9 +1754,11 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     c.showPage()
 
     # Program sheet: PO / PART / QTY sit in the value cells (not on the label
-    # baseline). Programmer and Date stay blank. Card photo goes in A2:A3,
-    # the merged cell above Programmer / left of PO# and PART #.
-    _overlay_draw_photo(c, photo_bytes, 52.0, 97.0, 128.0, 54.0)
+    # baseline). Programmer and Date stay blank. Card photo goes in A2:A3 —
+    # the merged cell left of PO# / PART #, above Programmer. Grid: x 51.4–179.4,
+    # y 80.3–132.6 (the 97/54 box sat on the text baseline and spilled into
+    # the Programmer row).
+    _overlay_draw_photo(c, photo_bytes, 51.4, 80.3, 128.0, 52.3)
     left(fields.get("po_number"), 248.0, 94.35, font=bold, size=9.5, width=296, height=22)
     left(fields.get("part_number"), 248.0, 120.5, font=bold, size=9.5, width=124, height=22)
     center(fields.get("qty"), 491.9, 120.5, font=bold, size=9.5, width=114, height=22)

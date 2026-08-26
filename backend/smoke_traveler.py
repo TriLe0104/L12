@@ -220,7 +220,39 @@ def check_photos() -> None:
         f"  photos: xlsx work-order={len(part._images)} program={len(program._images)} "
         f"pdf wo={len(pages[1].images)} prog={len(pages[2].images)}"
     )
+    anchor = program._images[0].anchor
+    assert getattr(anchor, "to", None) is not None, "program photo is not pinned to A2:A3"
+    assert int(anchor.to.row) == 3, f"program photo to.row={anchor.to.row}, expected 3 (end of A3)"
+    check_program_photo_clip(fields)
     check_photo_alpha()
+
+
+def check_program_photo_clip(fields: dict) -> None:
+    """A tall photo must stay above the Programmer rule on the program sheet."""
+    import pymupdf
+    from PIL import Image as PILImage
+
+    from app.storage import UPLOAD_DIR
+
+    name = "smoke_part_photo_tall.png"
+    PILImage.new("RGB", (60, 160), (200, 30, 30)).save(UPLOAD_DIR / name)
+    tall = {**fields, "thumbnail_url": f"/uploads/{name}"}
+    pdf, _source = build_preview_pdf(tall, po_id="smoke-photo-clip")
+    page = pymupdf.open(stream=pdf, filetype="pdf")[2]
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))
+    img = PILImage.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    # Programmer top rule is y=132.6pt; sample a strip just below it in col A.
+    below = img.crop((110, int(134 * 2), 340, int(154 * 2)))
+    pixels = list(below.getdata())
+    reds = sum(1 for p in pixels if p[0] > 140 and p[1] < 80 and p[2] < 80)
+    assert reds / max(len(pixels), 1) < 0.02, (
+        f"program-sheet photo spilled into Programmer ({reds}/{len(pixels)} red px)"
+    )
+    inside = img.crop((110, int(82 * 2), 340, int(130 * 2)))
+    inside_px = list(inside.getdata())
+    inside_reds = sum(1 for p in inside_px if p[0] > 140 and p[1] < 80 and p[2] < 80)
+    assert inside_reds / max(len(inside_px), 1) > 0.05, "program-sheet photo missing from A2:A3"
+    print(f"  program clip: inside_red={inside_reds/len(inside_px):.2f} below_red={reds/len(pixels):.2f}")
 
 
 def _rgba_cutout() -> bytes:
