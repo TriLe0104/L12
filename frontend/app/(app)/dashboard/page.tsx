@@ -1073,9 +1073,7 @@ export default function DashboardPage() {
                         return (
                           <td key="job" data-col="job" style={widthStyle}>
                             <div className="dash-id">
-                              <span className="dash-id-job">
-                                {partsCount > 1 ? po.po_number : po.job_no}
-                              </span>
+                              <span className="dash-id-job">{po.po_number}</span>
                               {po.locked && (
                                 <span
                                   className="dash-lock"
@@ -1088,7 +1086,7 @@ export default function DashboardPage() {
                               )}
                             </div>
                             {partsCount <= 1 ? (
-                              <div className="dash-id-sub">{face.part_number}</div>
+                              <div className="dash-id-sub">{face.job_no || po.job_no}</div>
                             ) : (
                               <div className="dash-id-sub">{partsCount} parts</div>
                             )}

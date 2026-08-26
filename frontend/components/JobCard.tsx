@@ -245,7 +245,12 @@ export function JobCard({
         }}
       >
         <header className="jobcard-head">
-          <div className="jobcard-job">{face.job_no || po.job_no}</div>
+          <div className="jobcard-job">{po.po_number}</div>
+          {(face.job_no || po.job_no) && (
+            <div className="jobcard-work" title="Job order">
+              {face.job_no || po.job_no}
+            </div>
+          )}
           {po.locked && <LockTag />}
           {faceModel && faceFormat && (
             <button
@@ -503,7 +508,7 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
       className="chip"
       data-locked={po.locked}
       style={toneStyle(po.status, tone)}
-      title={`${po.job_no} · ${po.po_number}${po.locked ? " · locked" : ""}`}
+      title={`${po.po_number} · ${shown.job_no || po.job_no}${po.locked ? " · locked" : ""}`}
     >
       <div className="chip-top">
         {photo ? (
@@ -514,7 +519,7 @@ export function JobChip({ po }: { po: PurchaseOrder }) {
         ) : (
           parts.length > 1 && <span className="chip-parts-inline">{parts.length}</span>
         )}
-        <span className="chip-job">{po.job_no}</span>
+        <span className="chip-job">{po.po_number}</span>
         {po.locked && (
           <span className="chip-lock" title="Locked">
             <LockGlyph />

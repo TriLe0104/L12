@@ -520,7 +520,8 @@ textarea {
 }
 
 .jobcard[data-custom-head="true"] .jobcard-head .cell-input,
-.jobcard[data-custom-head="true"] .jobcard-head .job-input {
+.jobcard[data-custom-head="true"] .jobcard-head .job-input,
+.jobcard[data-custom-head="true"] .jobcard-head .job-order-input {
   color: inherit;
   background: color-mix(in srgb, #fff 22%, transparent);
 }
@@ -530,6 +531,21 @@ textarea {
   font-weight: 800;
   letter-spacing: -0.02em;
   overflow-wrap: anywhere;
+}
+
+.jobcard-work,
+.job-order-input {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.88;
+}
+
+.job-order-input {
+  width: 7.2rem;
+  min-width: 6.5rem;
 }
 
 .prio {
@@ -5018,6 +5034,10 @@ button.jobcard-thumb:focus-visible {
 
   .print-card-face .jobcard-job {
     font-size: 8pt;
+  }
+
+  .print-card-face .jobcard-work {
+    font-size: 6.5pt;
   }
 
   .print-card-face .jobcard-due,

@@ -4,7 +4,7 @@ import enum
 import re
 import time
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -89,6 +89,20 @@ def _job_date_prefix(day: date | None = None) -> str:
     return f"{day.year % 100:02d}{day.month:02d}{day.day:02d}"
 
 
+def _as_job_day(value: object) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            pass
+    return date.today()
+
+
 def _is_placeholder_job_no(value: object) -> bool:
     raw = str(value or "").strip()
     return not raw or bool(_JOB_PLACEHOLDER_RE.fullmatch(raw))
@@ -110,16 +124,72 @@ def _job_seq_for_prefix(db: Session, prefix: str) -> int:
     return highest
 
 
-def allocate_job_no(db: Session, day: date | None = None) -> str:
-    """Next shop-floor job order: YYMMDD-NN for the given day (default today)."""
+def allocate_job_no(
+    db: Session,
+    day: date | None = None,
+    *,
+    reserved: dict[str, int] | None = None,
+) -> str:
+    """Next shop-floor job order: YYMMDD-NN for the day the job is due."""
     prefix = _job_date_prefix(day)
-    return f"{prefix}-{_job_seq_for_prefix(db, prefix) + 1:02d}"
+    db_max = _job_seq_for_prefix(db, prefix)
+    mem = reserved.get(prefix, 0) if reserved else 0
+    n = max(db_max, mem) + 1
+    if reserved is not None:
+        reserved[prefix] = n
+    return f"{prefix}-{n:02d}"
 
 
-def _ensure_job_no(db: Session, value: object, *, day: date | None = None) -> str:
+def _ensure_job_no(
+    db: Session,
+    value: object,
+    *,
+    day: date | None = None,
+    reserved: dict[str, int] | None = None,
+) -> str:
     if _is_placeholder_job_no(value):
-        return allocate_job_no(db, day)
+        return allocate_job_no(db, day, reserved=reserved)
     return str(value).strip()
+
+
+def _ensure_part_job_numbers(
+    db: Session,
+    po: PurchaseOrder,
+    *,
+    reserved: dict[str, int] | None = None,
+) -> bool:
+    """Give every part its own job order. Copies of the PO-level number are replaced.
+
+    Date prefix is the due date (when the job is to be made), e.g. 01/01/26 → 260101-01.
+    """
+    if reserved is None:
+        reserved = {}
+    day = _as_job_day(getattr(po, "due_date", None))
+    changed = False
+    if _is_placeholder_job_no(po.job_no):
+        po.job_no = allocate_job_no(db, day, reserved=reserved)
+        changed = True
+
+    parts = _as_parts_list(po)
+    if not parts:
+        return changed
+
+    seen: set[str] = set()
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            continue
+        current = str(part.get("job_no") or "").strip()
+        copied_header = index > 0 and current == str(po.job_no or "").strip()
+        if _is_placeholder_job_no(current) or copied_header or current in seen:
+            part["job_no"] = allocate_job_no(db, day, reserved=reserved)
+            changed = True
+        seen.add(str(part.get("job_no") or "").strip())
+    if changed:
+        _set_parts(po, parts)
+        first = parts[0].get("job_no") if isinstance(parts[0], dict) else None
+        if first:
+            po.job_no = str(first).strip()
+    return changed
 
 
 _HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
@@ -453,6 +523,16 @@ def _attach_comment_counts(db: Session, pos: Sequence[PurchaseOrder]) -> None:
 
 def _enrich(db: Session, pos: Sequence[PurchaseOrder]) -> None:
     board_service.apply_po_overlays(db, list(pos))
+    reserved: dict[str, int] = {}
+    assigned = False
+    for po in pos:
+        if _ensure_part_job_numbers(db, po, reserved=reserved):
+            assigned = True
+    if assigned:
+        db.commit()
+        for po in pos:
+            db.refresh(po)
+        board_service.apply_po_overlays(db, list(pos))
     _attach_last_modified(db, pos)
     _attach_comment_counts(db, pos)
 
@@ -691,7 +771,7 @@ def create_po(
         part_entry = {
             "part_number": data.get("part_number"),
             "part_name": data.get("model_filename") or data.get("part_number"),
-            "job_no": _ensure_job_no(db, data.get("job_no")),
+            "job_no": _ensure_job_no(db, data.get("job_no"), day=_as_job_day(existing.due_date)),
             "qty": data.get("qty"),
             "dims": data.get("dims"),
             "mat_dim": data.get("mat_dim"),
@@ -708,6 +788,13 @@ def create_po(
         parts = _as_parts_list(existing)
         if not parts and existing.part_number is not None:
             parts.append(_top_level_as_part(existing))
+        _set_parts(existing, parts)
+        _ensure_part_job_numbers(db, existing)
+        if _is_placeholder_job_no(part_entry.get("job_no")) or str(part_entry.get("job_no") or "") == str(
+            existing.job_no or ""
+        ):
+            part_entry["job_no"] = allocate_job_no(db, _as_job_day(existing.due_date))
+        parts = _as_parts_list(existing)
         parts.append(part_entry)
         _set_parts(existing, parts)
         # If the PO had no top-level thumbnail, adopt the new part's thumbnail so
@@ -728,7 +815,7 @@ def create_po(
         _enrich(db, [existing])
         return existing
 
-    data["job_no"] = _ensure_job_no(db, data.get("job_no"))
+    data["job_no"] = _ensure_job_no(db, data.get("job_no"), day=_as_job_day(data.get("due_date")))
     po = PurchaseOrder(**data)
     # No owner field at all means "mine", the old behaviour. An explicit null is
     # the picker saying Unassigned, and has to survive rather than snap back to
@@ -775,14 +862,19 @@ def add_part(
     _guard_locked(po, actor)
 
     part_entry = _part_entry_from_create(payload)
-    if _is_placeholder_job_no(part_entry.get("job_no")):
-        part_entry["job_no"] = allocate_job_no(db)
 
     _freeze_part_statuses(po)
     _freeze_part_priorities(po)
     parts = _as_parts_list(po)
     if not parts and po.part_number is not None:
         parts.append(_top_level_as_part(po))
+    _set_parts(po, parts)
+    _ensure_part_job_numbers(db, po)
+    if _is_placeholder_job_no(part_entry.get("job_no")) or str(part_entry.get("job_no") or "") == str(
+        po.job_no or ""
+    ):
+        part_entry["job_no"] = allocate_job_no(db, _as_job_day(po.due_date))
+    parts = _as_parts_list(po)
     parts.append(part_entry)
     _set_parts(po, parts)
     _adopt_part_media(po, part_entry)

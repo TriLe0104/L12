@@ -131,7 +131,7 @@ export function PartsCarousel({
       <div className="parts-carousel" role="dialog" aria-modal="true" aria-label="Parts">
         <header className="parts-carousel-head">
           <strong>
-            {po.job_no} · {parts.length} parts
+            {po.po_number} · {parts.length} parts
           </strong>
           <span className="parts-carousel-count">
             Part {active + 1} of {parts.length}

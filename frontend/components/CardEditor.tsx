@@ -371,8 +371,17 @@ export function CardEditor({
       <header className="jobcard-head">
         <input
           className="cell-input job-input"
+          placeholder="PO #"
+          aria-label="PO number"
+          value={value.po_number ?? ""}
+          disabled={disabled}
+          onChange={(e) => onChange({ po_number: e.target.value })}
+        />
+        <input
+          className="cell-input job-order-input"
           placeholder="260101-01"
-          aria-label="Job number"
+          aria-label="Job order"
+          title="Job order for this part"
           value={value.job_no ?? ""}
           disabled={disabled}
           onChange={(e) => onChange({ job_no: e.target.value })}

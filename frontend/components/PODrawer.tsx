@@ -137,7 +137,9 @@ export function PODrawer({
     return {
       ...(rec as any),
       part_number: p.part_number ?? (rec as any).part_number,
-      job_no: p.job_no ?? (rec as any).job_no,
+      job_no:
+        p.job_no
+        ?? (idx === 0 ? (rec as any).job_no : ""),
       part_name: p.part_name ?? p.part_number ?? (rec as any).part_name,
       qty: p.qty ?? (rec as any).qty,
       dims: p.dims ?? (rec as any).dims,
@@ -376,7 +378,7 @@ export function PODrawer({
       >
         <header className="drawer-head">
           <strong style={{ letterSpacing: "-0.02em" }}>
-            {creating ? "New purchase order" : `${record?.job_no} · ${record?.po_number}`}
+            {creating ? "New purchase order" : record?.po_number}
           </strong>
           <div className="drawer-head-actions">
             {record && Array.isArray(record.parts) && record.parts.length > 0 && (
@@ -395,8 +397,8 @@ export function PODrawer({
                 {(record.parts ?? []).map((p, i) => (
                   <option key={i} value={i}>
                     {`${i + 1} / ${record.parts?.length ?? 0}${
-                      p.part_number || p.part_name ? ` · ${p.part_number || p.part_name}` : ""
-                    }`}
+                      p.job_no ? ` · ${p.job_no}` : ""
+                    }${p.part_number || p.part_name ? ` · ${p.part_number || p.part_name}` : ""}`}
                   </option>
                 ))}
               </select>
