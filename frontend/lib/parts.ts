@@ -42,6 +42,7 @@ export function poShowingPart(po: PurchaseOrder, index?: number): PurchaseOrder 
   return {
     ...po,
     part_number: p.part_number ?? po.part_number,
+    job_no: p.job_no ?? po.job_no,
     qty: p.qty ?? po.qty,
     dims: p.dims ?? po.dims,
     mat_dim: p.mat_dim ?? po.mat_dim,

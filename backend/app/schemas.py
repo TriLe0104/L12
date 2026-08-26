@@ -85,12 +85,13 @@ class POBase(BaseModel):
 
 
 class POCreate(POBase):
-    pass
+    job_no: str = ""
 
 
 class PartCreate(BaseModel):
     part_number: str
     part_name: str | None = None
+    job_no: str | None = None
     qty: int | None = 1
     dims: str | None = None
     mat_dim: str | None = None
@@ -114,6 +115,7 @@ class PartCreate(BaseModel):
 class PartUpdate(BaseModel):
     part_number: str | None = None
     part_name: str | None = None
+    job_no: str | None = None
     qty: int | None = None
     dims: str | None = None
     mat_dim: str | None = None

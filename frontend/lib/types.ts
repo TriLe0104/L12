@@ -86,6 +86,7 @@ export interface PurchaseOrder {
   parts?: Array<{
     part_number?: string;
     part_name?: string;
+    job_no?: string;
     qty?: number;
     dims?: string;
     mat_dim?: string;

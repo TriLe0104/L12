@@ -1062,7 +1062,10 @@ export default function DashboardPage() {
                             <td key="job" data-col="job" style={widthStyle}>
                               <div className="dash-tree" data-last={entry.last ? "true" : undefined}>
                                 <span className="dash-tree-lines" aria-hidden="true" />
-                                <span className="dash-id-sub">{face.part_number}</span>
+                                <div>
+                                  <div className="dash-id-job">{face.job_no || po.job_no}</div>
+                                  <div className="dash-id-sub">{face.part_number}</div>
+                                </div>
                               </div>
                             </td>
                           );
@@ -1070,7 +1073,9 @@ export default function DashboardPage() {
                         return (
                           <td key="job" data-col="job" style={widthStyle}>
                             <div className="dash-id">
-                              <span className="dash-id-job">{po.job_no}</span>
+                              <span className="dash-id-job">
+                                {partsCount > 1 ? po.po_number : po.job_no}
+                              </span>
                               {po.locked && (
                                 <span
                                   className="dash-lock"
@@ -1082,8 +1087,10 @@ export default function DashboardPage() {
                                 </span>
                               )}
                             </div>
-                            {partsCount <= 1 && (
+                            {partsCount <= 1 ? (
                               <div className="dash-id-sub">{face.part_number}</div>
+                            ) : (
+                              <div className="dash-id-sub">{partsCount} parts</div>
                             )}
                           </td>
                         );

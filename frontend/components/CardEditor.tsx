@@ -356,25 +356,22 @@ export function CardEditor({
   }
 
   const headHex = normalizeHex(value.header_color);
-  const bodyHex = normalizeHex(value.body_color);
   const colorVars = {
     ...(headHex
       ? { ["--card-head-bg" as string]: headHex, ["--card-head-ink" as string]: contrastInk(headHex) }
       : {}),
-    ...(bodyHex ? { ["--card-body-bg" as string]: bodyHex } : {}),
   };
 
   return (
     <article
       className="jobcard jobcard-edit"
       data-custom-head={headHex ? "true" : undefined}
-      data-custom-body={bodyHex ? "true" : undefined}
       style={{ ...toneStyle(value.status ?? "need_material_size", statusTone), ...colorVars }}
     >
       <header className="jobcard-head">
         <input
           className="cell-input job-input"
-          placeholder="J-00"
+          placeholder="260101-01"
           aria-label="Job number"
           value={value.job_no ?? ""}
           disabled={disabled}
@@ -420,13 +417,6 @@ export function CardEditor({
       </header>
 
       <div className="jobcard-body">
-        <ColorWell
-          label="Middle section color — this part"
-          value={value.body_color}
-          fallback="#ffffff"
-          disabled={disabled}
-          onChange={(next) => onChange({ body_color: next })}
-        />
         {/* Photo and model stack in one column so the model slot sits beside the
             spec grid rather than stealing a second column from it. */}
         <div className="card-wells">

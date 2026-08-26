@@ -219,12 +219,10 @@ export function JobCard({
     const faceFormat = detectModelFormat(face.model_filename ?? face.model_url);
     const faceSize = formatModelSize(face.model_size);
     const headHex = normalizeHex(po.header_color);
-    const bodyHex = normalizeHex(face.body_color);
     const colorVars = {
       ...(headHex
         ? { ["--card-head-bg" as string]: headHex, ["--card-head-ink" as string]: contrastInk(headHex) }
         : {}),
-      ...(bodyHex ? { ["--card-body-bg" as string]: bodyHex } : {}),
     } as CSSProperties;
     return (
       <article
@@ -233,7 +231,6 @@ export function JobCard({
         data-current={opts.current ? "true" : undefined}
         data-has-model={!!faceModel}
         data-custom-head={headHex ? "true" : undefined}
-        data-custom-body={bodyHex ? "true" : undefined}
         style={{ ...toneStyle(face.status ?? po.status, faceTone), ...colorVars }}
         onClick={() => {
           if (opts.openDrawer) onClick?.(face);
@@ -248,7 +245,7 @@ export function JobCard({
         }}
       >
         <header className="jobcard-head">
-          <div className="jobcard-job">{po.job_no}</div>
+          <div className="jobcard-job">{face.job_no || po.job_no}</div>
           {po.locked && <LockTag />}
           {faceModel && faceFormat && (
             <button

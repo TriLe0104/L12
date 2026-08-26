@@ -8,7 +8,6 @@ export const CARD_LINKED_TRAVELER_KEYS = [
   "due_date",
   "mat_dim",
   "po_number",
-  "part_name",
   "part_number",
   "qty",
   "finish",
@@ -23,6 +22,7 @@ export const CARD_LINKED_TRAVELER_KEYS = [
 ] as const;
 
 export const TRAVELER_ONLY_KEYS = [
+  "part_name",
   "sign",
   "material_spec",
   "part_marking",
@@ -65,7 +65,6 @@ export function cardToTravelerSource(
     due_date: draft.due_date ?? "",
     mat_dim: draft.mat_dim ?? "",
     po_number: draft.po_number ?? "",
-    part_name: draft.part_number ?? "",
     part_number: draft.part_number ?? "",
     qty: draft.qty ?? "",
     finish: draft.finish ?? "",

@@ -60,7 +60,7 @@ TEMPLATE_BASE_VERSION = 2
 # Bump whenever overlay coordinates move. Kept separate from the background
 # version so a layout tweak invalidates the cached per-PO PDFs without forcing
 # a fresh background render, which only Word/Excel COM can produce.
-OVERLAY_VERSION = 23
+OVERLAY_VERSION = 24
 
 logger = logging.getLogger(__name__)
 _TEMPLATE_BASE_LOCK = threading.Lock()
@@ -142,7 +142,6 @@ CARD_LINKED_KEYS = frozenset(
         "due_date",
         "mat_dim",
         "po_number",
-        "part_name",
         "part_number",
         "qty",
         "finish",
@@ -158,8 +157,10 @@ CARD_LINKED_KEYS = frozenset(
 )
 
 # Traveler-only: never copied from the card, always stored if present.
+# Part Name defaults from the STEP/STP stem but is typed on the traveler.
 TRAVELER_ONLY_KEYS = frozenset(
     {
+        "part_name",
         "sign",
         "material_spec",
         "part_marking",
@@ -438,14 +439,20 @@ def _replace_docx_part_photo(doc: Document, image_bytes: bytes | None) -> None:
     if hasattr(part, "_image"):
         part._image = None
 
-def _set_paragraph_text(paragraph, text: str) -> None:
+def _set_paragraph_text(paragraph, text: str, *, size_pt: float | None = None) -> None:
+    from docx.shared import Pt
+
     text = text if text is not None else ""
     if paragraph.runs:
         paragraph.runs[0].text = text
         for run in paragraph.runs[1:]:
             run.text = ""
     else:
-        paragraph.text = text
+        paragraph.add_run(text)
+    if size_pt is not None:
+        for run in paragraph.runs:
+            if run.text:
+                run.font.size = Pt(size_pt)
 
 def resolve_created_by(db: Session, po: PurchaseOrder) -> str:
     """Order creator for traveler stamps.
@@ -720,20 +727,21 @@ def draft_from_po(
         else bool(po.hardware)
     )
     inspection_raw = _part_field(first_part, "inspection", po.inspection)
+    model_file = None
+    if first_part:
+        model_file = first_part.get("model_filename")
+    model_file = model_file or getattr(po, "model_filename", None)
+    part_job = _s(_part_field(first_part, "job_no", po.job_no)) or _s(po.job_no)
 
     base: dict[str, Any] = {
-        "work_order": po.job_no,
+        "work_order": part_job,
         "due_date": po.due_date.isoformat() if po.due_date else "",
         "mat_dim": _s(_part_field(first_part, "mat_dim", po.mat_dim or "")),
         "sign": created_by,
         "po_number": po.po_number,
         "part_number": _card_part_number(po, first_part),
         "part_name": (
-            _part_name_from_stp(
-                (first_part.get("model_filename") if first_part else None)
-                or getattr(po, "model_filename", None)
-            )
-            or _card_part_number(po, first_part)
+            _part_name_from_stp(model_file) or _card_part_number(po, first_part)
         ),
         "qty": (
             first_part.get("qty")
@@ -776,15 +784,12 @@ def draft_from_po(
         if k not in skip_meta and (k in TRAVELER_ONLY_KEYS or k in detached)
     }
     merged = {**base, **editable}
-    model_file = None
-    if first_part:
-        model_file = first_part.get("model_filename")
-    model_file = model_file or getattr(po, "model_filename", None)
-    # Old drafts stored a CAD upload (often .fbx) as Part Name. Prefer the
-    # STEP/STP stem when one is on the card, else the card part number,
-    # unless the traveler field was typed as something else.
-    if _is_model_filename(merged.get("part_name"), model_file):
+    # A saved Part Name wins. Blank (or a leftover CAD filename) falls back
+    # to the STEP/STP stem / card part number.
+    if not _s(merged.get("part_name")) or _is_model_filename(merged.get("part_name")):
         merged["part_name"] = base["part_name"]
+    elif _s(merged.get("part_name")).lower().endswith(tuple(STEP_FILE_SUFFIXES | MODEL_FILE_SUFFIXES)):
+        merged["part_name"] = _part_name_from_model(merged.get("part_name")) or base["part_name"]
     merged["created_by"] = created_by
     # Sign defaults to the creator only when the part has never saved a sign.
     if "sign" not in editable:
@@ -860,9 +865,11 @@ def fill_docx(fields: dict[str, Any]) -> bytes:
     # Body lines under the drawings (part-of + stock dims).
     paras = [p for p in doc.paragraphs if p.text.strip()]
     if len(paras) >= 1:
-        _set_paragraph_text(paras[0], f"\t{_s(fields.get('part_of')) or 'Part 1 of 1'}")
+        _set_paragraph_text(
+            paras[0], f"\t{_s(fields.get('part_of')) or 'Part 1 of 1'}", size_pt=11
+        )
     if len(paras) >= 2:
-        _set_paragraph_text(paras[1], f"\t{_s(fields.get('dims'))}")
+        _set_paragraph_text(paras[1], f"\t{_s(fields.get('dims'))}", size_pt=11)
 
     _replace_docx_part_photo(doc, _photo_bytes(fields))
 
@@ -1656,8 +1663,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
     h_rule(396.5, 264.4, 576.1)
     c.setFillColorRGB(0, 0, 0)
     center(f"Part ID: {_s(fields.get('part_number'))}", 449, 49.22, size=12, width=160, height=18)
-    center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=12, width=130, height=14)
-    center(fields.get("dims"), body_tab, 193.24, size=12, width=130, height=14)
+    center(fields.get("part_of") or "Part 1 of 1", body_tab, 178.60, size=11, width=160, height=20)
+    center(fields.get("dims"), body_tab, 193.24, size=11, width=160, height=20)
     # y is the midline of the VALUE row (not the header baseline).
     center(fields.get("work_order"), col_left, 251.6, width=168, height=22)
     center(_traveler_date(fields.get("due_date")), col_mid, 251.6, width=168, height=22)

@@ -137,6 +137,7 @@ export function PODrawer({
     return {
       ...(rec as any),
       part_number: p.part_number ?? (rec as any).part_number,
+      job_no: p.job_no ?? (rec as any).job_no,
       part_name: p.part_name ?? p.part_number ?? (rec as any).part_name,
       qty: p.qty ?? (rec as any).qty,
       dims: p.dims ?? (rec as any).dims,
@@ -235,8 +236,12 @@ export function PODrawer({
 
   async function save(nextDraft?: PODraft, quiet = false): Promise<boolean> {
     const d = nextDraft ?? draftRef.current;
-    if (!d.job_no?.trim() || !d.po_number?.trim() || !d.part_number?.trim()) {
-      setError("Job #, PO # and Part # are required");
+    if (!d.po_number?.trim() || !d.part_number?.trim()) {
+      setError("PO # and Part # are required");
+      return false;
+    }
+    if (!creating && !d.job_no?.trim()) {
+      setError("Job # is required");
       return false;
     }
     // `min` on the date input only blocks the picker, so a typed-in past date
@@ -279,6 +284,7 @@ export function PODrawer({
             const partPayload: Record<string, any> = {
               part_number: d.part_number,
               part_name: (d as any).part_name ?? d.part_number,
+              job_no: d.job_no || undefined,
               qty: Number(d.qty) || 1,
               dims: d.dims || undefined,
               mat_dim: d.mat_dim || undefined,
@@ -299,7 +305,7 @@ export function PODrawer({
               secondary_status: d.secondary_status ?? null,
             };
             const poFields = {
-              job_no: d.job_no,
+              ...(selectedPartIndex === 0 ? { job_no: d.job_no } : {}),
               po_number: d.po_number,
               due_date: d.due_date,
               locked: d.locked,
@@ -338,7 +344,7 @@ export function PODrawer({
   useEffect(() => {
     if (creating || !record || !dirty) return;
     if (!(modifiable || statusOnly)) return;
-    if (!draft.job_no?.trim() || !draft.po_number?.trim() || !draft.part_number?.trim()) return;
+    if (!draft.po_number?.trim() || !draft.part_number?.trim()) return;
     const id = window.setTimeout(() => {
       void save(draftRef.current, true);
     }, 700);

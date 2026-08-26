@@ -80,6 +80,48 @@ def _as_parts_list(po: PurchaseOrder) -> list[dict[str, Any]]:
     return [dict(p) if isinstance(p, dict) else p for p in raw]
 
 
+_JOB_NO_RE = re.compile(r"^(\d{6})-(\d+)$")
+_JOB_PLACEHOLDER_RE = re.compile(r"^J-?0*$", re.IGNORECASE)
+
+
+def _job_date_prefix(day: date | None = None) -> str:
+    day = day or date.today()
+    return f"{day.year % 100:02d}{day.month:02d}{day.day:02d}"
+
+
+def _is_placeholder_job_no(value: object) -> bool:
+    raw = str(value or "").strip()
+    return not raw or bool(_JOB_PLACEHOLDER_RE.fullmatch(raw))
+
+
+def _job_seq_for_prefix(db: Session, prefix: str) -> int:
+    """Highest NN already used for YYMMDD-* across PO and per-part job numbers."""
+    highest = 0
+    rows = db.scalars(select(PurchaseOrder)).all()
+    for po in rows:
+        candidates = [po.job_no]
+        for part in _as_parts_list(po):
+            if isinstance(part, dict):
+                candidates.append(part.get("job_no"))
+        for raw in candidates:
+            match = _JOB_NO_RE.fullmatch(str(raw or "").strip())
+            if match and match.group(1) == prefix:
+                highest = max(highest, int(match.group(2)))
+    return highest
+
+
+def allocate_job_no(db: Session, day: date | None = None) -> str:
+    """Next shop-floor job order: YYMMDD-NN for the given day (default today)."""
+    prefix = _job_date_prefix(day)
+    return f"{prefix}-{_job_seq_for_prefix(db, prefix) + 1:02d}"
+
+
+def _ensure_job_no(db: Session, value: object, *, day: date | None = None) -> str:
+    if _is_placeholder_job_no(value):
+        return allocate_job_no(db, day)
+    return str(value).strip()
+
+
 _HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
@@ -107,6 +149,7 @@ def _top_level_as_part(po: PurchaseOrder) -> dict[str, Any]:
     return {
         "part_number": po.part_number,
         "part_name": po.part_number,
+        "job_no": po.job_no,
         "qty": po.qty,
         "dims": po.dims,
         "mat_dim": po.mat_dim,
@@ -137,6 +180,7 @@ def _part_entry_from_create(payload: PartCreate) -> dict[str, Any]:
     return {
         "part_number": payload.part_number.strip() if isinstance(payload.part_number, str) else payload.part_number,
         "part_name": payload.part_name or payload.part_number,
+        "job_no": (payload.job_no or "").strip() or None,
         "qty": int(payload.qty) if payload.qty is not None else 1,
         "dims": payload.dims,
         "mat_dim": payload.mat_dim,
@@ -647,6 +691,7 @@ def create_po(
         part_entry = {
             "part_number": data.get("part_number"),
             "part_name": data.get("model_filename") or data.get("part_number"),
+            "job_no": _ensure_job_no(db, data.get("job_no")),
             "qty": data.get("qty"),
             "dims": data.get("dims"),
             "mat_dim": data.get("mat_dim"),
@@ -683,6 +728,7 @@ def create_po(
         _enrich(db, [existing])
         return existing
 
+    data["job_no"] = _ensure_job_no(db, data.get("job_no"))
     po = PurchaseOrder(**data)
     # No owner field at all means "mine", the old behaviour. An explicit null is
     # the picker saying Unassigned, and has to survive rather than snap back to
@@ -729,6 +775,8 @@ def add_part(
     _guard_locked(po, actor)
 
     part_entry = _part_entry_from_create(payload)
+    if _is_placeholder_job_no(part_entry.get("job_no")):
+        part_entry["job_no"] = allocate_job_no(db)
 
     _freeze_part_statuses(po)
     _freeze_part_priorities(po)
@@ -783,6 +831,8 @@ def update_part(
     part = _apply_part_update(dict(parts[index] or {}), payload)
     parts[index] = part
     _set_parts(po, parts)
+    if index == 0 and part.get("job_no"):
+        po.job_no = str(part.get("job_no")).strip()
     _adopt_part_media(po, part)
     _persist_rollup_status(db, po)
     _persist_rollup_priority(db, po)
@@ -877,6 +927,8 @@ def update_po_with_part(
         part = _apply_part_update(dict(parts[idx] or {}), payload.part)
         parts[idx] = part
         _set_parts(po, parts)
+        if idx == 0 and part.get("job_no"):
+            po.job_no = str(part.get("job_no")).strip()
         _adopt_part_media(po, part)
         _persist_rollup_status(db, po)
         _persist_rollup_priority(db, po)
