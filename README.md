@@ -1,6 +1,7 @@
-# TVM Precision Machining — PO Calendar
+# L12
 
-Purchase-order and material scheduling board for the machine shop floor. Each PO renders as a
+Fork of the TVM Precision Machining PO Calendar (`po-web`). Purchase-order and
+material scheduling board for the machine shop floor. Each PO renders as a
 job card (PO #, part #, qty, dims, mat dim, material, finish, inspection, hardware, status) laid
 out on a calendar by due date.
 
