@@ -418,3 +418,198 @@ class BoardSettingsUpdate(BaseModel):
     dashboardColumns, kanbanColumns."""
 
     document: dict
+
+
+# ---------- cluster ----------
+class DeviceOut(ORMModel):
+    id: str
+    rack_id: str
+    name: str
+    kind: str
+    status: str
+    u_start: int
+    u_height: int
+    last_check_at: datetime | None
+    check_value: str | None
+
+
+class DeviceCreate(BaseModel):
+    name: str
+    kind: str = "compute"
+    status: str = "healthy"
+    u_start: int = 1
+    u_height: int = 1
+    check_value: str | None = None
+
+
+class DeviceUpdate(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    status: str | None = None
+    u_start: int | None = None
+    u_height: int | None = None
+    check_value: str | None = None
+
+
+class RackOut(ORMModel):
+    id: str
+    hall_id: str
+    name: str
+    x: int
+    y: int
+    rotation: int
+    height_u: int
+    notes: str | None
+    power_state: str = "on"
+    run_status: str = "ready"
+    cpu_pct: float = 0
+    gpu_pct: float = 0
+    mem_pct: float = 0
+    power_pct: float = 0
+    power_kw: float = 0
+    created_at: datetime
+    updated_at: datetime
+    devices: list[DeviceOut] = []
+
+
+class RackCreate(BaseModel):
+    name: str
+    x: int = 0
+    y: int = 0
+    rotation: int = 0
+    height_u: int = 42
+    notes: str | None = None
+
+
+class RackBulkCreate(BaseModel):
+    cols: int = 16
+    rows: int = 4
+    count: int | None = None
+    prefix: str | None = None
+    aisle: bool = True
+
+
+class RackBulkPatch(BaseModel):
+    ids: list[str]
+    power_state: str | None = None
+    run_status: str | None = None
+    delete: bool = False
+
+
+class RackUpdate(BaseModel):
+    name: str | None = None
+    x: int | None = None
+    y: int | None = None
+    rotation: int | None = None
+    height_u: int | None = None
+    notes: str | None = None
+    power_state: str | None = None
+    run_status: str | None = None
+
+
+class HallOut(ORMModel):
+    id: str
+    name: str
+    description: str | None
+    width_tiles: int
+    depth_tiles: int
+    created_at: datetime
+    updated_at: datetime
+    rack_count: int = 0
+
+
+class HallDetail(HallOut):
+    racks: list[RackOut] = []
+
+
+class HallCreate(BaseModel):
+    name: str
+    description: str | None = None
+    width_tiles: int = 16
+    depth_tiles: int = 12
+
+
+class HallUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    width_tiles: int | None = None
+    depth_tiles: int | None = None
+
+
+class TelemetryOut(BaseModel):
+    cpu_pct: float
+    gpu_pct: float
+    mem_pct: float
+    power_kw: float
+    racks_on: int
+    racks_total: int
+
+
+class ClusterOverview(BaseModel):
+    name: str = "Firmus"
+    halls: int
+    racks: int
+    devices: int
+    occupied_u: int
+    total_u: int
+    utilization_pct: float
+    cpu_pct: float = 0
+    gpu_pct: float = 0
+    mem_pct: float = 0
+    power_kw: float = 0
+    device_status: dict[str, int]
+    resources: dict[str, int]
+    rack_power: dict[str, int]
+    rack_run: dict[str, int]
+    health_checks: list[dict]
+
+
+class HallCampus(HallOut):
+    telemetry: TelemetryOut
+    racks: list[RackOut] = []
+
+
+class CampusOut(BaseModel):
+    name: str = "Firmus"
+    telemetry: TelemetryOut
+    halls: list[HallCampus]
+
+
+class WorkloadOut(ORMModel):
+    id: str
+    name: str
+    kind: str
+    status: str
+    project: str
+    department: str
+    node_pool: str | None
+    pods_running: int
+    pods_requested: int
+    gpu_request: int
+    gpu_allocation: int
+    gpu_mem_gb_request: int
+    gpu_mem_gb_alloc: int
+    detail: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class WorkloadCreate(BaseModel):
+    name: str
+    kind: str = "mlperf"
+    project: str = "firmus"
+    department: str = "default"
+    node_pool: str | None = "gb300"
+    pods_requested: int = 1
+    gpu_request: int = 8
+    gpu_mem_gb_request: int = 640
+    detail: str | None = None
+
+
+class WorkloadUpdate(BaseModel):
+    status: str | None = None
+    pods_running: int | None = None
+    gpu_allocation: int | None = None
+    gpu_mem_gb_alloc: int | None = None
+    detail: str | None = None

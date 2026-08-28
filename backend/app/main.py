@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, meta, purchase_orders, staff_tasks, uploads, users
+from .routers import auth, cluster, fabric, meta, provision, purchase_orders, staff_tasks, uploads, users, workloads
 from .routers import settings as settings_router
 from .seed import seed
 from .storage import UPLOAD_DIR, object_storage_configured, serve_upload
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PO Calendar API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="L12 App API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +51,10 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(cluster.router)
+app.include_router(fabric.router)
+app.include_router(provision.router)
+app.include_router(workloads.router)
 app.include_router(purchase_orders.router)
 app.include_router(users.router)
 app.include_router(meta.router)

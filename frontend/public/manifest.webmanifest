@@ -1,8 +1,8 @@
 {
-  "name": "TVM Precision Machining — PO Calendar",
-  "short_name": "TVM PO",
-  "description": "Purchase order and material scheduling board for the shop floor.",
-  "start_url": "/dashboard",
+  "name": "L12 App",
+  "short_name": "L12",
+  "description": "L12 cluster testing — data halls, racks, and health.",
+  "start_url": "/cluster",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

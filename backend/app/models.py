@@ -263,6 +263,117 @@ class Activity(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
 
 
+class DataHall(Base):
+    """A floor plate you drop racks onto. One cluster can have many halls."""
+
+    __tablename__ = "data_halls"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    width_tiles: Mapped[int] = mapped_column(Integer, default=16)
+    depth_tiles: Mapped[int] = mapped_column(Integer, default=12)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    racks: Mapped[list["Rack"]] = relationship(
+        back_populates="hall", cascade="all, delete-orphan"
+    )
+
+
+class Rack(Base):
+    """A cabinet on a hall grid. (x, y) are integer tile coordinates."""
+
+    __tablename__ = "racks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    hall_id: Mapped[str] = mapped_column(ForeignKey("data_halls.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    x: Mapped[int] = mapped_column(Integer, default=0)
+    y: Mapped[int] = mapped_column(Integer, default=0)
+    rotation: Mapped[int] = mapped_column(Integer, default=0)  # 0/90/180/270
+    height_u: Mapped[int] = mapped_column(Integer, default=42)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Demo power / run state. Usage percentages are derived from these, not stored.
+    power_state: Mapped[str] = mapped_column(String(16), default="on")  # on | off
+    run_status: Mapped[str] = mapped_column(String(16), default="ready")  # idle | running | ready
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    hall: Mapped[DataHall] = relationship(back_populates="racks")
+    devices: Mapped[list["Device"]] = relationship(
+        back_populates="rack", cascade="all, delete-orphan"
+    )
+
+
+class Workload(Base):
+    """A cluster job / MLPerf run / inference service for the testing board."""
+
+    __tablename__ = "workloads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    kind: Mapped[str] = mapped_column(String(40), default="mlperf")  # mlperf|inference|training|workspace
+    status: Mapped[str] = mapped_column(String(40), default="pending")  # pending|running|completed|failed|stopped
+    project: Mapped[str] = mapped_column(String(80), default="firmus")
+    department: Mapped[str] = mapped_column(String(80), default="default")
+    node_pool: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    pods_running: Mapped[int] = mapped_column(Integer, default=0)
+    pods_requested: Mapped[int] = mapped_column(Integer, default=1)
+    gpu_request: Mapped[int] = mapped_column(Integer, default=0)
+    gpu_allocation: Mapped[int] = mapped_column(Integer, default=0)
+    gpu_mem_gb_request: Mapped[int] = mapped_column(Integer, default=0)
+    gpu_mem_gb_alloc: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class InventoryNode(Base):
+    """SPM / PXE inventory for a compute rack or fabric switch."""
+
+    __tablename__ = "inventory_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(24), default="compute")  # compute | leaf | spine
+    serial: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    hall_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    rack_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    bmc_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    os_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    pxe_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    switch_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    bmc_password: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    bmc_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    os_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    provision_status: Mapped[str] = mapped_column(String(24), default="registered")
+    sol_log: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provision_started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+
+class Device(Base):
+    """One occupant of a rack: compute, switch, PDU, or an empty reservation."""
+
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    rack_id: Mapped[str] = mapped_column(ForeignKey("racks.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(40), default="compute")  # compute|switch|power|empty
+    status: Mapped[str] = mapped_column(String(40), default="healthy")  # healthy|warning|critical|offline|empty
+    u_start: Mapped[int] = mapped_column(Integer, default=1)  # bottom-most U, 1 at floor
+    u_height: Mapped[int] = mapped_column(Integer, default=1)
+    last_check_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    check_value: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    rack: Mapped[Rack] = relationship(back_populates="devices")
+
+
 class StaffTask(Base):
     """A one-off assignment from a manager/admin to a person, shown on Task calendar."""
 

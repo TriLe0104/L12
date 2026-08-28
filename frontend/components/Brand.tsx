@@ -1,29 +1,26 @@
-import Image from "next/image";
+/** L12 cat mark + wordmark. */
+const MARK = "/brand/l12-mark.png";
 
-/** Full TVM lockup (wordmark + "PRECISION MACHINING"). Needs a dark surface. */
 export function BrandLockup({ width = 260 }: { width?: number }) {
   return (
-    <Image
-      src="/brand/tvm-logo.png"
-      alt="TVM Precision Machining"
-      width={631}
-      height={211}
-      priority
-      style={{ width, height: "auto" }}
-    />
+    <div className="brand-hero" style={{ width }}>
+      <img src={MARK} alt="" className="brand-hero-mark" width={120} height={120} />
+      <div className="brand-hero-word">
+        <span className="brand-l12">L12</span>
+        <span className="brand-app">APP</span>
+      </div>
+    </div>
   );
 }
 
-/** TVM mark only, for tight spots like the nav rail. */
-export function BrandMark({ width = 132 }: { width?: number }) {
+export function BrandMark({ size = 34 }: { size?: number }) {
   return (
-    <Image
-      src="/brand/tvm-mark.png"
-      alt="TVM"
-      width={219}
-      height={77}
-      priority
-      style={{ width, height: "auto" }}
-    />
+    <span className="brand-mark">
+      <img src={MARK} alt="L12" width={size} height={size} />
+      <span className="brand-word">
+        <span className="brand-l12">L12</span>
+        <span className="brand-app">APP</span>
+      </span>
+    </span>
   );
 }

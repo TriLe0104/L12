@@ -1,23 +1,22 @@
 :root {
-  /* surfaces: cool shop-floor grey, never flat */
-  --ink: #0d1117;
-  --ink-soft: #1b232d;
-  --steel: #5a6a7a;
-  --steel-soft: #8797a6;
-  --paper: #e9edf0;
-  --panel: #ffffff;
-  --rule: rgba(13, 17, 23, 0.14);
-  --rule-soft: rgba(13, 17, 23, 0.07);
+  /* L12: black field, white type, red signal */
+  --ink: #f5f5f5;
+  --ink-soft: #d2d2d2;
+  --steel: #8d8d8d;
+  --steel-soft: #6e6e6e;
+  --paper: #070707;
+  --panel: #111111;
+  --rule: rgba(255, 255, 255, 0.1);
+  --rule-soft: rgba(255, 255, 255, 0.06);
 
-  /* accents: TVM gold + brushed silver */
-  --signal: #f5a800;
-  --signal-wash: rgba(245, 168, 0, 0.1);
-  --signal-soft: rgba(245, 168, 0, 0.16);
-  --signal-ring: rgba(245, 168, 0, 0.3);
-  --signal-ring-strong: rgba(245, 168, 0, 0.55);
+  --signal: #e10600;
+  --signal-wash: rgba(225, 6, 0, 0.14);
+  --signal-soft: rgba(225, 6, 0, 0.22);
+  --signal-ring: rgba(225, 6, 0, 0.35);
+  --signal-ring-strong: rgba(225, 6, 0, 0.7);
   --silver: #c9ced3;
-  --go: #0b8457;
-  --stop: #c81e2b;
+  --go: #3dd68c;
+  --stop: #e10600;
 
   /* status tones */
   --tone-slate: #64748b;
@@ -31,7 +30,8 @@
   --tone-orange: #c2410c;
   --tone-purple: #6d28d9;
 
-  --rail-w: 14.5rem;
+  --rail-w: 3.6rem;
+  --rail-open: 14.5rem;
   --card-min: 18rem;
   /* the detail drawer's width, and below it the width the card inside actually
      gets: the drawer less .drawer-body's padding and the drawer's own border.
@@ -83,10 +83,8 @@ body {
   color: var(--ink);
   background-color: var(--paper);
   background-image:
-    radial-gradient(60rem 42rem at 88% -14%, var(--signal-wash), transparent 62%),
-    radial-gradient(52rem 40rem at 2% 6%, rgba(84, 124, 186, 0.09), transparent 64%),
-    radial-gradient(58rem 40rem at 55% 112%, rgba(90, 106, 122, 0.12), transparent 62%),
-    linear-gradient(178deg, #f8fafb 0%, #eff2f6 48%, #e8ecf1 100%);
+    radial-gradient(50rem 32rem at 100% -10%, var(--signal-wash), transparent 58%),
+    linear-gradient(180deg, #0b0b0b 0%, #050505 100%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
 }
@@ -102,30 +100,127 @@ textarea {
 /* ---------------- app shell ---------------- */
 .shell {
   display: grid;
-  grid-template-columns: var(--rail-w) 1fr;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
+  transition: grid-template-columns 160ms var(--ease);
+}
+
+.shell:has(.rail:hover),
+.shell:has(.rail:focus-within) {
+  grid-template-columns: var(--rail-open) minmax(0, 1fr);
+}
+
+.topbar {
+  display: none;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  line-height: 1;
+  min-width: max-content;
+}
+
+.brand-mark img {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
+  flex: none;
+}
+
+.brand-word {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  opacity: 0;
+  transition: opacity 140ms var(--ease);
+}
+
+.brand-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
+  line-height: 1;
+}
+
+.brand-hero-mark {
+  width: 7.5rem;
+  height: 7.5rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0 18px rgba(225, 6, 0, 0.35));
+}
+
+.brand-hero-word {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.brand-l12 {
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  font-size: 1.35rem;
+  color: #fff;
+}
+
+.brand-hero .brand-l12 {
+  font-size: clamp(3.4rem, 8vw, 5.4rem);
+}
+
+.brand-app {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--signal);
+}
+
+.brand-hero .brand-app {
+  font-size: 1rem;
 }
 
 .rail {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  position: relative;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 22px 16px 16px;
+  padding: 14px 10px 12px;
   color: #cdd6df;
-  background:
-    radial-gradient(420px 220px at 20% 0%, rgba(245, 168, 0, 0.14), transparent 70%),
-    linear-gradient(180deg, #0c0c0d 0%, #070708 62%, #000 100%);
+  background: #080808;
   border-right: 1px solid rgba(255, 255, 255, 0.07);
+  z-index: 6;
+}
+
+.rail:hover,
+.rail:focus-within {
+  box-shadow: none;
+}
+
+.rail:hover .brand-word,
+.rail:focus-within .brand-word,
+.rail:hover .brand-sub,
+.rail:focus-within .brand-sub,
+.rail:hover .nav-label,
+.rail:focus-within .nav-label,
+.rail:hover .rail-user,
+.rail:focus-within .rail-user {
+  opacity: 1;
 }
 
 .brand {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  padding: 0 8px 20px;
+  padding: 0 2px 16px;
 }
 
 .brand-sub {
@@ -134,21 +229,45 @@ textarea {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--steel-soft);
+  opacity: 0;
+  white-space: nowrap;
+  transition: opacity 140ms var(--ease);
 }
 
 .nav-link {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 10px;
+  padding: 9px 8px;
   border-radius: var(--radius);
   color: #b9c4ce;
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
   border-left: 2px solid transparent;
+  white-space: nowrap;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
-    border-color var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+    border-color var(--t-mid) var(--ease);
+}
+
+.nav-ico {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: inherit;
+}
+
+.nav-ico svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.nav-label {
+  opacity: 0;
+  transition: opacity 140ms var(--ease);
 }
 
 .nav-link:hover {
@@ -181,6 +300,8 @@ textarea {
 .rail-user {
   min-width: 0;
   line-height: 1.25;
+  opacity: 0;
+  transition: opacity 140ms var(--ease);
 }
 
 .rail-user b {
@@ -219,8 +340,16 @@ textarea {
 
 .main {
   min-width: 0;
-  overflow-x: clip;
+  min-height: 0;
+  overflow: auto;
   padding: 1.6rem clamp(0.9rem, 1.8vw, 1.9rem) 3.75rem;
+}
+
+.main:has(.cluster-app) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------------- page header ---------------- */
@@ -332,7 +461,8 @@ textarea {
   height: 2.15rem;
   border-radius: var(--radius);
   border: 1px solid var(--rule);
-  background: rgba(255, 255, 255, 0.86);
+  background: #141414;
+  color: #f5f5f5;
   padding: 0 0.625rem;
   font-size: 0.82rem;
   max-width: 100%;
@@ -360,10 +490,10 @@ textarea {
 }
 
 .btn:hover:not(:disabled) {
-  background: #fff;
-  border-color: rgba(13, 17, 23, 0.32);
+  background: #1c1c1c;
+  border-color: rgba(255, 255, 255, 0.28);
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px -14px rgba(13, 17, 23, 0.9);
+  box-shadow: 0 8px 18px -14px rgba(0, 0, 0, 0.9);
 }
 
 .btn:active:not(:disabled) {
@@ -379,9 +509,9 @@ textarea {
 }
 
 .btn-primary {
-  background: var(--ink);
+  background: var(--signal);
   color: #fff;
-  border-color: var(--ink);
+  border-color: var(--signal);
 }
 
 /* Must carry :not(:disabled) to outrank .btn:hover:not(:disabled) above —
@@ -391,10 +521,10 @@ textarea {
    gold focus ring. The fill never animates, so the label cannot wash out
    part-way through the transition. */
 .btn-primary:hover:not(:disabled) {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: #ff1a12;
+  border-color: #ff1a12;
   box-shadow:
-    inset 0 0 0 1px var(--signal-ring-strong),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     0 0 0 3px var(--signal-ring),
     0 10px 22px -14px rgba(0, 0, 0, 0.95);
 }
@@ -2260,7 +2390,7 @@ button.jobcard-thumb:focus-visible {
 
 /* Kill FullCalendar's gray focus halo (`.fc-button-active:focus` /
    `.fc-button-primary:focus` → `box-shadow: 0 0 0 .2rem rgba(76,91,106,.5)`).
-   Mouse :focus stays clean; keyboard :focus-visible uses TVM yellow. */
+   Mouse :focus stays clean; keyboard :focus-visible uses the red signal. */
 .fc .fc-button:focus,
 .fc .fc-button-primary:focus,
 .fc .fc-button-primary:not(:disabled).fc-button-active:focus,
@@ -3292,10 +3422,10 @@ button.jobcard-thumb:focus-visible {
 
 .list-panel,
 .detail-panel {
-  background: rgba(255, 255, 255, 0.82);
+  background: #111;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
 }
 
 .list-panel {
@@ -3527,8 +3657,7 @@ button.jobcard-thumb:focus-visible {
   gap: 4px;
   color: #eef2f6;
   background:
-    radial-gradient(700px 420px at 24% 22%, rgba(245, 168, 0, 0.2), transparent 66%),
-    radial-gradient(640px 520px at 84% 90%, rgba(201, 206, 211, 0.12), transparent 72%),
+    radial-gradient(700px 420px at 24% 22%, rgba(225, 6, 0, 0.22), transparent 66%),
     linear-gradient(155deg, #121213 0%, #0a0a0b 58%, #000 100%);
 }
 
@@ -3537,14 +3666,20 @@ button.jobcard-thumb:focus-visible {
   z-index: 1;
 }
 
+.login-art .brand-hero-mark {
+  width: 8.5rem;
+  height: 8.5rem;
+  object-fit: contain;
+}
+
 /* slow drifting light instead of the old wireframe grid */
 .login-art::before {
   content: "";
   position: absolute;
   inset: -25%;
   background:
-    radial-gradient(30rem 24rem at 32% 30%, rgba(245, 168, 0, 0.18), transparent 64%),
-    radial-gradient(26rem 22rem at 72% 68%, rgba(96, 142, 220, 0.14), transparent 66%);
+    radial-gradient(30rem 24rem at 32% 30%, rgba(225, 6, 0, 0.2), transparent 64%),
+    radial-gradient(26rem 22rem at 72% 68%, rgba(255, 255, 255, 0.05), transparent 66%);
   filter: blur(28px);
   animation: drift 26s var(--ease) infinite alternate;
   pointer-events: none;
@@ -3582,6 +3717,8 @@ button.jobcard-thumb:focus-visible {
   flex-direction: column;
   justify-content: center;
   padding: 48px clamp(28px, 6vw, 76px);
+  background: #090909;
+  color: #f5f5f5;
 }
 
 .auth-form {
@@ -3711,6 +3848,7 @@ button.jobcard-thumb:focus-visible {
 @media (max-width: 780px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 2.75rem auto minmax(0, 1fr);
   }
   .rail {
     position: sticky;

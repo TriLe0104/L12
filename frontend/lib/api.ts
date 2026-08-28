@@ -1,4 +1,12 @@
 import type {
+  Campus,
+  ClusterOverview,
+  ClusterRack,
+  ClusterWorkload,
+  DataHall,
+  HallDetail,
+} from "./cluster";
+import type {
   ActivityItem,
   Assignee,
   POComment,
@@ -77,6 +85,91 @@ export const api = {
   authConfig: () =>
     request<{ provider: string; allow_signup: boolean }>("/api/auth/config"),
   me: () => request<User>("/api/auth/me"),
+
+  clusterOverview: () => request<ClusterOverview>("/api/cluster/overview"),
+  clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.range) qs.set("range", params.range);
+    if (params.from_ts != null) qs.set("from_ts", String(params.from_ts));
+    if (params.to_ts != null) qs.set("to_ts", String(params.to_ts));
+    const q = qs.toString();
+    return request<import("./cluster").ClusterMetrics>(`/api/cluster/metrics${q ? `?${q}` : ""}`);
+  },
+  provision: () => request<import("./cluster").ProvisionSnapshot>("/api/provision"),
+  provisionRegister: (serials: string[]) =>
+    request<import("./cluster").ProvisionSnapshot>("/api/provision/register", {
+      method: "POST",
+      body: JSON.stringify({ serials }),
+    }),
+  provisionDiscover: () =>
+    request<import("./cluster").ProvisionSnapshot>("/api/provision/discover", { method: "POST" }),
+  provisionRedfish: (ids: string[]) =>
+    request<import("./cluster").ProvisionSnapshot>("/api/provision/redfish", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  provisionPxe: (ids: string[]) =>
+    request<import("./cluster").ProvisionSnapshot>("/api/provision/pxe", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  provisionConsole: (id: string) =>
+    request<{ id: string; name: string; status: string; log: string }>(`/api/provision/nodes/${id}/console`),
+  fabric: () => request<import("./cluster").FabricTopology>("/api/fabric"),
+  fabricPorts: (params: Record<string, string | undefined> = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v) as [string, string][],
+    ).toString();
+    return request<{ count: number; ports: import("./cluster").FabricPort[]; summary: import("./cluster").FabricSummary }>(
+      `/api/fabric/ports${qs ? `?${qs}` : ""}`,
+    );
+  },
+  fabricLive: (node?: string) =>
+    request<import("./cluster").LiveTraffic>(
+      node ? `/api/fabric/live?node=${encodeURIComponent(node)}` : "/api/fabric/live",
+    ),
+  campus: () => request<Campus>("/api/cluster/campus"),
+  getRack: (id: string) => request<ClusterRack>(`/api/cluster/racks/${id}`),
+  listWorkloads: () => request<ClusterWorkload[]>("/api/workloads"),
+  createWorkload: (payload: Partial<ClusterWorkload> & { name: string }) =>
+    request<ClusterWorkload>("/api/workloads", { method: "POST", body: JSON.stringify(payload) }),
+  updateWorkload: (id: string, payload: Partial<ClusterWorkload>) =>
+    request<ClusterWorkload>(`/api/workloads/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteWorkload: (id: string) => request<void>(`/api/workloads/${id}`, { method: "DELETE" }),
+  listHalls: () => request<DataHall[]>("/api/cluster/halls"),
+  getHall: (id: string) => request<HallDetail>(`/api/cluster/halls/${id}`),
+  createHall: (payload: { name: string; description?: string; width_tiles?: number; depth_tiles?: number }) =>
+    request<HallDetail>("/api/cluster/halls", { method: "POST", body: JSON.stringify(payload) }),
+  updateHall: (id: string, payload: Partial<{ name: string; description: string; width_tiles: number; depth_tiles: number }>) =>
+    request<DataHall>(`/api/cluster/halls/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteHall: (id: string) => request<void>(`/api/cluster/halls/${id}`, { method: "DELETE" }),
+  createRack: (hallId: string, payload: { name: string; x: number; y: number; rotation?: number; height_u?: number }) =>
+    request<ClusterRack>(`/api/cluster/halls/${hallId}/racks`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  createRacksBulk: (
+    hallId: string,
+    payload: { cols: number; rows: number; count?: number; prefix?: string; aisle?: boolean },
+  ) =>
+    request<ClusterRack[]>(`/api/cluster/halls/${hallId}/racks/bulk`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  patchRacksBulk: (payload: { ids: string[]; power_state?: string; run_status?: string; delete?: boolean }) =>
+    request<{ deleted?: number; racks?: ClusterRack[] }>("/api/cluster/racks/bulk", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateRack: (id: string, payload: Partial<{ name: string; x: number; y: number; rotation: number; height_u: number; notes: string | null; power_state: string; run_status: string }>) =>
+    request<ClusterRack>(`/api/cluster/racks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteRack: (id: string) => request<void>(`/api/cluster/racks/${id}`, { method: "DELETE" }),
+  createDevice: (rackId: string, payload: { name: string; kind?: string; status?: string; u_start: number; u_height?: number; check_value?: string }) =>
+    request(`/api/cluster/racks/${rackId}/devices`, { method: "POST", body: JSON.stringify(payload) }),
+  updateDevice: (id: string, payload: Record<string, unknown>) =>
+    request(`/api/cluster/devices/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteDevice: (id: string) => request<void>(`/api/cluster/devices/${id}`, { method: "DELETE" }),
+
 
   listPOs: (params: Record<string, string | undefined> = {}) => {
     const qs = new URLSearchParams(

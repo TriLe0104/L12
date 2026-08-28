@@ -44,6 +44,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # NULL = project-level chat; 0+ = comments on that part index.
         "part_index": "INTEGER",
     },
+    "racks": {
+        "power_state": "VARCHAR(16) NOT NULL DEFAULT 'on'",
+        "run_status": "VARCHAR(16) NOT NULL DEFAULT 'ready'",
+    },
 }
 
 # Absolute object-storage URLs outgrow the original 500-char columns. Postgres

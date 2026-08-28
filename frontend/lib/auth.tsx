@@ -7,7 +7,7 @@ import { api, setToken } from "./api";
 import { ROLES_HIGH_TO_LOW, roleRank, type Role, type User } from "./types";
 
 /** Where a signed-in session belongs. */
-export const LANDING = "/dashboard";
+export const LANDING = "/cluster";
 
 interface AuthState {
   user: User | null;

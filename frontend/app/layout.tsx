@@ -3,7 +3,6 @@ import { Archivo, IBM_Plex_Mono } from "next/font/google";
 
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
-import { BoardSettingsProvider } from "@/lib/boardSettings";
 import { RegisterSW } from "./register-sw";
 
 const ui = Archivo({
@@ -21,11 +20,11 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TVM Precision Machining — PO Calendar",
-  description: "Purchase order and material scheduling board for the machine shop floor.",
+  title: "L12 App",
+  description: "L12 cluster testing — data halls, racks, and health.",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icons/icon-192.png", apple: "/icons/icon-192.png" },
-  appleWebApp: { capable: true, title: "TVM PO", statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, title: "L12 App", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {
@@ -39,9 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${ui.variable} ${mono.variable}`}>
       <body>
-        <AuthProvider>
-          <BoardSettingsProvider>{children}</BoardSettingsProvider>
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
         <RegisterSW />
       </body>
     </html>

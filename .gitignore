@@ -23,6 +23,11 @@ next-env.d.ts
 frontend/screenshots/
 frontend/tmp-shots/
 frontend/tmp-*.png
+frontend/test-results/
+
+# local reference dump and uploads
+_ref_webgui/
+uploads/
 
 # os / editors
 .DS_Store
