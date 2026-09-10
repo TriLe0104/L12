@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClusterDevice, ClusterRack } from "@/lib/cluster";
+import type { ClusterDevice, ClusterRack, PowerRack } from "@/lib/cluster";
 import { GB300_ELEVATION, KIND_LABEL, POWER_LABEL, RUN_LABEL, STATUS_LABEL } from "@/lib/cluster";
 
 function occupant(devices: ClusterDevice[], u: number): ClusterDevice | null {
@@ -33,12 +33,14 @@ export function RackPanel({
   onDelete,
   onPower,
   onRestart,
+  power,
 }: {
   rack: ClusterRack;
   tab: "overview" | "details";
   onTab: (tab: "overview" | "details") => void;
   canEdit: boolean;
   busy?: boolean;
+  power?: PowerRack;
   onClose: () => void;
   onRotate: () => void;
   onRename: (name: string) => void;
@@ -110,11 +112,37 @@ export function RackPanel({
         <div className="usage-meter">
           <div className="usage-meter-label">
             <span>Power</span>
-            <b>{rack.power_kw ? `${rack.power_kw.toFixed(0)} kW` : `${Math.round(rack.power_pct ?? 0)}%`}</b>
+            <b>
+              {power
+                ? power.denied
+                  ? "No budget"
+                  : `${Math.round(power.consumed_kw)} / ${Math.round(power.allocated_kw)} kW`
+                : rack.power_kw
+                  ? `${rack.power_kw.toFixed(0)} kW`
+                  : `${Math.round(rack.power_pct ?? 0)}%`}
+            </b>
           </div>
           <div className="meter" aria-hidden>
-            <i style={{ width: `${Math.max(0, Math.min(100, rack.power_pct ?? 0))}%` }} />
+            {power && !power.denied ? (
+              <i
+                style={{
+                  width: `${Math.max(0, Math.min(100, ((power.consumed_kw + power.unused_kw) / (power.nameplate_kw || 120)) * 100))}%`,
+                  background:
+                    power.allocated_kw > 0
+                      ? `linear-gradient(90deg, #3da35a ${(power.consumed_kw / power.allocated_kw) * 100}%, #b7bbc0 0)`
+                      : "#3da35a",
+                }}
+              />
+            ) : (
+              <i style={{ width: `${Math.max(0, Math.min(100, rack.power_pct ?? 0))}%` }} />
+            )}
           </div>
+          {power?.action && power.action !== "off" && (
+            <div className="usage-meter-label">
+              <span>{power.extra ? "Extra rack" : "Limiter"}</span>
+              <b>{power.action}</b>
+            </div>
+          )}
         </div>
       </div>
 

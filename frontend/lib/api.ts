@@ -129,6 +129,12 @@ export const api = {
       node ? `/api/fabric/live?node=${encodeURIComponent(node)}` : "/api/fabric/live",
     ),
   campus: () => request<Campus>("/api/cluster/campus"),
+  clusterPower: () => request<import("./cluster").PowerLimiter>("/api/cluster/power"),
+  patchClusterPower: (payload: { mode?: string; budget_kw?: number; auto_budget?: boolean; reset?: boolean }) =>
+    request<import("./cluster").PowerLimiter>("/api/cluster/power", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   getRack: (id: string) => request<ClusterRack>(`/api/cluster/racks/${id}`),
   listWorkloads: () => request<ClusterWorkload[]>("/api/workloads"),
   createWorkload: (payload: Partial<ClusterWorkload> & { name: string }) =>

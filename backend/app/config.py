@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     bootstrap_admin_name: str = "Demo Admin"
     bootstrap_admin_email: str = "tri@supermicro.com"
     bootstrap_admin_password: str = "demo1234"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
     # S3-compatible object storage (Cloudflare R2, AWS S3, MinIO, …). When all
     # of endpoint / bucket / keys are set, uploads survive container restarts.

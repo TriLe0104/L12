@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 
 import { OverviewDash } from "@/components/OverviewDash";
+import { usePowerLimiter } from "@/components/PowerLimiter";
 import { RackBoard } from "@/components/RackBoard";
 import { RackPanel } from "@/components/RackPanel";
 import { SwitchPanel, type SelectedSwitch } from "@/components/SwitchPanel";
@@ -52,6 +53,8 @@ export default function ClusterPage() {
   const [matrixCount, setMatrixCount] = useState(64);
   const [rackPrefix, setRackPrefix] = useState("");
   const [restarting, setRestarting] = useState(false);
+
+  const { data: power, setData: setPower, byId: powerByRack } = usePowerLimiter(tab === "floor");
 
   const hall = halls.find((h) => h.id === hallId) ?? null;
   const selectedRacks = halls.flatMap((h) => h.racks).filter((r) => selectedIds.includes(r.id));
@@ -418,6 +421,7 @@ export default function ClusterPage() {
               focusHallId={flyHallId}
               placeMode={placeMode}
               canEdit={mayEdit}
+              powerByRack={powerByRack}
               onSelect={(id, opts) => {
                 setPlaceMode(false);
                 setHallOverview(false);
@@ -452,6 +456,52 @@ export default function ClusterPage() {
             <div className="cluster-canvas cluster-canvas-pending">
               {mayEdit ? "Create a data hall to start laying out racks." : "No data halls yet."}
             </div>
+          )}
+          {power && (
+            <aside className="lps-hud" aria-label="Power limiter">
+              <div className="lps-hud-kicker">{power.mode === "dynamic" ? "MaxLPS" : "Static"}</div>
+              <strong>{formatKw(power.active.consumed_kw)}</strong>
+              <span className="lps-hud-sub">
+                {formatKw(power.budget_kw)} budget · {power.active.racks_enabled}/{power.racks.length} capped
+              </span>
+              <dl>
+                <div>
+                  <dt>Stranded</dt>
+                  <dd>{formatKw(power.active.stranded_kw)}</dd>
+                </div>
+                <div>
+                  <dt>Extra racks</dt>
+                  <dd>+{power.active.racks_extra}</dd>
+                </div>
+                <div>
+                  <dt>Headroom</dt>
+                  <dd>{formatKw(power.active.headroom_kw)}</dd>
+                </div>
+                <div>
+                  <dt>Tick</dt>
+                  <dd>{power.tick}</dd>
+                </div>
+              </dl>
+              <div className="lps-hud-modes">
+                <button
+                  type="button"
+                  data-active={power.mode === "static"}
+                  onClick={() => api.patchClusterPower({ mode: "static" }).then(setPower)}
+                >
+                  Static
+                </button>
+                <button
+                  type="button"
+                  data-active={power.mode === "dynamic"}
+                  onClick={() => api.patchClusterPower({ mode: "dynamic" }).then(setPower)}
+                >
+                  MaxLPS
+                </button>
+                <button type="button" onClick={() => api.patchClusterPower({ mode: "dynamic", reset: true }).then(setPower)}>
+                  Replay
+                </button>
+              </div>
+            </aside>
           )}
           {hudTelemetry && (
             <aside className="zoom-hud" data-level={zoom.level}>
@@ -502,6 +552,12 @@ export default function ClusterPage() {
               </span>
               <span>
                 <i data-k="dn" /> Downlink
+              </span>
+              <span>
+                <i data-k="used" /> Consumed
+              </span>
+              <span>
+                <i data-k="spare" /> Unused alloc
               </span>
             </div>
           )}
@@ -622,6 +678,7 @@ export default function ClusterPage() {
               onTab={setRackTab}
               canEdit={mayEdit}
               busy={busy || restarting}
+              power={powerByRack[selected.id]}
               onClose={() => setSelectedIds([])}
               onRotate={() => onRotate(selected)}
               onRename={(name) => onRename(selected, name)}

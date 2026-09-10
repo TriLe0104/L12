@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-import type { ClusterRack, Telemetry } from "@/lib/cluster";
+import type { ClusterRack, PowerRack, Telemetry } from "@/lib/cluster";
 
 const TILE = 1.15;
 const RACK_W = 0.62;
@@ -28,6 +28,7 @@ type Props = {
   focusHallId: string | null;
   placeMode: boolean;
   canEdit: boolean;
+  powerByRack?: Record<string, PowerRack>;
   onSelect: (id: string | null, opts?: { additive?: boolean }) => void;
   onMove: (id: string, x: number, y: number) => void;
   onPlace: (hallId: string, x: number, y: number) => void;
@@ -98,17 +99,22 @@ type Entry = {
   hallIndex: number;
   width: number;
   depth: number;
+  barUsed: number;
+  barSpare: number;
 };
 
-function capColor(rack: ClusterRack, selected: boolean) {
+function capColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
   if (rack.power_state === "off") return new THREE.Color(0x3a3a3a);
+  if (power?.denied) return new THREE.Color(0x3a3a3a);
+  if (power?.extra) return new THREE.Color(0x2f9e4a);
   if (selected) return new THREE.Color(0xff3b30);
   if (rack.run_status === "running") return new THREE.Color(0xe10600);
   return new THREE.Color(0x9a1a14);
 }
 
-function bodyColor(rack: ClusterRack, selected: boolean) {
+function bodyColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
   if (rack.power_state === "off") return new THREE.Color(0x121212);
+  if (power?.denied) return new THREE.Color(0x141414);
   if (selected) return new THREE.Color(0x333333);
   return new THREE.Color(0x1c1c1c);
 }
@@ -119,6 +125,7 @@ export function ClusterCanvas({
   focusHallId,
   placeMode,
   canEdit,
+  powerByRack,
   onSelect,
   onMove,
   onPlace,
@@ -132,6 +139,7 @@ export function ClusterCanvas({
   const placeRef = useRef(placeMode);
   const editRef = useRef(canEdit);
   const focusRef = useRef(focusHallId);
+  const powerRef = useRef(powerByRack);
   const onSelectRef = useRef(onSelect);
   const onMoveRef = useRef(onMove);
   const onPlaceRef = useRef(onPlace);
@@ -143,6 +151,7 @@ export function ClusterCanvas({
   placeRef.current = placeMode;
   editRef.current = canEdit;
   focusRef.current = focusHallId;
+  powerRef.current = powerByRack;
   onSelectRef.current = onSelect;
   onMoveRef.current = onMove;
   onPlaceRef.current = onPlace;
@@ -162,7 +171,7 @@ export function ClusterCanvas({
 
   useEffect(() => {
     paintRef.current?.();
-  }, [selectedIds]);
+  }, [selectedIds, powerByRack]);
 
   useEffect(() => {
     if (skipFly.current) {
@@ -212,10 +221,21 @@ export function ClusterCanvas({
 
     const bodyGeo = new THREE.BoxGeometry(RACK_W, RACK_H, RACK_D);
     const capGeo = new THREE.BoxGeometry(RACK_W * 0.98, 0.04, RACK_D * 0.98);
+    const barGeo = new THREE.BoxGeometry(0.28, 1, 0.28);
     const bodyMat = new THREE.MeshStandardMaterial({ metalness: 0.5, roughness: 0.45 });
     const capMat = new THREE.MeshStandardMaterial({ metalness: 0.3, roughness: 0.4, emissive: 0xe10600, emissiveIntensity: 0.28 });
+    const usedMat = new THREE.MeshStandardMaterial({
+      color: 0x2f9e4a,
+      emissive: 0x145c28,
+      emissiveIntensity: 0.4,
+      metalness: 0.2,
+      roughness: 0.42,
+    });
+    const spareMat = new THREE.MeshStandardMaterial({ color: 0xb7bbc0, metalness: 0.12, roughness: 0.72 });
     let bodyMesh: THREE.InstancedMesh | null = null;
     let capMesh: THREE.InstancedMesh | null = null;
+    let usedMesh: THREE.InstancedMesh | null = null;
+    let spareMesh: THREE.InstancedMesh | null = null;
 
     const dummy = new THREE.Object3D();
     let entries: Entry[] = [];
@@ -256,10 +276,16 @@ export function ClusterCanvas({
     const disposeInstanced = () => {
       bodyMesh?.dispose();
       capMesh?.dispose();
+      usedMesh?.dispose();
+      spareMesh?.dispose();
       if (bodyMesh) scene.remove(bodyMesh);
       if (capMesh) scene.remove(capMesh);
+      if (usedMesh) scene.remove(usedMesh);
+      if (spareMesh) scene.remove(spareMesh);
       bodyMesh = null;
       capMesh = null;
+      usedMesh = null;
+      spareMesh = null;
     };
 
     const rebuild = () => {
@@ -268,7 +294,15 @@ export function ClusterCanvas({
       entries = [];
       hs.forEach((hall, hallIndex) => {
         for (const rack of hall.racks) {
-          entries.push({ rack, hallId: hall.id, hallIndex, width: hall.width_tiles, depth: hall.depth_tiles });
+          entries.push({
+            rack,
+            hallId: hall.id,
+            hallIndex,
+            width: hall.width_tiles,
+            depth: hall.depth_tiles,
+            barUsed: 0,
+            barSpare: 0,
+          });
         }
       });
 
@@ -322,14 +356,22 @@ export function ClusterCanvas({
       const count = Math.max(entries.length, 1);
       bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
       capMesh = new THREE.InstancedMesh(capGeo, capMat, count);
+      usedMesh = new THREE.InstancedMesh(barGeo, usedMat, count);
+      spareMesh = new THREE.InstancedMesh(barGeo, spareMat, count);
       bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       capMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      usedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      spareMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       if (count > 0) {
         bodyMesh.frustumCulled = false;
         capMesh.frustumCulled = false;
+        usedMesh.frustumCulled = false;
+        spareMesh.frustumCulled = false;
       }
       scene.add(bodyMesh);
       scene.add(capMesh);
+      scene.add(usedMesh);
+      scene.add(spareMesh);
       buildNetwork(hs, pitch);
       paint();
     };
@@ -458,6 +500,7 @@ export function ClusterCanvas({
     const paint = () => {
       if (!bodyMesh || !capMesh) return;
       const selected = new Set(selectedRef.current);
+      const power = powerRef.current ?? {};
       let ringOn = false;
       entries.forEach((entry, i) => {
         const pos = worldOf(entry);
@@ -470,8 +513,9 @@ export function ClusterCanvas({
         dummy.updateMatrix();
         capMesh!.setMatrixAt(i, dummy.matrix);
         const isSel = selected.has(entry.rack.id);
-        bodyMesh!.setColorAt(i, bodyColor(entry.rack, isSel));
-        capMesh!.setColorAt(i, capColor(entry.rack, isSel));
+        const slice = power[entry.rack.id];
+        bodyMesh!.setColorAt(i, bodyColor(entry.rack, isSel, slice));
+        capMesh!.setColorAt(i, capColor(entry.rack, isSel, slice));
         if (isSel && selected.size === 1) {
           ring.position.set(pos.x, RACK_H / 2, pos.z);
           ring.rotation.y = dummy.rotation.y;
@@ -484,6 +528,40 @@ export function ClusterCanvas({
       capMesh.instanceMatrix.needsUpdate = true;
       if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
       if (capMesh.instanceColor) capMesh.instanceColor.needsUpdate = true;
+    };
+
+    const paintBars = () => {
+      if (!usedMesh || !spareMesh) return;
+      const power = powerRef.current ?? {};
+      const tdp = 120;
+      entries.forEach((entry, i) => {
+        const slice = power[entry.rack.id];
+        const usedT = slice && !slice.denied ? Math.max(0, slice.consumed_kw / tdp) : 0;
+        const spareT = slice && !slice.denied ? Math.max(0, slice.unused_kw / tdp) : 0;
+        entry.barUsed += (usedT - entry.barUsed) * 0.14;
+        entry.barSpare += (spareT - entry.barSpare) * 0.14;
+        const pos = worldOf(entry);
+        const yaw = THREE.MathUtils.degToRad(entry.rack.rotation);
+        const colH = RACK_H * 1.15;
+        const usedH = Math.max(0.001, entry.barUsed * colH);
+        const spareH = Math.max(0.001, entry.barSpare * colH);
+        const usedVis = !!(slice && !slice.denied && entry.barUsed > 0.01);
+        const spareVis = !!(slice && !slice.denied && entry.barSpare > 0.01);
+        dummy.rotation.set(0, yaw, 0);
+        dummy.scale.set(usedVis ? 1 : 0, usedH, usedVis ? 1 : 0);
+        dummy.position.set(pos.x, RACK_H + 0.08 + usedH / 2, pos.z);
+        dummy.updateMatrix();
+        usedMesh!.setMatrixAt(i, dummy.matrix);
+        dummy.scale.set(spareVis ? 1 : 0, spareH, spareVis ? 1 : 0);
+        dummy.position.set(pos.x, RACK_H + 0.08 + usedH + spareH / 2, pos.z);
+        dummy.updateMatrix();
+        spareMesh!.setMatrixAt(i, dummy.matrix);
+        if (slice?.extra) usedMesh!.setColorAt(i, new THREE.Color(0x4ade80));
+        else usedMesh!.setColorAt(i, new THREE.Color(0x2f9e4a));
+      });
+      usedMesh.instanceMatrix.needsUpdate = true;
+      spareMesh.instanceMatrix.needsUpdate = true;
+      if (usedMesh.instanceColor) usedMesh.instanceColor.needsUpdate = true;
     };
 
     rebuildRef.current = rebuild;
@@ -758,6 +836,7 @@ export function ClusterCanvas({
         lastHall = nearest;
         onViewRef.current({ level, hallId: nearest, distance });
       }
+      paintBars();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };

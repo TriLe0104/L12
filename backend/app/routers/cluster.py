@@ -9,9 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from pydantic import BaseModel, Field
+
 from ..db import get_db
 from ..fabric import live_traffic, build_fabric
 from ..models import DataHall, Device, Rack, Role, User, Workload, has_rank
+from .. import power_limit
 from ..schemas import (
     CampusOut,
     ClusterOverview,
@@ -356,6 +359,54 @@ def metrics(
         "from_ts": start,
         "to_ts": end,
     }
+
+
+class PowerPatch(BaseModel):
+    mode: str | None = None
+    budget_kw: float | None = Field(default=None, ge=0)
+    auto_budget: bool | None = None
+    reset: bool = False
+
+
+def _power_samples(rack_rows: list[Rack]) -> list[dict]:
+    rows = []
+    for r in rack_rows:
+        _cpu, _gpu, _mem, power = _usage(r)
+        rows.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "hall_id": r.hall_id,
+                "power_state": getattr(r, "power_state", None) or "on",
+                "run_status": getattr(r, "run_status", None) or "ready",
+                "demand_kw": round(power / 100.0 * RACK_TDP_KW, 2) if power else 0.0,
+            }
+        )
+    return rows
+
+
+@router.get("/power")
+def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+    return power_limit.snapshot(_power_samples(rack_rows))
+
+
+@router.patch("/power")
+def patch_power_limiter(
+    payload: PowerPatch,
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if payload.mode is not None and payload.mode not in ("static", "dynamic"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "mode must be static or dynamic")
+    power_limit.apply_patch(
+        mode=payload.mode,
+        budget_kw=payload.budget_kw,
+        reset=payload.reset,
+        auto_budget_flag=bool(payload.auto_budget),
+    )
+    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+    return power_limit.snapshot(_power_samples(rack_rows))
 
 
 @router.get("/campus", response_model=CampusOut)

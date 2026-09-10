@@ -356,3 +356,67 @@ export function formatGbps(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(2)} Tbps`;
   return `${v.toFixed(1)} Gbps`;
 }
+
+export type PowerAction = "reduce" | "increase" | "hold" | "enable" | "deny" | "off" | string;
+
+export interface PowerRack {
+  id: string;
+  name: string;
+  label: string;
+  hall_id: string;
+  power_state: string;
+  run_status: string;
+  demand_kw: number;
+  consumed_kw: number;
+  allocated_kw: number;
+  unused_kw: number;
+  nameplate_kw: number;
+  enabled: boolean;
+  denied: boolean;
+  extra: boolean;
+  action: PowerAction;
+  gap_pct: number | null;
+}
+
+export interface PowerSummary {
+  budget_kw: number;
+  consumed_kw: number;
+  allocated_kw: number;
+  stranded_kw: number;
+  headroom_kw: number;
+  racks_enabled: number;
+  racks_denied: number;
+  racks_extra: number;
+  racks_off: number;
+  actions: Record<string, number>;
+}
+
+export interface PowerShowcaseSlot {
+  id: string;
+  name: string;
+  label: string;
+  additional?: boolean;
+  static: PowerRack;
+  dynamic: PowerRack;
+}
+
+export interface PowerLimiter {
+  mode: "static" | "dynamic" | string;
+  budget_kw: number;
+  auto_budget: boolean;
+  nameplate_kw: number;
+  tdp_kw: number;
+  policy: {
+    reduce_gap_pct: number;
+    increase_gap_pct: number;
+    target_headroom_pct: number;
+    enable_per_tick: number;
+  };
+  tick: number;
+  last_event: string;
+  static: PowerSummary;
+  dynamic: PowerSummary;
+  active: PowerSummary;
+  showcase: PowerShowcaseSlot[];
+  racks: PowerRack[];
+}

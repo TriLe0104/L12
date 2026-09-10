@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { ClusterMetrics } from "@/lib/cluster";
+import type { ClusterMetrics, PowerLimiter as PowerLimiterData } from "@/lib/cluster";
 import { formatGbps, formatKw } from "@/lib/cluster";
+import { PowerLimiterPanel } from "@/components/PowerLimiter";
 
 function Gauge({
   title,
@@ -209,6 +210,7 @@ const RANGE_LABEL: Record<string, string> = {
 
 export function OverviewDash() {
   const [data, setData] = useState<ClusterMetrics | null>(null);
+  const [power, setPower] = useState<PowerLimiterData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeId>("5m");
   const [customFrom, setCustomFrom] = useState("");
@@ -235,6 +237,14 @@ export function OverviewDash() {
         })
         .catch((err) => {
           if (!cancelled) setError(err instanceof Error ? err.message : "Metrics failed");
+        });
+      api
+        .clusterPower()
+        .then((d) => {
+          if (!cancelled) setPower(d);
+        })
+        .catch(() => {
+          /* limiter is additive; metrics still render */
         });
     };
     load();
@@ -306,9 +316,11 @@ export function OverviewDash() {
         </div>
         <div>
           <span>Power</span>
-          <b>{formatKw(last.power_kw)}</b>
+          <b>{formatKw(power?.active.consumed_kw ?? last.power_kw)}</b>
           <small>
-            {data.now.power_pct.toFixed(0)}% of {formatKw(data.size.nameplate_kw)}
+            {power
+              ? `${formatKw(power.active.stranded_kw)} stranded · ${power.mode === "dynamic" ? "MaxLPS" : "static"}`
+              : `${data.now.power_pct.toFixed(0)}% of ${formatKw(data.size.nameplate_kw)}`}
           </small>
         </div>
       </div>
@@ -339,11 +351,19 @@ export function OverviewDash() {
         />
         <Gauge
           title="Total power"
-          pct={data.now.power_pct}
-          value={formatKw(last.power_kw)}
-          used={formatKw(last.power_kw)}
-          total={formatKw(data.size.nameplate_kw)}
-          detail={`120 kW TDP / rack · IT load`}
+          pct={
+            power
+              ? (power.active.consumed_kw / Math.max(power.budget_kw, 1)) * 100
+              : data.now.power_pct
+          }
+          value={formatKw(power?.active.consumed_kw ?? last.power_kw)}
+          used={formatKw(power?.active.consumed_kw ?? last.power_kw)}
+          total={formatKw(power?.budget_kw ?? data.size.nameplate_kw)}
+          detail={
+            power
+              ? `${formatKw(power.budget_kw)} DC budget · ${power.active.racks_enabled} racks capped`
+              : `120 kW TDP / rack · IT load`
+          }
         />
         <article className="stat-panel">
           <h2>Cluster</h2>
@@ -407,6 +427,7 @@ export function OverviewDash() {
           </dl>
         </article>
       </div>
+      <PowerLimiterPanel data={power} onChange={setPower} />
       <div className="chart-row">
         <div className="range-bar">
           <span>Range</span>
