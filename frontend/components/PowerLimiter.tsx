@@ -121,7 +121,7 @@ function Totals({
           <dd>{formatKw(available)}</dd>
         </div>
         <div>
-          <dt>Floating</dt>
+          <dt>Unallocated</dt>
           <dd>{formatKw(floating)}</dd>
         </div>
       </dl>
@@ -147,9 +147,9 @@ function SummaryBars({
   const scale = Math.max(envelope, used + available + floating, 1);
   const pool = racks.filter((r) => r.enabled);
   const cols = [
-    { key: "used", label: "Usage", kw: used, hint: "Workload consumption" },
-    { key: "avail", label: "Available", kw: available, hint: "Allocated on racks, not consumed" },
-    { key: "float", label: "Floating", kw: floating, hint: "Envelope not sitting on a rack" },
+    { key: "used", label: "Usage", kw: used, hint: "Power the workloads are drawing" },
+    { key: "avail", label: "Available", kw: available, hint: "On racks but not consumed — MaxLPS can move this" },
+    { key: "float", label: "Unallocated", kw: floating, hint: "Envelope not on racks (hit max kW/rack, or not enough min-kW slots)" },
   ];
   return (
     <div className="lps-summary">
@@ -413,9 +413,10 @@ export function PowerPolicyFields({
       </label>
       <p>
         Default {formatKw(shareLocal)} / rack = ({formatKw(Number.isFinite(totalLocal) ? totalLocal : 0)} × {Number.isFinite(pctLocal) ? Math.round(pctLocal) : 0}%) / {nLocal}
-        {capped ? " · clamped to max" : ""}
-        {unused > 50 ? ` · ${formatKw(unused)} floating` : ""}
-        {` · envelope ${formatKw(envLocal)} · ${source}`}
+        {capped ? " · hit max kW/rack — leftover is unallocated" : ""}
+        {!capped && shareLocal <= minLocal + 0.5 ? " · short of power — not all racks fed at min" : ""}
+        {unused > 50 ? ` · ${formatKw(unused)} unallocated` : ""}
+        {` · ${formatKw(envLocal)} envelope · ${source}`}
       </p>
     </form>
   );
@@ -550,7 +551,7 @@ export function PowerLimiterPanel({
         <p className="lps-legend">
           <i data-k="c" /> Usage
           <i data-k="u" /> Available
-          <i data-k="f" /> Floating
+          <i data-k="f" /> Unallocated
         </p>
       </aside>
     </section>

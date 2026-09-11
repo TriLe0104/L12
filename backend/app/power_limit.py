@@ -71,16 +71,36 @@ def envelope_kw(n_on: int = 0) -> float:
     return _plan_n(n_on) * STATE.max_rack_kw * pct
 
 
+def n_feed(n_on: int = 0) -> int:
+    """How many racks the envelope can actually feed.
+
+    Fair share is envelope / planned racks. If that is below min kW, drop racks
+    so we do not run anyone at full max while the pool is short of power.
+    """
+    live = n_on or STATE.live_on
+    want = _plan_n(live)
+    env = envelope_kw(live)
+    lo = rack_min_kw()
+    cap = live if live > 0 else want
+    if want <= 0:
+        return max(1, cap)
+    fair = env / want
+    if lo > 0 and fair < lo:
+        fit = int(env // lo)
+        return max(1, min(fit, cap, want))
+    return max(1, min(want, cap))
+
+
 def rack_share_kw(n_on: int = 0) -> float:
-    """Uncapped (total × threshold%) / racks."""
-    n = _plan_n(n_on)
+    """Even split of the envelope across racks we will feed."""
+    n = n_feed(n_on)
     if n <= 0:
         return 0.0
     return max(0.0, envelope_kw(n_on) / n)
 
 
 def rack_policy_kw() -> float:
-    """Default kW/rack, clamped to [min, max] so leftover is not wasted on one rack."""
+    """Default kW/rack = envelope / fed racks, then clamp to [min, max]."""
     lo, hi = rack_min_kw(), rack_hard_kw()
     return min(hi, max(lo, rack_share_kw()))
 
@@ -89,7 +109,7 @@ def pool_size(n_on: int = 0) -> int:
     if STATE.pool_ids:
         return len(STATE.pool_ids)
     live = n_on or STATE.live_on
-    return min(_plan_n(live), live) if live else _plan_n()
+    return n_feed(live) if live else n_feed()
 
 
 def pick_pool_ids(samples: list[Sample], n: int) -> tuple[str, ...]:
@@ -327,7 +347,9 @@ def _summarize(rows: list[RackAlloc], budget_kw: float, envelope: float | None =
         "racks_at_cap": sum(1 for r in rows if r.at_cap),
         "used_kw": _r(consumed),
         "available_kw": _r(stranded),
-        "floating_kw": _r(max(0.0, (envelope if envelope is not None else budget_kw) - allocated)),
+        "floating_kw": _r(
+            max(0.0, (envelope if envelope is not None else budget_kw) - consumed - stranded)
+        ),
         "actions": actions,
     }
 
@@ -710,7 +732,7 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
     n_halls = len(counts)
     n_on = sum(counts.values())
     STATE.live_on = n_on
-    base = pick_pool_ids(parsed, _plan_n(n_on))
+    base = pick_pool_ids(parsed, n_feed(n_on))
     STATE.base_ids = base
     if not STATE.seeded:
         STATE.pool_ids = base

@@ -377,7 +377,7 @@ class PowerPatch(BaseModel):
 
 def _power_samples(rack_rows: list[Rack], workloads: list[Workload] | None = None) -> list[dict]:
     hot = power_limit.pick_hot_ids(rack_rows, workloads or [])
-    hard = power_limit.rack_hard_kw()
+    share = power_limit.rack_policy_kw()
     rows = []
     for r in rack_rows:
         _cpu, _gpu, _mem, power = _usage(r)
@@ -388,7 +388,7 @@ def _power_samples(rack_rows: list[Rack], workloads: list[Workload] | None = Non
                 "hall_id": r.hall_id,
                 "power_state": getattr(r, "power_state", None) or "on",
                 "run_status": getattr(r, "run_status", None) or "ready",
-                "demand_kw": round(power / 100.0 * hard, 2) if power else 0.0,
+                "demand_kw": round(power / 100.0 * share, 2) if power else 0.0,
                 "saturating": r.id in hot,
             }
         )
