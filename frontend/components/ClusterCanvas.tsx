@@ -553,14 +553,17 @@ export function ClusterCanvas({
       const innerH = RACK_H * 0.96;
       entries.forEach((entry, i) => {
         const slice = power[entry.rack.id];
-        const cap =
-          slice && slice.nameplate_kw > 1
-            ? slice.nameplate_kw
-            : slice && slice.allocated_kw > 1
-              ? slice.allocated_kw
-              : 0;
-        const usedT = cap ? Math.max(0, Math.min(1, slice.consumed_kw / cap)) : 0;
-        const spareT = cap ? Math.max(0, Math.min(1, slice.unused_kw / cap)) : 0;
+        const hi = slice
+          ? slice.max_kw && slice.max_kw > 1
+            ? slice.max_kw
+            : slice.nameplate_kw > 1
+              ? slice.nameplate_kw
+              : slice.allocated_kw > 1
+                ? slice.allocated_kw
+                : 0
+          : 0;
+        const usedT = slice && hi > 0 ? Math.max(0, Math.min(1, slice.consumed_kw / hi)) : 0;
+        const spareT = 0;
         entry.barUsed += (usedT - entry.barUsed) * 0.16;
         entry.barSpare += (spareT - entry.barSpare) * 0.16;
         const pos = worldOf(entry);

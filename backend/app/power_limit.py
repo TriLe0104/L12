@@ -118,12 +118,17 @@ def pick_pool_ids(samples: list[Sample], n: int) -> tuple[str, ...]:
     return tuple(s.id for s in on[: max(0, n)])
 
 
+def placeable_kw(n_on: int, n_fed: int | None = None) -> float:
+    """Power that can actually sit on fed racks: min(envelope, n × max kW)."""
+    n = n_fed if n_fed is not None else pool_size(n_on)
+    if n <= 0:
+        return 0.0
+    return min(envelope_kw(n_on), n * rack_hard_kw())
+
+
 def unplaced_budget_kw(n_on: int) -> float:
-    n = pool_size(n_on)
-    placed = min(envelope_kw(n_on), n * rack_hard_kw())
-    if STATE.mode != "dynamic":
-        placed = min(placed, n * rack_policy_kw())
-    return max(0.0, envelope_kw(n_on) - placed)
+    """Envelope leftover that cannot land because every fed rack is at max."""
+    return max(0.0, envelope_kw(n_on) - placeable_kw(n_on))
 
 
 def min_alloc_kw() -> float:
@@ -259,6 +264,14 @@ def _consumed(demand: float, allocated: float) -> float:
     return min(demand, allocated)
 
 
+def rack_usage_pct(consumed: float) -> float:
+    """Actual usage as a percent of the control-loop max kW (min is the floor, not 0%)."""
+    hi = rack_hard_kw()
+    if hi <= 0:
+        return 0.0
+    return _r(max(0.0, min(100.0, consumed / hi * 100.0)))
+
+
 def _demand_kw(sample: Sample) -> float:
     if sample.saturating:
         return rack_hard_kw() * 1.05
@@ -333,13 +346,19 @@ def _summarize(rows: list[RackAlloc], budget_kw: float, envelope: float | None =
     actions = {"reduce": 0, "increase": 0, "hold": 0, "enable": 0, "deny": 0, "off": 0}
     for r in rows:
         actions[r.action] = actions.get(r.action, 0) + 1
+    env = envelope if envelope is not None else budget_kw
+    n_en = len(enabled)
+    placed = placeable_kw(STATE.live_on, n_en)
+    placed = max(placed, allocated)
+    floating = max(0.0, placed - allocated)
+    surplus = max(0.0, env - placed)
     return {
         "budget_kw": _r(budget_kw),
         "consumed_kw": _r(consumed),
         "allocated_kw": _r(allocated),
         "stranded_kw": _r(stranded),
         "headroom_kw": _r(max(0.0, budget_kw - allocated)),
-        "racks_enabled": len(enabled),
+        "racks_enabled": n_en,
         "racks_denied": len(denied),
         "racks_extra": len(extra),
         "racks_off": actions["off"],
@@ -347,9 +366,9 @@ def _summarize(rows: list[RackAlloc], budget_kw: float, envelope: float | None =
         "racks_at_cap": sum(1 for r in rows if r.at_cap),
         "used_kw": _r(consumed),
         "available_kw": _r(stranded),
-        "floating_kw": _r(
-            max(0.0, (envelope if envelope is not None else budget_kw) - consumed - stranded)
-        ),
+        "floating_kw": _r(floating),
+        "placeable_kw": _r(placed),
+        "surplus_kw": _r(surplus),
         "actions": actions,
     }
 
@@ -367,6 +386,9 @@ def _dump_rack(r: RackAlloc) -> dict[str, Any]:
         "allocated_kw": r.allocated_kw,
         "unused_kw": r.unused_kw,
         "nameplate_kw": r.nameplate_kw,
+        "min_kw": _r(rack_min_kw()),
+        "max_kw": _r(rack_hard_kw()),
+        "usage_pct": rack_usage_pct(r.consumed_kw),
         "policy_kw": _r(rack_policy_kw()),
         "enabled": r.enabled,
         "denied": r.denied,
@@ -785,6 +807,8 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
         "max_budget_kw": _r(hard_budget),
         "total_budget_kw": _r(total),
         "envelope_kw": _r(env),
+        "placeable_kw": _r(placeable_kw(n_on, len(STATE.pool_ids))),
+        "surplus_kw": _r(unplaced_budget_kw(n_on)),
         "unplaced_budget_kw": _r(unplaced_budget_kw(n_on)),
         "max_rack_kw": _r(STATE.max_rack_kw),
         "min_rack_kw": _r(rack_min_kw()),

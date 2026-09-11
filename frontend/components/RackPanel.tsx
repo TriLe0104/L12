@@ -116,7 +116,7 @@ export function RackPanel({
               {power
                 ? power.denied
                   ? "No budget"
-                  : `${Math.round(power.consumed_kw)} / ${Math.round(power.allocated_kw)} kW`
+                  : `${Math.round(power.consumed_kw)} kW · ${Math.round(power.usage_pct ?? 0)}% of [${Math.round(power.min_kw ?? 40)}–${Math.round(power.max_kw ?? power.nameplate_kw ?? 120)}]`
                 : rack.power_kw
                   ? `${rack.power_kw.toFixed(0)} kW`
                   : `${Math.round(rack.power_pct ?? 0)}%`}
@@ -126,11 +126,15 @@ export function RackPanel({
             {power && !power.denied ? (
               <i
                 style={{
-                  width: `${Math.max(0, Math.min(100, ((power.consumed_kw + power.unused_kw) / (power.nameplate_kw || power.allocated_kw || 120)) * 100))}%`,
-                  background:
-                    power.allocated_kw > 0
-                      ? `linear-gradient(90deg, #3da35a ${(power.consumed_kw / power.allocated_kw) * 100}%, #b7bbc0 0)`
-                      : "#3da35a",
+                  width: `${Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      power.usage_pct ??
+                        (power.consumed_kw / Math.max(power.max_kw ?? power.nameplate_kw ?? 120, 1)) * 100,
+                    ),
+                  )}%`,
+                  background: "#3da35a",
                 }}
               />
             ) : (

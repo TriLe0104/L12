@@ -1446,7 +1446,7 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.35rem;
-  align-items: end;
+  align-items: flex-end;
   padding-top: 0.2rem;
 }
 
@@ -1456,7 +1456,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.4rem 0.5rem;
-  align-items: end;
+  align-items: flex-end;
   padding-top: 0.2rem;
 }
 
@@ -1502,7 +1502,7 @@
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: flex-end;
   gap: 2px;
   min-height: 1.7rem;
 }
@@ -1527,6 +1527,14 @@
   text-transform: uppercase;
   color: #8a8a8a;
   align-self: center;
+}
+
+.lps-surplus {
+  grid-column: 1 / -1;
+  margin: 0.1rem 0 0;
+  color: #8a8a8a;
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
 }
 
 .lps-slot {

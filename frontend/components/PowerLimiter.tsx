@@ -11,20 +11,31 @@ function barPct(kw: number, tdp: number) {
   return Math.max(0, Math.min(100, (kw / tdp) * 100));
 }
 
+/** Actual usage as a percent of control-loop max kW. minKw is the allocation floor, not 0%. */
+function usageInLoop(consumed: number, _minKw: number, maxKw: number, fallbackPct?: number) {
+  if (fallbackPct != null && Number.isFinite(fallbackPct)) {
+    return Math.max(0, Math.min(100, fallbackPct));
+  }
+  if (!(maxKw > 0)) return 0;
+  return Math.max(0, Math.min(100, (consumed / maxKw) * 100));
+}
+
 function Stack({
   consumed,
-  unused,
-  tdp,
+  minKw,
+  maxKw,
   policyKw,
   denied,
   extra,
+  usagePct,
 }: {
   consumed: number;
-  unused: number;
-  tdp: number;
+  minKw: number;
+  maxKw: number;
   policyKw?: number;
   denied?: boolean;
   extra?: boolean;
+  usagePct?: number;
 }) {
   if (denied) {
     return (
@@ -33,12 +44,12 @@ function Stack({
       </div>
     );
   }
-  const mark = tdp > 0 && policyKw && policyKw > 0 ? barPct(policyKw, tdp) : 0;
+  const used = usageInLoop(consumed, minKw, maxKw, usagePct);
+  const mark = policyKw && policyKw > 0 ? usageInLoop(policyKw, minKw, maxKw) : 0;
   return (
     <div className="lps-stack" data-extra={extra ? "true" : undefined}>
-      {mark > 0 ? <i className="lps-policy-mark" style={{ height: `${mark}%` }} title="Average share" /> : null}
-      <i className="lps-unused" style={{ height: `${barPct(unused, tdp)}%` }} />
-      <i className="lps-used" style={{ height: `${barPct(consumed, tdp)}%` }} />
+      {mark > 0 ? <i className="lps-policy-mark" style={{ height: `${mark}%` }} title="Default share" /> : null}
+      <i className="lps-used" style={{ height: `${used}%` }} />
     </div>
   );
 }
@@ -46,44 +57,49 @@ function Stack({
 function Slot({
   slot,
   side,
+  minKw,
   maxKw,
   policyKw,
 }: {
   slot: PowerShowcaseSlot;
   side: "static" | "dynamic";
+  minKw: number;
   maxKw: number;
   policyKw: number;
 }) {
   const row: PowerRack = slot[side];
-  const tdp = maxKw || row.nameplate_kw || 120;
+  const hi = maxKw || row.max_kw || row.nameplate_kw || 120;
+  const lo = minKw || row.min_kw || 0;
   const denied = side === "static" && (slot.additional || row.denied) && row.allocated_kw <= 0;
+  const pct = usageInLoop(row.consumed_kw, lo, hi, row.usage_pct);
   return (
     <div
       className="lps-slot"
       data-side={side}
       data-consumed={Math.round(row.consumed_kw)}
       data-allocated={Math.round(row.allocated_kw)}
-      data-tdp={Math.round(tdp)}
+      data-tdp={Math.round(hi)}
       data-extra={row.extra ? "true" : undefined}
       data-denied={denied ? "true" : undefined}
       title={
         denied
           ? `${slot.label} · no budget`
-          : `${slot.label} · ${Math.round(row.consumed_kw)} consumed / ${Math.round(row.allocated_kw)} alloc / ${Math.round(tdp)} max kW`
+          : `${slot.label} · ${Math.round(row.consumed_kw)} kW · ${Math.round(pct)}% of [${Math.round(lo)}–${Math.round(hi)}] kW`
       }
     >
       <Stack
         consumed={row.consumed_kw}
-        unused={row.unused_kw}
-        tdp={tdp}
+        minKw={lo}
+        maxKw={hi}
         policyKw={policyKw || row.policy_kw}
         denied={denied}
         extra={row.extra}
+        usagePct={row.usage_pct}
       />
       <b>{denied ? "—" : `${Math.round(row.consumed_kw)} kW`}</b>
       <small>
         {slot.label}
-        {denied ? "" : ` · ${Math.round(row.allocated_kw)}`}
+        {denied ? "" : ` · ${Math.round(pct)}%`}
       </small>
     </div>
   );
@@ -121,7 +137,7 @@ function Totals({
           <dd>{formatKw(available)}</dd>
         </div>
         <div>
-          <dt>Unallocated</dt>
+          <dt>Room to max</dt>
           <dd>{formatKw(floating)}</dd>
         </div>
       </dl>
@@ -133,23 +149,27 @@ function SummaryBars({
   used,
   available,
   floating,
-  envelope,
+  placeable,
+  surplus,
   racks,
+  minKw,
   maxKw,
 }: {
   used: number;
   available: number;
   floating: number;
-  envelope: number;
+  placeable: number;
+  surplus: number;
   racks: PowerRack[];
+  minKw: number;
   maxKw: number;
 }) {
-  const scale = Math.max(envelope, used + available + floating, 1);
+  const scale = Math.max(placeable, used + available + floating, 1);
   const pool = racks.filter((r) => r.enabled);
   const cols = [
     { key: "used", label: "Usage", kw: used, hint: "Power the workloads are drawing" },
-    { key: "avail", label: "Available", kw: available, hint: "On racks but not consumed — MaxLPS can move this" },
-    { key: "float", label: "Unallocated", kw: floating, hint: "Envelope not on racks (hit max kW/rack, or not enough min-kW slots)" },
+    { key: "avail", label: "Available", kw: available, hint: "Allocated on racks but not consumed — MaxLPS can move this" },
+    { key: "float", label: "Room to max", kw: floating, hint: "Still under max kW/rack — can land on these racks" },
   ];
   return (
     <div className="lps-summary">
@@ -163,39 +183,49 @@ function SummaryBars({
         </div>
       ))}
       <div className="lps-rack-strip" aria-label={`${pool.length} racks in the pool`}>
-        {pool.map((r) => (
-          <span
-            key={r.id}
-            title={`${r.label} · ${Math.round(r.consumed_kw)} used / ${Math.round(r.unused_kw)} avail / ${Math.round(r.allocated_kw)} alloc`}
-          >
-            <i data-k="u" style={{ height: `${barPct(r.unused_kw, maxKw)}%` }} />
-            <i data-k="c" style={{ height: `${barPct(r.consumed_kw, maxKw)}%` }} />
-          </span>
-        ))}
+        {pool.map((r) => {
+          const lo = r.min_kw ?? minKw;
+          const hi = r.max_kw ?? maxKw;
+          const pct = usageInLoop(r.consumed_kw, lo, hi, r.usage_pct);
+          return (
+            <span
+              key={r.id}
+              title={`${r.label} · ${Math.round(r.consumed_kw)} kW · ${Math.round(pct)}% of [${Math.round(lo)}–${Math.round(hi)}] kW`}
+            >
+              <i data-k="c" style={{ height: `${pct}%` }} />
+            </span>
+          );
+        })}
         <em>{pool.length} rack{pool.length === 1 ? "" : "s"}</em>
       </div>
+      {surplus > 50 ? (
+        <p className="lps-surplus">
+          {formatKw(surplus)} over max kW/rack — cannot land unless you raise max or add racks
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function Heat({ racks, maxKw }: { racks: PowerRack[]; maxKw: number }) {
+function Heat({ racks, minKw, maxKw }: { racks: PowerRack[]; minKw: number; maxKw: number }) {
   const on = racks.filter((r) => r.power_state !== "off");
   return (
-    <div className="lps-heat" aria-label="All rack allocations">
+    <div className="lps-heat" aria-label="Rack usage in the min–max band">
       {on.map((r) => {
-        const tdp = maxKw || r.nameplate_kw || 120;
+        const hi = maxKw || r.max_kw || r.nameplate_kw || 120;
+        const lo = minKw || r.min_kw || 0;
         if (r.denied || r.allocated_kw <= 0) {
           return <span key={r.id} className="lps-heat-cell" data-k="deny" title={`${r.label} · no budget`} />;
         }
+        const pct = usageInLoop(r.consumed_kw, lo, hi, r.usage_pct);
         return (
           <span
             key={r.id}
             className="lps-heat-cell"
             data-k={r.extra ? "extra" : "on"}
-            title={`${r.label} · ${Math.round(r.consumed_kw)} consumed / ${Math.round(r.allocated_kw)} alloc / ${Math.round(tdp)} max kW`}
+            title={`${r.label} · ${Math.round(r.consumed_kw)} kW · ${Math.round(pct)}% of [${Math.round(lo)}–${Math.round(hi)}] kW`}
           >
-            <i style={{ height: `${barPct(r.unused_kw, tdp)}%` }} data-k="u" />
-            <i style={{ height: `${barPct(r.consumed_kw, tdp)}%` }} data-k="c" />
+            <i style={{ height: `${pct}%` }} data-k="c" />
           </span>
         );
       })}
@@ -332,7 +362,8 @@ export function PowerPolicyFields({
     Number.isFinite(rawLocal) && Number.isFinite(minLocal) && Number.isFinite(maxLocal)
       ? Math.min(maxLocal, Math.max(minLocal, rawLocal))
       : data.rack_policy_kw ?? 0;
-  const unused = Math.max(0, envLocal - shareLocal * nLocal);
+  const placeableLocal = Number.isFinite(maxLocal) ? Math.min(envLocal, nLocal * maxLocal) : envLocal;
+  const surplusLocal = Math.max(0, envLocal - placeableLocal);
   const capped = rawLocal > shareLocal + 0.5;
   const source = data.power_source === "breaker" ? "smart breaker" : "manual";
 
@@ -413,10 +444,10 @@ export function PowerPolicyFields({
       </label>
       <p>
         Default {formatKw(shareLocal)} / rack = ({formatKw(Number.isFinite(totalLocal) ? totalLocal : 0)} × {Number.isFinite(pctLocal) ? Math.round(pctLocal) : 0}%) / {nLocal}
-        {capped ? " · hit max kW/rack — leftover is unallocated" : ""}
+        {capped ? " · hit max kW/rack" : ""}
         {!capped && shareLocal <= minLocal + 0.5 ? " · short of power — not all racks fed at min" : ""}
-        {unused > 50 ? ` · ${formatKw(unused)} unallocated` : ""}
-        {` · ${formatKw(envLocal)} envelope · ${source}`}
+        {surplusLocal > 50 ? ` · ${formatKw(surplusLocal)} over max (cannot land)` : ""}
+        {` · ${formatKw(placeableLocal)} on racks · ${source}`}
       </p>
     </form>
   );
@@ -452,9 +483,19 @@ export function PowerLimiterPanel({
       ? `${extraN} extra rack${extraN === 1 ? "" : "s"} from leftover envelope`
       : `Share ${formatKw(data.rack_policy_kw ?? data.rack_avg_kw ?? data.tdp_kw)} per rack`;
   const maxKw = data.max_rack_kw ?? data.rack_hard_kw ?? 300;
-  const policyKw = data.rack_policy_kw ?? data.rack_avg_kw ?? (maxKw * (data.stay_under_pct ?? 80)) / 100;
+  const minKw = data.min_rack_kw ?? 40;
   const nRacks = data.racks_pool ?? data.rack_count ?? data.racks_on ?? 0;
   const envelope = data.envelope_kw ?? ((data.total_budget_kw ?? 0) * (data.threshold_pct ?? data.stay_under_pct ?? 80)) / 100;
+  const staticUsed = data.static.used_kw ?? data.static.consumed_kw;
+  const staticAvail = data.static.available_kw ?? data.static.stranded_kw;
+  const staticPlace = data.static.placeable_kw ?? Math.min(envelope, (data.static.racks_enabled || nRacks) * maxKw);
+  const staticFloat = data.static.floating_kw ?? Math.max(0, staticPlace - (data.static.allocated_kw ?? staticUsed + staticAvail));
+  const staticSurplus = data.static.surplus_kw ?? Math.max(0, envelope - staticPlace);
+  const dynUsed = data.dynamic.used_kw ?? data.dynamic.consumed_kw;
+  const dynAvail = data.dynamic.available_kw ?? data.dynamic.stranded_kw;
+  const dynPlace = data.dynamic.placeable_kw ?? Math.min(envelope, (data.dynamic.racks_enabled || nRacks) * maxKw);
+  const dynFloat = data.dynamic.floating_kw ?? Math.max(0, dynPlace - (data.dynamic.allocated_kw ?? dynUsed + dynAvail));
+  const dynSurplus = data.dynamic.surplus_kw ?? Math.max(0, envelope - dynPlace);
 
   return (
     <section className="lps-row">
@@ -487,18 +528,20 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-active={data.mode === "static"}>
         <Totals
           title="Static power allocation"
-          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)}`}
-          used={data.static.used_kw ?? data.static.consumed_kw}
-          available={data.static.available_kw ?? data.static.stranded_kw}
-          floating={Math.max(0, envelope - (data.static.used_kw ?? data.static.consumed_kw) - (data.static.available_kw ?? data.static.stranded_kw))}
-          extra={`[${Math.round(data.min_rack_kw ?? 40)}–${Math.round(data.max_rack_kw ?? 300)}] kW`}
+          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)} · ${formatKw(staticPlace)} on racks`}
+          used={staticUsed}
+          available={staticAvail}
+          floating={staticFloat}
+          extra={`[${Math.round(minKw)}–${Math.round(maxKw)}] kW`}
         />
         <SummaryBars
-          used={data.static.used_kw ?? data.static.consumed_kw}
-          available={data.static.available_kw ?? data.static.stranded_kw}
-          floating={Math.max(0, envelope - (data.static.used_kw ?? data.static.consumed_kw) - (data.static.available_kw ?? data.static.stranded_kw))}
-          envelope={envelope}
+          used={staticUsed}
+          available={staticAvail}
+          floating={staticFloat}
+          placeable={staticPlace}
+          surplus={staticSurplus}
           racks={data.static_racks ?? []}
+          minKw={minKw}
           maxKw={maxKw}
         />
       </article>
@@ -506,18 +549,20 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-kind="dyn" data-active={data.mode === "dynamic"}>
         <Totals
           title="MaxLPS dynamic allocation"
-          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)}`}
-          used={data.dynamic.used_kw ?? data.dynamic.consumed_kw}
-          available={data.dynamic.available_kw ?? data.dynamic.stranded_kw}
-          floating={Math.max(0, envelope - (data.dynamic.used_kw ?? data.dynamic.consumed_kw) - (data.dynamic.available_kw ?? data.dynamic.stranded_kw))}
+          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)} · ${formatKw(dynPlace)} on racks`}
+          used={dynUsed}
+          available={dynAvail}
+          floating={dynFloat}
           extra={extraLabel}
         />
         <SummaryBars
-          used={data.dynamic.used_kw ?? data.dynamic.consumed_kw}
-          available={data.dynamic.available_kw ?? data.dynamic.stranded_kw}
-          floating={Math.max(0, envelope - (data.dynamic.used_kw ?? data.dynamic.consumed_kw) - (data.dynamic.available_kw ?? data.dynamic.stranded_kw))}
-          envelope={envelope}
+          used={dynUsed}
+          available={dynAvail}
+          floating={dynFloat}
+          placeable={dynPlace}
+          surplus={dynSurplus}
           racks={data.dynamic_racks ?? []}
+          minKw={minKw}
           maxKw={maxKw}
         />
       </article>
@@ -547,11 +592,11 @@ export function PowerLimiterPanel({
           tick {data.tick}
           {data.last_event ? ` · ${data.last_event}` : ""}
         </p>
-        <Heat racks={(data.racks ?? []).filter((r) => r.enabled)} maxKw={maxKw} />
+        <Heat racks={(data.racks ?? []).filter((r) => r.enabled)} minKw={minKw} maxKw={maxKw} />
         <p className="lps-legend">
-          <i data-k="c" /> Usage
+          <i data-k="c" /> Usage in [min–max]
           <i data-k="u" /> Available
-          <i data-k="f" /> Unallocated
+          <i data-k="f" /> Room to max
         </p>
       </aside>
     </section>

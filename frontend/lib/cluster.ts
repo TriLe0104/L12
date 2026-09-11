@@ -371,6 +371,9 @@ export interface PowerRack {
   allocated_kw: number;
   unused_kw: number;
   nameplate_kw: number;
+  min_kw?: number;
+  max_kw?: number;
+  usage_pct?: number;
   policy_kw?: number;
   enabled: boolean;
   denied: boolean;
@@ -390,6 +393,8 @@ export interface PowerSummary {
   used_kw?: number;
   available_kw?: number;
   floating_kw?: number;
+  placeable_kw?: number;
+  surplus_kw?: number;
   racks_enabled: number;
   racks_denied: number;
   racks_extra: number;
@@ -422,6 +427,8 @@ export interface PowerLimiter {
   threshold_pct?: number;
   total_budget_kw?: number;
   envelope_kw?: number;
+  placeable_kw?: number;
+  surplus_kw?: number;
   unplaced_budget_kw?: number;
   power_source?: string;
   halls?: number;
