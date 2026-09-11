@@ -252,7 +252,7 @@ export function PowerPolicyFields({
     nextMin = minKw,
     nextMax = rackKw,
   ) {
-    const total_budget_kw = Math.min(135000, Math.max(100, Number(nextMw) * 1000));
+    const total_budget_kw = Math.min(10_000_000, Math.max(100, Number(nextMw) * 1000));
     const rack_count = Math.round(Number(nextRacks));
     const stay_under_pct = Number(nextPct);
     const min_rack_kw = Number(nextMin);
@@ -351,7 +351,7 @@ export function PowerPolicyFields({
           <input
             type="number"
             min={0.1}
-            max={135}
+            max={10000}
             step={0.1}
             value={budgetMw}
             aria-label="Total power in megawatts"
@@ -453,7 +453,7 @@ export function PowerLimiterPanel({
   const maxKw = data.max_rack_kw ?? data.rack_hard_kw ?? 300;
   const policyKw = data.rack_policy_kw ?? data.rack_avg_kw ?? (maxKw * (data.stay_under_pct ?? 80)) / 100;
   const nRacks = data.racks_pool ?? data.rack_count ?? data.racks_on ?? 0;
-  const envelope = data.envelope_kw ?? data.budget_kw;
+  const envelope = data.envelope_kw ?? ((data.total_budget_kw ?? 0) * (data.threshold_pct ?? data.stay_under_pct ?? 80)) / 100;
 
   return (
     <section className="lps-row">
@@ -486,16 +486,16 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-active={data.mode === "static"}>
         <Totals
           title="Static power allocation"
-          kicker={`${nRacks} racks · envelope ${formatKw(data.static.budget_kw)}`}
+          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)}`}
           used={data.static.used_kw ?? data.static.consumed_kw}
           available={data.static.available_kw ?? data.static.stranded_kw}
-          floating={data.static.floating_kw ?? data.static.headroom_kw}
+          floating={Math.max(0, envelope - (data.static.used_kw ?? data.static.consumed_kw) - (data.static.available_kw ?? data.static.stranded_kw))}
           extra={`[${Math.round(data.min_rack_kw ?? 40)}–${Math.round(data.max_rack_kw ?? 300)}] kW`}
         />
         <SummaryBars
           used={data.static.used_kw ?? data.static.consumed_kw}
           available={data.static.available_kw ?? data.static.stranded_kw}
-          floating={data.static.floating_kw ?? data.static.headroom_kw}
+          floating={Math.max(0, envelope - (data.static.used_kw ?? data.static.consumed_kw) - (data.static.available_kw ?? data.static.stranded_kw))}
           envelope={envelope}
           racks={data.static_racks ?? []}
           maxKw={maxKw}
@@ -505,16 +505,16 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-kind="dyn" data-active={data.mode === "dynamic"}>
         <Totals
           title="MaxLPS dynamic allocation"
-          kicker={`${nRacks} racks · live ${formatKw(data.budget_kw)} · default ${formatKw(policyKw)}`}
+          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)}`}
           used={data.dynamic.used_kw ?? data.dynamic.consumed_kw}
           available={data.dynamic.available_kw ?? data.dynamic.stranded_kw}
-          floating={data.dynamic.floating_kw ?? data.dynamic.headroom_kw}
+          floating={Math.max(0, envelope - (data.dynamic.used_kw ?? data.dynamic.consumed_kw) - (data.dynamic.available_kw ?? data.dynamic.stranded_kw))}
           extra={extraLabel}
         />
         <SummaryBars
           used={data.dynamic.used_kw ?? data.dynamic.consumed_kw}
           available={data.dynamic.available_kw ?? data.dynamic.stranded_kw}
-          floating={data.dynamic.floating_kw ?? data.dynamic.headroom_kw}
+          floating={Math.max(0, envelope - (data.dynamic.used_kw ?? data.dynamic.consumed_kw) - (data.dynamic.available_kw ?? data.dynamic.stranded_kw))}
           envelope={envelope}
           racks={data.dynamic_racks ?? []}
           maxKw={maxKw}

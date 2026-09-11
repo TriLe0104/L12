@@ -13,7 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-CLUSTER_MAX_KW = 135_000.0  # 135 MW hard facility cap
+CLUSTER_MAX_KW = 135_000.0  # legacy demo ceiling; allocation is capped by envelope and max kW/rack
+MAX_TOTAL_KW = 10_000_000.0  # 10 GW planning cap for typed total power
 DEFAULT_MAX_RACK_KW = 300.0
 DEFAULT_MIN_RACK_KW = 40.0
 DEFAULT_STAY_UNDER_PCT = 80.0
@@ -99,7 +100,9 @@ def pick_pool_ids(samples: list[Sample], n: int) -> tuple[str, ...]:
 
 def unplaced_budget_kw(n_on: int) -> float:
     n = pool_size(n_on)
-    placed = min(envelope_kw(n_on), n * rack_policy_kw(), CLUSTER_MAX_KW)
+    placed = min(envelope_kw(n_on), n * rack_hard_kw())
+    if STATE.mode != "dynamic":
+        placed = min(placed, n * rack_policy_kw())
     return max(0.0, envelope_kw(n_on) - placed)
 
 
@@ -132,15 +135,15 @@ def cluster_policy_budget(n_on: int) -> float:
         return 0.0
     env = envelope_kw(n_on)
     if STATE.mode == "dynamic":
-        return min(CLUSTER_MAX_KW, env, n_on * rack_hard_kw())
+        return min(env, n_on * rack_hard_kw())
     n = pool_size(n_on)
-    return min(CLUSTER_MAX_KW, env, n * rack_policy_kw(), n * rack_hard_kw())
+    return min(env, n * rack_policy_kw(), n * rack_hard_kw())
 
 
 def cluster_hard_budget(n_on: int) -> float:
     if n_on <= 0:
         return 0.0
-    return min(CLUSTER_MAX_KW, n_on * rack_hard_kw())
+    return n_on * rack_hard_kw()
 
 
 def hot_rack_count(workloads: Iterable[Any]) -> int:
@@ -656,10 +659,10 @@ def apply_patch(
         STATE.rack_count = max(1, min(2_000, int(rack_count)))
         reset = True
     if total_budget_kw is not None:
-        STATE.total_budget_kw = min(CLUSTER_MAX_KW, max(100.0, float(total_budget_kw)))
+        STATE.total_budget_kw = min(MAX_TOTAL_KW, max(100.0, float(total_budget_kw)))
         reset = True
     elif budget_kw is not None and total_budget_kw is None:
-        STATE.total_budget_kw = min(CLUSTER_MAX_KW, max(100.0, float(budget_kw)))
+        STATE.total_budget_kw = min(MAX_TOTAL_KW, max(100.0, float(budget_kw)))
         reset = True
     if stay_under_pct is not None:
         STATE.stay_under_pct = max(10.0, min(100.0, float(stay_under_pct)))
@@ -788,7 +791,7 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
             "rack_count": planned,
             "total_budget_kw": _r(total),
             "envelope_kw": _r(env),
-            "max_mw": CLUSTER_MAX_KW / 1000.0,
+            "max_mw": MAX_TOTAL_KW / 1000.0,
         },
         "tick": STATE.tick,
         "last_event": STATE.last_event,

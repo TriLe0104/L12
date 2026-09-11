@@ -370,7 +370,7 @@ class PowerPatch(BaseModel):
     max_hall_kw: float | None = Field(default=None, ge=1000, le=135000)
     max_pod_kw: float | None = Field(default=None, ge=5, le=500)
     stay_under_pct: float | None = Field(default=None, ge=10, le=100)
-    total_budget_kw: float | None = Field(default=None, ge=100, le=135000)
+    total_budget_kw: float | None = Field(default=None, ge=100, le=10_000_000)
     rack_count: int | None = Field(default=None, ge=1, le=2000)
     min_rack_kw: float | None = Field(default=None, ge=8, le=2000)
 
