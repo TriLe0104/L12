@@ -1371,6 +1371,12 @@
   font-size: 0.55rem;
 }
 
+.lps-rack-diff {
+  color: #c8c8c8 !important;
+  font-size: 0.6rem !important;
+  letter-spacing: 0.02em;
+}
+
 .lps-policy label {
   display: flex;
   flex-direction: column;

@@ -436,6 +436,9 @@ export interface PowerLimiter {
   rack_count_auto?: boolean;
   racks_on?: number;
   racks_pool?: number;
+  racks_static_max?: number;
+  racks_lps_max?: number;
+  racks_lps_gain?: number;
   rack_avg_kw?: number;
   rack_policy_kw?: number;
   rack_share_kw?: number;

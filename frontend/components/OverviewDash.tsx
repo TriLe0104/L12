@@ -361,7 +361,7 @@ export function OverviewDash() {
           total={formatKw(power?.max_budget_kw ?? power?.nameplate_kw ?? data.size.nameplate_kw)}
           detail={
             power
-              ? `${formatKw(power.envelope_kw ?? power.budget_kw)} envelope · ${power.rack_count ?? power.racks_on ?? 0} racks · [${Math.round(power.min_rack_kw ?? 40)}–${Math.round(power.max_rack_kw ?? 300)}] kW`
+              ? `${formatKw(power.envelope_kw ?? power.budget_kw)} envelope · static ${power.racks_static_max ?? 0} · MaxLPS ${power.racks_lps_max ?? 0}${power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [${Math.round(power.min_rack_kw ?? 40)}–${Math.round(power.max_rack_kw ?? 300)}] kW`
               : `Set total power, threshold, min/max kW per rack`
           }
         />

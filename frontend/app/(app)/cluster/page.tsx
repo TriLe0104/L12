@@ -463,7 +463,7 @@ export default function ClusterPage() {
               <div className="lps-hud-kicker">{power.mode === "dynamic" ? "MaxLPS" : "Static"}</div>
               <strong>{formatKw(power.active.consumed_kw)}</strong>
               <span className="lps-hud-sub">
-                {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · {power.rack_count ?? power.racks_on ?? 0} racks · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW · {power.active.racks_at_cap ?? 0} at cap
+                {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · static {power.racks_static_max ?? 0} · MaxLPS {power.racks_lps_max ?? 0}{power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW
               </span>
               <dl>
                 <div>

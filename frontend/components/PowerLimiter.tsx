@@ -238,6 +238,13 @@ function mwText(kw: number) {
   return mw >= 10 ? mw.toFixed(1) : mw.toFixed(2);
 }
 
+function fitRacks(envKw: number, perKw: number, live: number) {
+  if (!(perKw > 0) || !(envKw > 0)) return 0;
+  const fit = Math.floor(envKw / perKw);
+  if (live > 0) return Math.max(0, Math.min(fit, live));
+  return Math.max(0, fit);
+}
+
 export function PowerPolicyFields({
   data,
   onChange,
@@ -251,24 +258,26 @@ export function PowerPolicyFields({
 }) {
   const totalKw = data.total_budget_kw ?? data.default_budget_kw ?? 0;
   const [budgetMw, setBudgetMw] = useState(mwText(totalKw));
-  const [racks, setRacks] = useState(String(data.rack_count ?? data.racks_on ?? 1));
   const [pct, setPct] = useState(String(Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)));
   const [minKw, setMinKw] = useState(String(Math.round(data.min_rack_kw ?? 40)));
   const [rackKw, setRackKw] = useState(String(Math.round(data.max_rack_kw ?? 300)));
-  const focused = useRef(false);
+  const editing = useRef(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   useEffect(() => {
-    if (focused.current) return;
-    setBudgetMw(mwText(data.total_budget_kw ?? data.default_budget_kw ?? 0));
-    setRacks(String(data.rack_count ?? data.racks_on ?? 1));
-    setPct(String(Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)));
-    setMinKw(String(Math.round(data.min_rack_kw ?? 40)));
-    setRackKw(String(Math.round(data.max_rack_kw ?? 300)));
+    if (editing.current) return;
+    const nextMw = data.total_budget_kw ?? data.default_budget_kw ?? 0;
+    if (Math.abs(Number(budgetMw) * 1000 - nextMw) >= 50) setBudgetMw(mwText(nextMw));
+    const nextPct = String(Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80));
+    if (nextPct !== pct) setPct(nextPct);
+    const nextMin = String(Math.round(data.min_rack_kw ?? 40));
+    if (nextMin !== minKw) setMinKw(nextMin);
+    const nextMax = String(Math.round(data.max_rack_kw ?? 300));
+    if (nextMax !== rackKw) setRackKw(nextMax);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     data.total_budget_kw,
     data.default_budget_kw,
-    data.rack_count,
-    data.racks_on,
     data.threshold_pct,
     data.stay_under_pct,
     data.min_rack_kw,
@@ -277,34 +286,28 @@ export function PowerPolicyFields({
 
   async function commit(
     nextMw = budgetMw,
-    nextRacks = racks,
     nextPct = pct,
     nextMin = minKw,
     nextMax = rackKw,
   ) {
     const total_budget_kw = Math.min(10_000_000, Math.max(100, Number(nextMw) * 1000));
-    const rack_count = Math.round(Number(nextRacks));
     const stay_under_pct = Number(nextPct);
     const min_rack_kw = Number(nextMin);
     const max_rack_kw = Number(nextMax);
-    if (![total_budget_kw, rack_count, stay_under_pct, min_rack_kw, max_rack_kw].every(Number.isFinite)) return;
-    if (rack_count < 1 || rack_count > 2000) return;
+    if (![total_budget_kw, stay_under_pct, min_rack_kw, max_rack_kw].every(Number.isFinite)) return;
     if (stay_under_pct < 10 || stay_under_pct > 100) return;
     if (min_rack_kw < 8 || max_rack_kw < 20 || max_rack_kw > 2000 || min_rack_kw > max_rack_kw) return;
     const sameBudget = Math.abs(total_budget_kw - (data.total_budget_kw ?? data.default_budget_kw ?? 0)) < 50;
-    const sameRacks = rack_count === (data.rack_count ?? data.racks_on);
     const samePct = stay_under_pct === (data.threshold_pct ?? data.stay_under_pct);
     const sameMin = min_rack_kw === data.min_rack_kw;
     const sameMax = max_rack_kw === data.max_rack_kw;
-    if (sameBudget && sameRacks && samePct && sameMin && sameMax) return;
+    if (sameBudget && samePct && sameMin && sameMax) return;
     try {
       const res = await api.patchClusterPower({
         total_budget_kw,
-        rack_count,
         stay_under_pct,
         min_rack_kw,
         max_rack_kw,
-        reset: true,
       });
       onChange?.(res);
     } catch {
@@ -312,36 +315,10 @@ export function PowerPolicyFields({
     }
   }
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      void commit(budgetMw, racks, pct, minKw, rackKw);
-    }, 400);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    budgetMw,
-    racks,
-    pct,
-    minKw,
-    rackKw,
-    data.total_budget_kw,
-    data.rack_count,
-    data.threshold_pct,
-    data.min_rack_kw,
-    data.max_rack_kw,
-  ]);
-
   function bind(setter: (v: string) => void) {
     return {
       disabled: locked,
       onChange: (e: { target: { value: string } }) => setter(e.target.value),
-      onFocus: () => {
-        focused.current = true;
-      },
-      onBlur: () => {
-        focused.current = false;
-        void commit();
-      },
       onKeyDown: (e: { key: string; preventDefault: () => void }) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -351,26 +328,34 @@ export function PowerPolicyFields({
     };
   }
 
-  const nLocal = Math.max(1, Math.round(Number(racks)) || 1);
   const pctLocal = Number(pct);
   const minLocal = Number(minKw);
   const maxLocal = Number(rackKw);
   const totalLocal = Number(budgetMw) * 1000;
   const envLocal = Number.isFinite(totalLocal) && Number.isFinite(pctLocal) ? (totalLocal * pctLocal) / 100 : 0;
-  const rawLocal = envLocal / nLocal;
-  const shareLocal =
-    Number.isFinite(rawLocal) && Number.isFinite(minLocal) && Number.isFinite(maxLocal)
-      ? Math.min(maxLocal, Math.max(minLocal, rawLocal))
-      : data.rack_policy_kw ?? 0;
-  const placeableLocal = Number.isFinite(maxLocal) ? Math.min(envLocal, nLocal * maxLocal) : envLocal;
-  const surplusLocal = Math.max(0, envLocal - placeableLocal);
-  const capped = rawLocal > shareLocal + 0.5;
+  const live = data.racks_on ?? 0;
+  const nStatic =
+    Number.isFinite(maxLocal) && maxLocal > 0
+      ? fitRacks(envLocal, maxLocal, live) || (envLocal >= minLocal && live > 0 ? 1 : 0)
+      : (data.racks_static_max ?? 0);
+  const nLps = Number.isFinite(minLocal) && minLocal > 0 ? fitRacks(envLocal, minLocal, live) : (data.racks_lps_max ?? 0);
+  const gain = Math.max(0, nLps - nStatic);
   const source = data.power_source === "breaker" ? "smart breaker" : "manual";
 
   return (
     <form
+      ref={formRef}
       className="lps-policy"
       data-compact={compact ? "true" : undefined}
+      onFocusCapture={() => {
+        editing.current = true;
+      }}
+      onBlurCapture={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (next && formRef.current?.contains(next)) return;
+        editing.current = false;
+        void commit();
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         void commit();
@@ -407,18 +392,6 @@ export function PowerPolicyFields({
         </span>
       </label>
       <label>
-        Racks
-        <input
-          type="number"
-          min={1}
-          max={2000}
-          step={1}
-          value={racks}
-          aria-label="Number of racks to distribute the budget across"
-          {...bind(setRacks)}
-        />
-      </label>
-      <label>
         Min kW / rack
         <input
           type="number"
@@ -442,12 +415,16 @@ export function PowerPolicyFields({
           {...bind(setRackKw)}
         />
       </label>
+      <p className="lps-rack-diff">
+        Static {nStatic} rack{nStatic === 1 ? "" : "s"} at {Number.isFinite(maxLocal) ? Math.round(maxLocal) : "—"} kW
+        {" · "}
+        MaxLPS {nLps} rack{nLps === 1 ? "" : "s"} at ≥{Number.isFinite(minLocal) ? Math.round(minLocal) : "—"} kW
+        {gain > 0 ? ` · +${gain} vs static` : live > 0 && nLps >= live ? " · floor is the limit" : ""}
+      </p>
       <p>
-        Default {formatKw(shareLocal)} / rack = ({formatKw(Number.isFinite(totalLocal) ? totalLocal : 0)} × {Number.isFinite(pctLocal) ? Math.round(pctLocal) : 0}%) / {nLocal}
-        {capped ? " · hit max kW/rack" : ""}
-        {!capped && shareLocal <= minLocal + 0.5 ? " · short of power — not all racks fed at min" : ""}
-        {surplusLocal > 50 ? ` · ${formatKw(surplusLocal)} over max (cannot land)` : ""}
-        {` · ${formatKw(placeableLocal)} on racks · ${source}`}
+        {formatKw(Number.isFinite(totalLocal) ? totalLocal : 0)} × {Number.isFinite(pctLocal) ? Math.round(pctLocal) : 0}% = {formatKw(envLocal)} envelope
+        {live > 0 ? ` · ${live} live` : ""}
+        {` · ${source}`}
       </p>
     </form>
   );
@@ -478,22 +455,24 @@ export function PowerLimiterPanel({
   if (!data) return <section className="lps-row lps-pending">Loading power limiter…</section>;
 
   const extraN = data.dynamic.racks_extra ?? 0;
+  const nStatic = data.racks_static_max ?? data.static.racks_enabled ?? 0;
+  const nLps = data.racks_lps_max ?? 0;
+  const gain = data.racks_lps_gain ?? Math.max(0, nLps - nStatic);
   const extraLabel =
     extraN > 0
-      ? `${extraN} extra rack${extraN === 1 ? "" : "s"} from leftover envelope`
-      : `Share ${formatKw(data.rack_policy_kw ?? data.rack_avg_kw ?? data.tdp_kw)} per rack`;
+      ? `${extraN} extra rack${extraN === 1 ? "" : "s"} vs static · ${data.dynamic.racks_enabled ?? 0} of ${nLps} MaxLPS`
+      : `MaxLPS ${nLps} racks vs static ${nStatic}${gain > 0 ? ` · +${gain}` : ""}`;
   const maxKw = data.max_rack_kw ?? data.rack_hard_kw ?? 300;
   const minKw = data.min_rack_kw ?? 40;
-  const nRacks = data.racks_pool ?? data.rack_count ?? data.racks_on ?? 0;
   const envelope = data.envelope_kw ?? ((data.total_budget_kw ?? 0) * (data.threshold_pct ?? data.stay_under_pct ?? 80)) / 100;
   const staticUsed = data.static.used_kw ?? data.static.consumed_kw;
   const staticAvail = data.static.available_kw ?? data.static.stranded_kw;
-  const staticPlace = data.static.placeable_kw ?? Math.min(envelope, (data.static.racks_enabled || nRacks) * maxKw);
+  const staticPlace = data.static.placeable_kw ?? Math.min(envelope, (data.static.racks_enabled || nStatic) * maxKw);
   const staticFloat = data.static.floating_kw ?? Math.max(0, staticPlace - (data.static.allocated_kw ?? staticUsed + staticAvail));
   const staticSurplus = data.static.surplus_kw ?? Math.max(0, envelope - staticPlace);
   const dynUsed = data.dynamic.used_kw ?? data.dynamic.consumed_kw;
   const dynAvail = data.dynamic.available_kw ?? data.dynamic.stranded_kw;
-  const dynPlace = data.dynamic.placeable_kw ?? Math.min(envelope, (data.dynamic.racks_enabled || nRacks) * maxKw);
+  const dynPlace = data.dynamic.placeable_kw ?? Math.min(envelope, (data.dynamic.racks_enabled || nLps) * maxKw);
   const dynFloat = data.dynamic.floating_kw ?? Math.max(0, dynPlace - (data.dynamic.allocated_kw ?? dynUsed + dynAvail));
   const dynSurplus = data.dynamic.surplus_kw ?? Math.max(0, envelope - dynPlace);
 
@@ -503,8 +482,8 @@ export function PowerLimiterPanel({
         <div>
           <strong>Closed-loop power limiter</strong>
           <span>
-            {formatKw(data.total_budget_kw ?? data.budget_kw)} × {Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)}% · {nRacks} racks · default{" "}
-            {formatKw(data.rack_policy_kw ?? data.rack_avg_kw ?? 0)} · [{Math.round(data.min_rack_kw ?? 40)}–{Math.round(data.max_rack_kw ?? 300)}] kW
+            {formatKw(data.total_budget_kw ?? data.budget_kw)} × {Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)}% · static {nStatic} · MaxLPS {nLps}
+            {gain > 0 ? ` (+${gain})` : ""} · [{Math.round(minKw)}–{Math.round(maxKw)}] kW
           </span>
         </div>
         <div className="lps-modes">
@@ -528,7 +507,7 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-active={data.mode === "static"}>
         <Totals
           title="Static power allocation"
-          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)} · ${formatKw(staticPlace)} on racks`}
+          kicker={`${nStatic} racks at max · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)}`}
           used={staticUsed}
           available={staticAvail}
           floating={staticFloat}
@@ -549,7 +528,7 @@ export function PowerLimiterPanel({
       <article className="lps-panel" data-kind="dyn" data-active={data.mode === "dynamic"}>
         <Totals
           title="MaxLPS dynamic allocation"
-          kicker={`${nRacks} racks · ${formatKw(data.total_budget_kw ?? 0)} × ${Math.round(data.threshold_pct ?? 80)}% = ${formatKw(envelope)} · ${formatKw(dynPlace)} on racks`}
+          kicker={`${data.dynamic.racks_enabled ?? 0} of ${nLps} MaxLPS racks · +${gain} vs static ${nStatic} · ${formatKw(envelope)} envelope`}
           used={dynUsed}
           available={dynAvail}
           floating={dynFloat}

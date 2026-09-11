@@ -1,9 +1,9 @@
 """Closed-loop rack power limiter (MaxLPS-style).
 
-Default kW/rack = (total_power × threshold%) / rack_count, then clamped to
-[min_rack, max_rack]. The loop steals from idle racks and feeds hot ones
-inside that band. Total power is a manual input today; a smart-breaker
-reading can replace it later.
+Envelope = total_power × threshold%. Static feeds floor(envelope / max)
+racks at max kW. MaxLPS packs idle racks down toward min so the same
+envelope can feed floor(envelope / min) racks. Live floor racks cap both.
+Total power is a manual input today; a smart-breaker reading can replace it later.
 """
 
 from __future__ import annotations
@@ -50,8 +50,7 @@ def rack_min_kw() -> float:
 
 
 def _plan_n(n_on: int = 0) -> int:
-    if STATE.rack_count and STATE.rack_count > 0:
-        return int(STATE.rack_count)
+    """Physical racks on the floor (powered)."""
     if n_on > 0:
         return int(n_on)
     if STATE.live_on > 0:
@@ -71,36 +70,47 @@ def envelope_kw(n_on: int = 0) -> float:
     return _plan_n(n_on) * STATE.max_rack_kw * pct
 
 
-def n_feed(n_on: int = 0) -> int:
-    """How many racks the envelope can actually feed.
+def _fit_n(budget: float, kw: float, live: int) -> int:
+    if kw <= 0 or budget <= 0:
+        return 0
+    fit = int(budget // kw)
+    if live > 0:
+        return max(0, min(fit, live))
+    return max(0, fit)
 
-    Fair share is envelope / planned racks. If that is below min kW, drop racks
-    so we do not run anyone at full max while the pool is short of power.
-    """
+
+def n_static_cap(n_on: int = 0) -> int:
+    """Racks static allocation can feed if every rack sits at max kW."""
     live = n_on or STATE.live_on
-    want = _plan_n(live)
     env = envelope_kw(live)
-    lo = rack_min_kw()
-    cap = live if live > 0 else want
-    if want <= 0:
-        return max(1, cap)
-    fair = env / want
-    if lo > 0 and fair < lo:
-        fit = int(env // lo)
-        return max(1, min(fit, cap, want))
-    return max(1, min(want, cap))
+    hi, lo = rack_hard_kw(), rack_min_kw()
+    n = _fit_n(env, hi, live)
+    if n == 0 and live > 0 and env >= lo:
+        return 1
+    return n
+
+
+def n_lps_cap(n_on: int = 0) -> int:
+    """Racks MaxLPS can feed if idle racks sit at min kW."""
+    live = n_on or STATE.live_on
+    return _fit_n(envelope_kw(live), rack_min_kw(), live)
+
+
+def n_feed(n_on: int = 0) -> int:
+    """Static pool size — MaxLPS grows this toward n_lps_cap."""
+    return n_static_cap(n_on)
 
 
 def rack_share_kw(n_on: int = 0) -> float:
-    """Even split of the envelope across racks we will feed."""
-    n = n_feed(n_on)
+    """Even split of the envelope across the static pool (typically max kW)."""
+    n = n_static_cap(n_on)
     if n <= 0:
         return 0.0
     return max(0.0, envelope_kw(n_on) / n)
 
 
 def rack_policy_kw() -> float:
-    """Default kW/rack = envelope / fed racks, then clamp to [min, max]."""
+    """Static kW/rack = envelope / static racks, clamped to [min, max]."""
     lo, hi = rack_min_kw(), rack_hard_kw()
     return min(hi, max(lo, rack_share_kw()))
 
@@ -113,8 +123,9 @@ def pool_size(n_on: int = 0) -> int:
 
 
 def pick_pool_ids(samples: list[Sample], n: int) -> tuple[str, ...]:
+    """Static set is a spatial slice — includes idle racks over-provisioned at max."""
     on = [s for s in samples if _on(s)]
-    on.sort(key=lambda s: (not s.saturating, (s.run_status or "") != "running", s.name))
+    on.sort(key=lambda s: s.name)
     return tuple(s.id for s in on[: max(0, n)])
 
 
@@ -160,9 +171,10 @@ def cluster_policy_budget(n_on: int) -> float:
         return 0.0
     env = envelope_kw(n_on)
     if STATE.mode == "dynamic":
-        return min(env, n_on * rack_hard_kw())
-    n = pool_size(n_on)
-    return min(env, n * rack_policy_kw(), n * rack_hard_kw())
+        n = max(len(STATE.pool_ids), n_lps_cap(n_on))
+        return min(env, n * rack_hard_kw())
+    n = n_static_cap(n_on)
+    return min(env, n * rack_policy_kw(), n * rack_hard_kw()) if n else 0.0
 
 
 def cluster_hard_budget(n_on: int) -> float:
@@ -193,8 +205,12 @@ def pick_hot_ids(rack_rows: list[Any], workloads: Iterable[Any]) -> set[str]:
         for r in rack_rows
         if (getattr(r, "power_state", None) or "on") != "off"
     ]
-    on.sort(key=lambda r: ((getattr(r, "run_status", None) or "") != "running", getattr(r, "name", "") or ""))
-    return {getattr(r, "id") for r in on[:n]}
+    on.sort(key=lambda r: getattr(r, "name", "") or "")
+    if n >= len(on):
+        return {getattr(r, "id") for r in on}
+    stride = len(on) / n
+    picked = [on[min(len(on) - 1, int(i * stride))] for i in range(n)]
+    return {getattr(r, "id") for r in picked}
 
 
 @dataclass
@@ -287,6 +303,7 @@ def static_plan(samples: list[Sample]) -> list[RackAlloc]:
         n = counts.get(s.hall_id, 0)
         share = rack_share_for_hall(n)
         if not _on(s) or (pool and s.id not in pool):
+            denied = bool(_on(s) and pool and s.id not in pool)
             out.append(
                 RackAlloc(
                     id=s.id,
@@ -300,11 +317,11 @@ def static_plan(samples: list[Sample]) -> list[RackAlloc]:
                     unused_kw=0.0,
                     nameplate_kw=_r(hard),
                     enabled=False,
-                    denied=False,
+                    denied=denied,
                     extra=False,
                     hot=False,
                     at_cap=False,
-                    action="off",
+                    action="deny" if denied else "off",
                     gap_pct=None,
                 )
             )
@@ -449,10 +466,9 @@ def _seed_from_static(static_rows: list[RackAlloc]) -> None:
     STATE.seeded = True
     STATE.tick = 0
     avg = next((r.allocated_kw for r in static_rows if r.enabled), 0.0)
-    n = _plan_n()
     STATE.last_event = (
-        f"Default {avg:.0f} kW/rack · {n} racks · envelope {envelope_kw():.0f} kW · "
-        f"[{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
+        f"Static {n_static_cap()} racks at {avg:.0f} kW · "
+        f"MaxLPS {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
     )
     STATE.last_step = 0.0
 
@@ -490,7 +506,6 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
     for hall_id, on_ids in halls.items():
         policy = rack_policy_kw()
         hard = rack_hard_kw()
-        hall_budget = hall_policy_kw(len(on_ids))
         for rid in on_ids:
             if rid not in STATE.alloc:
                 STATE.alloc[rid] = policy
@@ -517,12 +532,19 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
         for rid in reduce_ids:
             alloc = STATE.alloc[rid]
             used = _consumed(by_id[rid].demand_kw, alloc)
-            target = max(floor, used / (1.0 - TARGET_HEADROOM) if used else floor)
-            delta = min(max(abs(alloc - target) * 0.45, 8.0), alloc * 0.25, max(0.0, alloc - floor))
+            # Idle racks drop toward min so leftover can enable more racks.
+            if by_id[rid].saturating:
+                target = max(floor, used / (1.0 - TARGET_HEADROOM) if used else floor)
+            else:
+                target = floor
+            delta = min(max(abs(alloc - target) * 0.55, 12.0), alloc * 0.35, max(0.0, alloc - floor))
             STATE.alloc[rid] = max(target, alloc - max(delta, 0.0))
             STATE.action[rid] = "reduce"
 
-        pool = hall_budget - sum(STATE.alloc.get(rid, 0.0) for rid in on_ids)
+        leftover = envelope_kw(STATE.live_on) - sum(
+            STATE.alloc.get(s.id, 0.0) for s in samples if _on(s)
+        )
+        pool = max(0.0, leftover)
         sat_ids = [rid for rid in increase_ids if by_id[rid].saturating]
         rest_ids = [rid for rid in increase_ids if not by_id[rid].saturating]
         hot_total += len(sat_ids)
@@ -545,59 +567,32 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
                 STATE.action[rid] = "hold"
             held_hot += len(sat_ids)
         for rid in rest_ids:
-            alloc = STATE.alloc[rid]
-            s = by_id[rid]
-            used = _consumed(s.demand_kw, alloc)
-            target = max(alloc, min(hard, used / (1.0 - TARGET_HEADROOM) if used else alloc))
-            if pool <= 0.5:
-                STATE.action[rid] = "hold"
-                continue
-            delta = min(max(target - alloc, 0.0), max(alloc * 0.18, 12.0), pool, max(0.0, hard - alloc))
-            if delta <= 0:
-                STATE.action[rid] = "hold"
-                continue
-            STATE.alloc[rid] = alloc + delta
-            pool -= delta
-            STATE.action[rid] = "increase"
-            boosted += 1
+            STATE.action[rid] = "hold"
         for rid in hold_ids:
             STATE.action[rid] = "hold"
 
-        total = sum(STATE.alloc.get(rid, 0.0) for rid in on_ids)
-        if total > hall_budget + 0.05 and total > 0:
-            overflow = total - hall_budget
-            slack = [rid for rid in on_ids if not by_id[rid].saturating and STATE.alloc.get(rid, 0.0) > floor]
-            slack.sort(key=lambda rid: -STATE.alloc.get(rid, 0.0))
-            for rid in slack:
-                if overflow <= 0:
-                    break
-                take = min(overflow, STATE.alloc[rid] - floor)
-                STATE.alloc[rid] -= take
-                overflow -= take
-                STATE.action[rid] = "reduce"
-            if overflow > 0:
-                scale = hall_budget / max(sum(STATE.alloc.get(rid, 0.0) for rid in on_ids), 1.0)
-                for rid in on_ids:
-                    STATE.alloc[rid] *= scale
-                STATE.last_event = (
-                    f"Clamped hall to {rack_policy_kw():.0f} kW/rack · cap {STATE.max_rack_kw:.0f} kW"
-                )
-
     added = _enable_extras(samples)
+    fed = [s.id for s in samples if STATE.alloc.get(s.id, 0.0) > 0]
+    total = sum(STATE.alloc.get(i, 0.0) for i in fed)
+    env = envelope_kw(STATE.live_on)
+    if total > env + 0.05 and total > 0:
+        scale = env / total
+        for i in fed:
+            STATE.alloc[i] *= scale
     if added:
         STATE.last_event = (
             f"Enabled {added} extra racks from leftover envelope · "
-            f"{len(STATE.pool_ids)} racks in pool"
+            f"{len(STATE.pool_ids)} of {n_lps_cap()} MaxLPS racks"
         )
     elif boosted:
         STATE.last_event = (
-            f"Reallocated slack to {boosted} racks · share {rack_policy_kw():.0f} kW · "
-            f"cap {STATE.max_rack_kw:.0f} kW"
+            f"Reallocated slack to {boosted} racks · "
+            f"static {n_static_cap()} · MaxLPS {n_lps_cap()}"
         )
     elif hot_total and held_hot == hot_total:
         STATE.last_event = (
             f"Held {hot_total} hot racks at {STATE.max_rack_kw:.0f} kW cap · "
-            f"share {rack_policy_kw():.0f} kW/rack"
+            f"static {n_static_cap()} · MaxLPS {n_lps_cap()}"
         )
 
     STATE.tick += 1
@@ -605,22 +600,26 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
 
 
 def _enable_extras(samples: list[Sample]) -> int:
-    """Spend leftover envelope on more racks instead of leaving it floating."""
+    """Spend leftover envelope on more racks at min kW (MaxLPS packing)."""
     floor = min_alloc_kw()
-    policy = rack_policy_kw()
     hard = rack_hard_kw()
-    leftover = envelope_kw(STATE.live_on) - sum(STATE.alloc.get(s.id, 0.0) for s in samples if _on(s))
+    cap = n_lps_cap(STATE.live_on)
+    leftover = envelope_kw(STATE.live_on) - sum(
+        STATE.alloc.get(s.id, 0.0) for s in samples if _on(s)
+    )
     if leftover < floor:
         return 0
     have = set(STATE.pool_ids)
     cand = [s for s in samples if _on(s) and s.id not in have]
-    cand.sort(key=lambda s: ((s.run_status or "") != "running", s.name))
+    cand.sort(key=lambda s: (not s.saturating, (s.run_status or "") != "running", s.name))
     added = 0
     pool = list(STATE.pool_ids)
     for s in cand:
+        if len(pool) >= cap:
+            break
         if leftover < floor:
             break
-        take = min(hard, leftover, max(policy, floor))
+        take = min(hard, leftover, floor)
         if take < floor:
             break
         STATE.alloc[s.id] = take
@@ -685,32 +684,44 @@ def apply_patch(
         if mode == "dynamic" and STATE.mode != "dynamic":
             reset = True
         STATE.mode = mode
+
+    def _set_max(v: float) -> None:
+        nonlocal reset
+        v = max(20.0, min(2_000.0, float(v)))
+        if abs(v - STATE.max_rack_kw) >= 0.05:
+            reset = True
+        STATE.max_rack_kw = v
+
     if max_rack_kw is not None:
-        STATE.max_rack_kw = max(20.0, min(2_000.0, float(max_rack_kw)))
-        reset = True
+        _set_max(max_rack_kw)
     elif max_hall_kw is not None:
-        STATE.max_rack_kw = max(20.0, min(2_000.0, float(max_hall_kw) / 64.0))
-        reset = True
+        _set_max(float(max_hall_kw) / 64.0)
     elif max_pod_kw is not None:
-        STATE.max_rack_kw = max(20.0, min(2_000.0, float(max_pod_kw) * 4))
-        reset = True
+        _set_max(float(max_pod_kw) * 4)
     if min_rack_kw is not None:
-        STATE.min_rack_kw = max(8.0, min(2_000.0, float(min_rack_kw)))
-        reset = True
+        v = max(8.0, min(2_000.0, float(min_rack_kw)))
+        if abs(v - STATE.min_rack_kw) >= 0.05:
+            reset = True
+        STATE.min_rack_kw = v
     if STATE.min_rack_kw > STATE.max_rack_kw:
         STATE.min_rack_kw = STATE.max_rack_kw
-    if rack_count is not None:
-        STATE.rack_count = max(1, min(2_000, int(rack_count)))
-        reset = True
+    STATE.rack_count = None  # derived from envelope / min / max; ignore client rack_count
+    _ = rack_count
     if total_budget_kw is not None:
-        STATE.total_budget_kw = min(MAX_TOTAL_KW, max(100.0, float(total_budget_kw)))
-        reset = True
-    elif budget_kw is not None and total_budget_kw is None:
-        STATE.total_budget_kw = min(MAX_TOTAL_KW, max(100.0, float(budget_kw)))
-        reset = True
+        v = min(MAX_TOTAL_KW, max(100.0, float(total_budget_kw)))
+        if STATE.total_budget_kw is None or abs(v - STATE.total_budget_kw) >= 0.5:
+            reset = True
+        STATE.total_budget_kw = v
+    elif budget_kw is not None:
+        v = min(MAX_TOTAL_KW, max(100.0, float(budget_kw)))
+        if STATE.total_budget_kw is None or abs(v - STATE.total_budget_kw) >= 0.5:
+            reset = True
+        STATE.total_budget_kw = v
     if stay_under_pct is not None:
-        STATE.stay_under_pct = max(10.0, min(100.0, float(stay_under_pct)))
-        reset = True
+        v = max(10.0, min(100.0, float(stay_under_pct)))
+        if abs(v - STATE.stay_under_pct) >= 0.05:
+            reset = True
+        STATE.stay_under_pct = v
     if auto_budget_flag:
         STATE.total_budget_kw = None
         STATE.budget_kw = None
@@ -722,10 +733,9 @@ def apply_patch(
         STATE.action.clear()
         STATE.tick = 0
         STATE.budget_kw = None
-        n = _plan_n()
         STATE.last_event = (
-            f"Default {rack_policy_kw():.0f} kW/rack · {n} racks · "
-            f"{threshold_pct():.0f}% of total · [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
+            f"Static {n_static_cap()} racks at {rack_policy_kw():.0f} kW · "
+            f"MaxLPS {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
         )
         STATE.last_step = 0.0
 
@@ -817,9 +827,12 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
         "power_source": STATE.power_source,
         "halls": n_halls,
         "rack_count": planned,
-        "rack_count_auto": STATE.rack_count is None,
+        "rack_count_auto": True,
         "racks_on": n_on,
         "racks_pool": len(STATE.pool_ids),
+        "racks_static_max": n_static_cap(n_on),
+        "racks_lps_max": n_lps_cap(n_on),
+        "racks_lps_gain": max(0, n_lps_cap(n_on) - n_static_cap(n_on)),
         "rack_avg_kw": _r(rack_policy_kw()),
         "rack_policy_kw": _r(rack_policy_kw()),
         "rack_share_kw": _r(rack_share_kw(n_on)),
@@ -835,6 +848,9 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
             "threshold_pct": _r(stay),
             "rack_avg_kw": _r(rack_policy_kw()),
             "rack_count": planned,
+            "racks_static_max": n_static_cap(n_on),
+            "racks_lps_max": n_lps_cap(n_on),
+            "racks_lps_gain": max(0, n_lps_cap(n_on) - n_static_cap(n_on)),
             "total_budget_kw": _r(total),
             "envelope_kw": _r(env),
             "max_mw": MAX_TOTAL_KW / 1000.0,
