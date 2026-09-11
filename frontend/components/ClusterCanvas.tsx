@@ -847,13 +847,18 @@ export function ClusterCanvas({
         if (ch.userData.isNetLabel) ch.scale.set(7.2 * labelScale, 1.9 * labelScale, 1);
       });
       const nearest = (() => {
-        let best: { id: string; d: number } | null = null;
-        hallsRef.current.forEach((hall, i) => {
+        let bestId: string | null = null;
+        let bestD = Infinity;
+        const hallsNow = hallsRef.current;
+        for (let i = 0; i < hallsNow.length; i++) {
           const o = hallOrigin(i, pitch);
           const d = Math.hypot(controls.target.x - o.x, controls.target.z - o.z);
-          if (!best || d < best.d) best = { id: hall.id, d };
-        });
-        return best ? best.id : null;
+          if (d < bestD) {
+            bestD = d;
+            bestId = hallsNow[i].id;
+          }
+        }
+        return bestId;
       })();
       if (level !== lastLevel || nearest !== lastHall) {
         lastLevel = level;
