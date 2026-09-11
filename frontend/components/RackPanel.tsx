@@ -126,7 +126,7 @@ export function RackPanel({
             {power && !power.denied ? (
               <i
                 style={{
-                  width: `${Math.max(0, Math.min(100, ((power.consumed_kw + power.unused_kw) / (power.nameplate_kw || 120)) * 100))}%`,
+                  width: `${Math.max(0, Math.min(100, ((power.consumed_kw + power.unused_kw) / (power.nameplate_kw || power.allocated_kw || 120)) * 100))}%`,
                   background:
                     power.allocated_kw > 0
                       ? `linear-gradient(90deg, #3da35a ${(power.consumed_kw / power.allocated_kw) * 100}%, #b7bbc0 0)`

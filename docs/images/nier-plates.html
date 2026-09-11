@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>L12 MaxLPS · YoRHa plates</title>
+  <style>
+    :root {
+      --bg: #cfc6ad;
+      --bg-2: #c3baa0;
+      --paper: #d8d0b8;
+      --ink: #2c2a24;
+      --mute: #6a6558;
+      --line: #2c2a24;
+      --used: #2f2c26;
+      --spare: #efe8d2;
+      --hot: #8a3b2a;
+      --ok: #4a5340;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: #1a1916;
+      color: var(--ink);
+      font-family: "Yu Gothic", "YuGothic", "Meiryo", "Segoe UI", sans-serif;
+    }
+    .stage {
+      width: 1400px;
+      margin: 0 auto;
+      padding: 24px 0 80px;
+    }
+    .plate {
+      position: relative;
+      width: 1400px;
+      background:
+        repeating-linear-gradient(0deg, rgba(44,42,36,0.035) 0 1px, transparent 1px 12px),
+        repeating-linear-gradient(90deg, rgba(44,42,36,0.035) 0 1px, transparent 1px 12px),
+        radial-gradient(120% 80% at 50% 40%, var(--bg) 0%, #b7ae95 100%);
+      color: var(--ink);
+      overflow: hidden;
+      margin: 0 0 28px;
+    }
+    .plate:after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 120px rgba(20,18,14,0.35);
+    }
+    .br { position: absolute; width: 18px; height: 18px; border: 1.5px solid var(--ink); }
+    .br.tl { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
+    .br.tr { top: 14px; right: 14px; border-left: 0; border-bottom: 0; }
+    .br.bl { bottom: 14px; left: 14px; border-right: 0; border-top: 0; }
+    .br.br { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding: 36px 48px 12px;
+      border-bottom: 1px solid rgba(44,42,36,0.35);
+      margin: 0 28px;
+    }
+    .kicker {
+      font-size: 11px;
+      letter-spacing: 0.42em;
+      text-transform: uppercase;
+      color: var(--mute);
+    }
+    h1 {
+      margin: 4px 0 0;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    h1 small {
+      display: block;
+      margin-top: 4px;
+      font-size: 13px;
+      letter-spacing: 0.28em;
+      font-weight: 500;
+      color: var(--mute);
+    }
+    .meta {
+      text-align: right;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--mute);
+      line-height: 1.7;
+    }
+    .body { padding: 22px 48px 40px; }
+    .row { display: flex; gap: 28px; }
+    .col { flex: 1; min-width: 0; }
+    .panel {
+      border: 1px solid rgba(44,42,36,0.45);
+      background: rgba(216,208,184,0.35);
+      padding: 16px 18px 18px;
+      position: relative;
+    }
+    .panel h2 {
+      margin: 0 0 4px;
+      font-size: 13px;
+      letter-spacing: 0.32em;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .panel .sub {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      color: var(--mute);
+      margin-bottom: 12px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .stats b { display: block; font-size: 18px; letter-spacing: 0.04em; }
+    .stats span { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mute); }
+    .bars {
+      height: 240px;
+      border-bottom: 1px solid var(--ink);
+      padding: 12px 8px 0;
+      position: relative;
+    }
+    .bars .grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+      align-items: end;
+      height: 100%;
+      position: relative;
+      z-index: 1;
+    }
+    .axis {
+      position: absolute;
+      left: 0; right: 0;
+      border-top: 1px dashed rgba(44,42,36,0.55);
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--mute);
+      padding-left: 4px;
+    }
+    .slot { display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+    .stack {
+      width: 42px;
+      height: 100%;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      border: 1px solid var(--ink);
+      background: rgba(44,42,36,0.08);
+      position: relative;
+    }
+    .stack i { display: block; width: 100%; }
+    .stack .u { background: var(--spare); }
+    .stack .c { background: var(--used); }
+    .stack[data-hot="true"] .c { background: var(--hot); }
+    .slot b { margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .slot small { font-size: 10px; letter-spacing: 0.08em; color: var(--mute); }
+    .legend {
+      display: flex;
+      gap: 18px;
+      margin-top: 14px;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--mute);
+    }
+    .legend i {
+      display: inline-block;
+      width: 11px; height: 11px;
+      margin-right: 6px;
+      vertical-align: -1px;
+      border: 1px solid var(--ink);
+    }
+    .legend .c { background: var(--used); }
+    .legend .h { background: var(--hot); }
+    .legend .u { background: var(--spare); }
+    .legend .p {
+      width: 16px; height: 0;
+      border: 0;
+      border-top: 1px dashed var(--ink);
+      vertical-align: 3px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 40px 1fr 40px 1fr;
+      align-items: stretch;
+      gap: 0;
+    }
+    .box {
+      border: 1px solid var(--ink);
+      padding: 18px 16px;
+      background: rgba(216,208,184,0.45);
+    }
+    .box .id {
+      font-size: 10px;
+      letter-spacing: 0.32em;
+      color: var(--mute);
+    }
+    .box h3 {
+      margin: 4px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    .box p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+      letter-spacing: 0.02em;
+    }
+    .box code {
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 11px;
+    }
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    .chips { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+    .chip {
+      border: 1px solid var(--ink);
+      padding: 6px 10px;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .chip.on { background: var(--ink); color: var(--bg); }
+    .pool {
+      display: grid;
+      grid-template-columns: 1.1fr 0.8fr 1.1fr;
+      gap: 18px;
+      align-items: center;
+    }
+    .rack-row { display: flex; gap: 8px; align-items: end; height: 160px; }
+    .mini {
+      width: 22px;
+      border: 1px solid var(--ink);
+      background: var(--used);
+    }
+    .mini.idle { background: var(--spare); }
+    .mini.hot { background: var(--hot); }
+    .note {
+      font-size: 12px;
+      line-height: 1.6;
+      letter-spacing: 0.03em;
+    }
+    .note b { letter-spacing: 0.12em; text-transform: uppercase; font-size: 11px; }
+    .env {
+      height: 320px;
+      position: relative;
+      border: 1px solid var(--ink);
+      margin-top: 8px;
+    }
+    .env .fill {
+      position: absolute;
+      left: 18%; right: 18%;
+      bottom: 0;
+    }
+    .env .cap { height: 100%; border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
+    .env .pol {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      height: 80%;
+      border-top: 1px dashed var(--ink);
+      background: repeating-linear-gradient(90deg, rgba(44,42,36,0.06) 0 8px, transparent 8px 16px);
+    }
+    .env .burst {
+      position: absolute; left: 22%; right: 22%;
+      bottom: 0; height: 100%;
+      background: var(--hot);
+    }
+    .env .idleb {
+      position: absolute; left: 22%; right: 22%;
+      bottom: 0; height: 28%;
+      background: var(--used);
+    }
+    .env label {
+      position: absolute;
+      left: 8px;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(44,42,36,0.28);
+      padding: 8px 6px;
+      text-align: left;
+      letter-spacing: 0.06em;
+    }
+    th { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mute); font-weight: 600; }
+    .foot {
+      padding: 0 48px 28px;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--mute);
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+
+    <section class="plate" id="p-compare" style="height: 760px">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br br"></i>
+      <header class="head">
+        <div>
+          <div class="kicker">L12 · Unit 042 · Power</div>
+          <h1>Static vs MaxLPS <small>静的配電 ／ 動的再配分 · 135 kW max · stay under 80%</small></h1>
+        </div>
+        <div class="meta">
+          Snapshot from the live L12 loop<br>
+          Policy 108 kW / rack · hall envelope 25.92 MW<br>
+          240 powered racks · 35 saturating
+        </div>
+      </header>
+      <div class="body">
+        <div class="row">
+          <div class="col">
+            <div class="panel">
+              <h2>01  Static allocation</h2>
+              <div class="sub">均等割当 · every rack at stay-under</div>
+              <div class="stats">
+                <div><span>Consumed</span><b>11.09 MW</b></div>
+                <div><span>Budget</span><b>25.92 MW</b></div>
+                <div><span>Stranded</span><b>14.83 MW</b></div>
+              </div>
+              <div class="bars">
+                <div class="axis" style="bottom:80%">Stay-under 108 kW</div>
+                <div class="axis" style="bottom:100%; border-top-style:solid">Max 135 kW</div>
+                <div class="grid">
+                <div class="slot"><div class="stack" data-hot="true" style="height:80%"><i class="c" style="height:100%"></i></div><b>108 kW</b><small>R01C01 · 108</small></div>
+                <div class="slot"><div class="stack" data-hot="true" style="height:80%"><i class="c" style="height:100%"></i></div><b>108 kW</b><small>R01C03 · 108</small></div>
+                <div class="slot"><div class="stack" data-hot="true" style="height:80%"><i class="c" style="height:100%"></i></div><b>108 kW</b><small>R01C06 · 108</small></div>
+                <div class="slot"><div class="stack" style="height:80%"><i class="u" style="height:85.2%"></i><i class="c" style="height:14.8%"></i></div><b>16 kW</b><small>R03C03 · 108</small></div>
+                <div class="slot"><div class="stack" style="height:80%"><i class="u" style="height:85.2%"></i><i class="c" style="height:14.8%"></i></div><b>16 kW</b><small>R03C11 · 108</small></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="panel">
+              <h2>02  MaxLPS dynamic</h2>
+              <div class="sub">余剰回収 · idle slack feeds the cap</div>
+              <div class="stats">
+                <div><span>Consumed</span><b>12.13 MW</b></div>
+                <div><span>Budget</span><b>25.92 MW</b></div>
+                <div><span>Stranded</span><b>2.75 MW</b></div>
+              </div>
+              <div class="bars">
+                <div class="axis" style="bottom:80%">Stay-under 108 kW</div>
+                <div class="axis" style="bottom:100%; border-top-style:solid">Max 135 kW</div>
+                <div class="grid">
+                <div class="slot"><div class="stack" data-hot="true" style="height:100%"><i class="c" style="height:100%"></i></div><b>135 kW</b><small>R01C01 · 135</small></div>
+                <div class="slot"><div class="stack" data-hot="true" style="height:100%"><i class="c" style="height:100%"></i></div><b>135 kW</b><small>R01C03 · 135</small></div>
+                <div class="slot"><div class="stack" data-hot="true" style="height:100%"><i class="c" style="height:100%"></i></div><b>135 kW</b><small>R01C06 · 135</small></div>
+                <div class="slot"><div class="stack" style="height:27.4%"><i class="u" style="height:56.8%"></i><i class="c" style="height:43.2%"></i></div><b>16 kW</b><small>R03C03 · 37</small></div>
+                <div class="slot"><div class="stack" style="height:27.4%"><i class="u" style="height:56.8%"></i><i class="c" style="height:43.2%"></i></div><b>16 kW</b><small>R03C11 · 37</small></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="h"></i>Saturating (at cap)</span>
+          <span><i class="c"></i>Workload consumption</span>
+          <span><i class="u"></i>Allocated unused</span>
+          <span><i class="p"></i>Stay-under 80%</span>
+        </div>
+      </div>
+      <div class="foot"><span>Glory to mankind</span><span>Fig. N1 · measured from /api/cluster/power</span></div>
+    </section>
+
+    <section class="plate" id="p-loop" style="height: 620px">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br br"></i>
+      <header class="head">
+        <div>
+          <div class="kicker">Control loop · 制御周期</div>
+          <h1>Classify · Steal · Feed <small>gap = (allocated − consumed) / allocated</small></h1>
+        </div>
+        <div class="meta">Tick 5–10 s live · 1 s in the L12 demo<br>Deadband 25 W before PATCH</div>
+      </header>
+      <div class="body">
+        <div class="flow">
+          <div class="box">
+            <div class="id">03A  Reduce</div>
+            <h3>余剰  &gt; 20%</h3>
+            <p>Idle racks with more than 20% slack drop toward <code>consumed / 0.88</code>. Freed watts return to the hall pool. Never below GPU AllowableMin.</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="box">
+            <div class="id">03B  Hold</div>
+            <h3>5–20%  余白</h3>
+            <p>Operating band. No PATCH. Observed SetPoint is truth — if nvidia-smi set a lower cap, we do not fight it.</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="box">
+            <div class="id">03C  Increase</div>
+            <h3>不足  &lt; 5%</h3>
+            <p>At-cap racks take from the hall pool up to <b>max kW / rack</b> (135), not merely stay-under (108). Hall average stays at 80%.</p>
+          </div>
+        </div>
+        <div class="chips">
+          <span class="chip">Hall isolation</span>
+          <span class="chip">Facility ceiling 135 MW</span>
+          <span class="chip">Non-persistent SetPoint</span>
+          <span class="chip on">Replay = ClearOOBSetPoint</span>
+        </div>
+        <p class="note" style="margin:18px 0 0">
+          <b>Live demo at 135 kW / 80%:</b> reduce 172 · hold 68 · increase 0 (already at cap) · 35 hot racks held at 135 kW · 47 extra racks above stay-under.
+        </p>
+      </div>
+      <div class="foot"><span>System · YoRHa</span><span>Fig. N2</span></div>
+    </section>
+
+    <section class="plate" id="p-pool" style="height: 640px">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br br"></i>
+      <header class="head">
+        <div>
+          <div class="kicker">Hall pooling · ホール内再配分</div>
+          <h1>Steal from idle · feed the cap <small>same hall only · never across DH-01 / DH-02</small></h1>
+        </div>
+        <div class="meta">policy_w = max_rack × stay_under<br>burst_w = max_rack (hard cap)</div>
+      </header>
+      <div class="body">
+        <div class="pool">
+          <div>
+            <div class="sub" style="letter-spacing:.22em;text-transform:uppercase;font-size:11px;color:var(--mute);margin-bottom:8px">Idle · slack recovered</div>
+            <div class="rack-row">
+              <div class="mini idle" style="height:28%"></div>
+              <div class="mini idle" style="height:30%"></div>
+              <div class="mini idle" style="height:26%"></div>
+              <div class="mini idle" style="height:32%"></div>
+              <div class="mini idle" style="height:29%"></div>
+              <div class="mini idle" style="height:27%"></div>
+              <div class="mini idle" style="height:31%"></div>
+              <div class="mini idle" style="height:28%"></div>
+            </div>
+            <p class="note" style="margin-top:10px"><b>After reduce</b><br>Allocation falls from 108 kW toward ~37 kW. Unused gray leaves the envelope.</p>
+          </div>
+          <div class="panel" style="text-align:center">
+            <div class="id" style="letter-spacing:.3em;font-size:10px;color:var(--mute)">Hall pool</div>
+            <h3 style="margin:8px 0;letter-spacing:.18em;text-transform:uppercase">25.92 MW</h3>
+            <p class="note">n_on × 108 kW<br>stays the hall budget<br><br>→ extra watts<br>to saturating racks</p>
+          </div>
+          <div>
+            <div class="sub" style="letter-spacing:.22em;text-transform:uppercase;font-size:11px;color:var(--mute);margin-bottom:8px">Hot · burst to max</div>
+            <div class="rack-row">
+              <div class="mini hot" style="height:100%"></div>
+              <div class="mini hot" style="height:100%"></div>
+              <div class="mini hot" style="height:100%"></div>
+              <div class="mini hot" style="height:96%"></div>
+              <div class="mini hot" style="height:100%"></div>
+            </div>
+            <p class="note" style="margin-top:10px"><b>After increase</b><br>Hot racks climb 108 → 135 kW (the user max). Average across the hall remains 80%.</p>
+          </div>
+        </div>
+      </div>
+      <div class="foot"><span>Data hall DH-01</span><span>Fig. N3</span></div>
+    </section>
+
+    <section class="plate" id="p-redfish" style="height: 680px">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br br"></i>
+      <header class="head">
+        <div>
+          <div class="kicker">I/O · 通信</div>
+          <h1>Redfish on the BMC <small>the demo math does not change · only the sensor and actuator</small></h1>
+        </div>
+        <div class="meta">Lab 10.10.78.223 read<br>Lab 10.10.78.206 write<br>HGX_Baseboard_0 / GPU_N</div>
+      </header>
+      <div class="body">
+        <div class="flow">
+          <div class="box">
+            <div class="id">04A  Sensor</div>
+            <h3>GET  監視</h3>
+            <p><code>…/Processors/GPU_0/EnvironmentMetrics</code></p>
+            <p style="margin-top:8px">Reading, SetPoint, AllowableMin, AllowableMax. One HTTP session per BMC. 5–10 s tick.</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="box">
+            <div class="id">04B  Brain</div>
+            <h3>L12 allocator</h3>
+            <p>Same <code>power_limit.py</code> loop. Sums GPU watts to rack kW. Publishes today’s <code>/api/cluster/power</code> snapshot so the UI does not change.</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="box">
+            <div class="id">04C  Actuator</div>
+            <h3>PATCH  指令</h3>
+            <p><code>{"PowerLimitWatts":{"SetPoint":750}}</code></p>
+            <p style="margin-top:8px">Non-persistent. Replay = <code>ClearOOBSetPoint</code>. Deadband 25 W.</p>
+          </div>
+        </div>
+        <table style="margin-top:22px">
+          <thead>
+            <tr><th>Role</th><th>Method</th><th>Lab URL</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Sensor</td><td>GET</td><td>https://10.10.78.223/redfish/v1/Systems/HGX_Baseboard_0/Processors/GPU_0/EnvironmentMetrics</td></tr>
+            <tr><td>Actuator</td><td>PATCH</td><td>https://10.10.78.206/redfish/v1/Systems/HGX_Baseboard_0/Processors/GPU_0/EnvironmentMetrics</td></tr>
+            <tr><td>Reset</td><td>POST</td><td>…/Actions/Oem/NvidiaEnvironmentMetrics.ClearOOBSetPoint</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="foot"><span>Credentials live in the secret store · not this repo</span><span>Fig. N4</span></div>
+    </section>
+
+    <section class="plate" id="p-env" style="height: 560px">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br br"></i>
+      <header class="head">
+        <div>
+          <div class="kicker">Envelope · 包絡線</div>
+          <h1>One rack · two ceilings <small>stay-under is the average · max is the burst</small></h1>
+        </div>
+        <div class="meta">User knobs in the L12 control loop<br>Max kW / rack = 135 · Stay under = 80%</div>
+      </header>
+      <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
+        <div>
+          <div class="env">
+            <div class="pol"></div>
+            <div class="burst" style="left:12%;right:58%"></div>
+            <div class="idleb" style="left:58%;right:12%;background:var(--spare)"></div>
+            <div class="idleb" style="left:58%;right:12%;height:12%;background:var(--used)"></div>
+            <label style="top:8px">Max 135 kW</label>
+            <label style="top:22%">Stay-under 108 kW</label>
+          </div>
+        </div>
+        <div class="note">
+          <p><b>Left · saturating rack</b><br>Consumes the full 135 kW nameplate. Allowed because idle racks in the same hall donated slack. Still counted inside the 80% hall envelope.</p>
+          <p style="margin-top:14px"><b>Right · idle rack</b><br>Allocation collapsed to ~37 kW. Consumption 16 kW. Gap &gt; 20% so the loop keeps reducing until the floor.</p>
+          <p style="margin-top:14px"><b>This is the graph the L12 UI now draws.</b> Static bars all sit on the dashed stay-under line. MaxLPS bars cross it.</p>
+        </div>
+      </div>
+      <div class="foot"><span>Do not cap hot racks at stay-under</span><span>Fig. N5</span></div>
+    </section>
+
+  </div>
+</body>
+</html>

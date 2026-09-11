@@ -366,9 +366,18 @@ class PowerPatch(BaseModel):
     budget_kw: float | None = Field(default=None, ge=0)
     auto_budget: bool | None = None
     reset: bool = False
+    max_rack_kw: float | None = Field(default=None, ge=20, le=2000)
+    max_hall_kw: float | None = Field(default=None, ge=1000, le=135000)
+    max_pod_kw: float | None = Field(default=None, ge=5, le=500)
+    stay_under_pct: float | None = Field(default=None, ge=10, le=100)
+    total_budget_kw: float | None = Field(default=None, ge=100, le=135000)
+    rack_count: int | None = Field(default=None, ge=1, le=2000)
+    min_rack_kw: float | None = Field(default=None, ge=8, le=2000)
 
 
-def _power_samples(rack_rows: list[Rack]) -> list[dict]:
+def _power_samples(rack_rows: list[Rack], workloads: list[Workload] | None = None) -> list[dict]:
+    hot = power_limit.pick_hot_ids(rack_rows, workloads or [])
+    hard = power_limit.rack_hard_kw()
     rows = []
     for r in rack_rows:
         _cpu, _gpu, _mem, power = _usage(r)
@@ -379,16 +388,21 @@ def _power_samples(rack_rows: list[Rack]) -> list[dict]:
                 "hall_id": r.hall_id,
                 "power_state": getattr(r, "power_state", None) or "on",
                 "run_status": getattr(r, "run_status", None) or "ready",
-                "demand_kw": round(power / 100.0 * RACK_TDP_KW, 2) if power else 0.0,
+                "demand_kw": round(power / 100.0 * hard, 2) if power else 0.0,
+                "saturating": r.id in hot,
             }
         )
     return rows
 
 
+def _running_workloads(db: Session) -> list[Workload]:
+    return list(db.scalars(select(Workload).where(Workload.status == "running")).all())
+
+
 @router.get("/power")
 def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    return power_limit.snapshot(_power_samples(rack_rows))
+    return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
 
 
 @router.patch("/power")
@@ -404,9 +418,16 @@ def patch_power_limiter(
         budget_kw=payload.budget_kw,
         reset=payload.reset,
         auto_budget_flag=bool(payload.auto_budget),
+        max_rack_kw=payload.max_rack_kw,
+        max_hall_kw=payload.max_hall_kw,
+        max_pod_kw=payload.max_pod_kw,
+        stay_under_pct=payload.stay_under_pct,
+        total_budget_kw=payload.total_budget_kw,
+        rack_count=payload.rack_count,
+        min_rack_kw=payload.min_rack_kw,
     )
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    return power_limit.snapshot(_power_samples(rack_rows))
+    return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
 
 
 @router.get("/campus", response_model=CampusOut)

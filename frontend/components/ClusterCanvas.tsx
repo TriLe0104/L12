@@ -106,6 +106,7 @@ type Entry = {
 function capColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
   if (rack.power_state === "off") return new THREE.Color(0x3a3a3a);
   if (power?.denied) return new THREE.Color(0x3a3a3a);
+  if (power?.at_cap || power?.hot) return new THREE.Color(0xe10600);
   if (power?.extra) return new THREE.Color(0x2f9e4a);
   if (selected) return new THREE.Color(0xff3b30);
   if (rack.run_status === "running") return new THREE.Color(0xe10600);
@@ -221,17 +222,30 @@ export function ClusterCanvas({
 
     const bodyGeo = new THREE.BoxGeometry(RACK_W, RACK_H, RACK_D);
     const capGeo = new THREE.BoxGeometry(RACK_W * 0.98, 0.04, RACK_D * 0.98);
-    const barGeo = new THREE.BoxGeometry(0.28, 1, 0.28);
-    const bodyMat = new THREE.MeshStandardMaterial({ metalness: 0.5, roughness: 0.45 });
+    const barGeo = new THREE.BoxGeometry(RACK_W * 0.78, 1, RACK_D * 0.78);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      metalness: 0.45,
+      roughness: 0.4,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+    });
     const capMat = new THREE.MeshStandardMaterial({ metalness: 0.3, roughness: 0.4, emissive: 0xe10600, emissiveIntensity: 0.28 });
     const usedMat = new THREE.MeshStandardMaterial({
       color: 0x2f9e4a,
       emissive: 0x145c28,
-      emissiveIntensity: 0.4,
-      metalness: 0.2,
-      roughness: 0.42,
+      emissiveIntensity: 0.55,
+      metalness: 0.18,
+      roughness: 0.4,
     });
-    const spareMat = new THREE.MeshStandardMaterial({ color: 0xb7bbc0, metalness: 0.12, roughness: 0.72 });
+    const spareMat = new THREE.MeshStandardMaterial({
+      color: 0x6a7074,
+      metalness: 0.1,
+      roughness: 0.75,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
     let bodyMesh: THREE.InstancedMesh | null = null;
     let capMesh: THREE.InstancedMesh | null = null;
     let usedMesh: THREE.InstancedMesh | null = null;
@@ -368,10 +382,13 @@ export function ClusterCanvas({
         usedMesh.frustumCulled = false;
         spareMesh.frustumCulled = false;
       }
-      scene.add(bodyMesh);
-      scene.add(capMesh);
+      usedMesh.renderOrder = 1;
+      spareMesh.renderOrder = 1;
+      bodyMesh.renderOrder = 2;
       scene.add(usedMesh);
       scene.add(spareMesh);
+      scene.add(bodyMesh);
+      scene.add(capMesh);
       buildNetwork(hs, pitch);
       paint();
     };
@@ -533,30 +550,37 @@ export function ClusterCanvas({
     const paintBars = () => {
       if (!usedMesh || !spareMesh) return;
       const power = powerRef.current ?? {};
-      const tdp = 120;
+      const innerH = RACK_H * 0.96;
       entries.forEach((entry, i) => {
         const slice = power[entry.rack.id];
-        const usedT = slice && !slice.denied ? Math.max(0, slice.consumed_kw / tdp) : 0;
-        const spareT = slice && !slice.denied ? Math.max(0, slice.unused_kw / tdp) : 0;
-        entry.barUsed += (usedT - entry.barUsed) * 0.14;
-        entry.barSpare += (spareT - entry.barSpare) * 0.14;
+        const cap =
+          slice && slice.nameplate_kw > 1
+            ? slice.nameplate_kw
+            : slice && slice.allocated_kw > 1
+              ? slice.allocated_kw
+              : 0;
+        const usedT = cap ? Math.max(0, Math.min(1, slice.consumed_kw / cap)) : 0;
+        const spareT = cap ? Math.max(0, Math.min(1, slice.unused_kw / cap)) : 0;
+        entry.barUsed += (usedT - entry.barUsed) * 0.16;
+        entry.barSpare += (spareT - entry.barSpare) * 0.16;
         const pos = worldOf(entry);
         const yaw = THREE.MathUtils.degToRad(entry.rack.rotation);
-        const colH = RACK_H * 1.15;
-        const usedH = Math.max(0.001, entry.barUsed * colH);
-        const spareH = Math.max(0.001, entry.barSpare * colH);
-        const usedVis = !!(slice && !slice.denied && entry.barUsed > 0.01);
-        const spareVis = !!(slice && !slice.denied && entry.barSpare > 0.01);
+        const usedH = Math.max(0.001, entry.barUsed * innerH);
+        const spareH = Math.max(0.001, entry.barSpare * innerH);
+        const usedVis = !!(slice && slice.enabled && entry.barUsed > 0.012);
+        const spareVis = !!(slice && slice.enabled && entry.barSpare > 0.012);
         dummy.rotation.set(0, yaw, 0);
         dummy.scale.set(usedVis ? 1 : 0, usedH, usedVis ? 1 : 0);
-        dummy.position.set(pos.x, RACK_H + 0.08 + usedH / 2, pos.z);
+        dummy.position.set(pos.x, usedH / 2, pos.z);
         dummy.updateMatrix();
         usedMesh!.setMatrixAt(i, dummy.matrix);
         dummy.scale.set(spareVis ? 1 : 0, spareH, spareVis ? 1 : 0);
-        dummy.position.set(pos.x, RACK_H + 0.08 + usedH + spareH / 2, pos.z);
+        dummy.position.set(pos.x, usedH + spareH / 2, pos.z);
         dummy.updateMatrix();
         spareMesh!.setMatrixAt(i, dummy.matrix);
-        if (slice?.extra) usedMesh!.setColorAt(i, new THREE.Color(0x4ade80));
+        const atCap = !!(slice?.at_cap || slice?.hot || entry.barUsed > 0.94);
+        if (atCap) usedMesh!.setColorAt(i, new THREE.Color(0xe10600));
+        else if (slice?.extra) usedMesh!.setColorAt(i, new THREE.Color(0x4ade80));
         else usedMesh!.setColorAt(i, new THREE.Color(0x2f9e4a));
       });
       usedMesh.instanceMatrix.needsUpdate = true;

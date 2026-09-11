@@ -371,9 +371,12 @@ export interface PowerRack {
   allocated_kw: number;
   unused_kw: number;
   nameplate_kw: number;
+  policy_kw?: number;
   enabled: boolean;
   denied: boolean;
   extra: boolean;
+  hot?: boolean;
+  at_cap?: boolean;
   action: PowerAction;
   gap_pct: number | null;
 }
@@ -384,10 +387,15 @@ export interface PowerSummary {
   allocated_kw: number;
   stranded_kw: number;
   headroom_kw: number;
+  used_kw?: number;
+  available_kw?: number;
+  floating_kw?: number;
   racks_enabled: number;
   racks_denied: number;
   racks_extra: number;
   racks_off: number;
+  racks_hot?: number;
+  racks_at_cap?: number;
   actions: Record<string, number>;
 }
 
@@ -406,11 +414,40 @@ export interface PowerLimiter {
   auto_budget: boolean;
   nameplate_kw: number;
   tdp_kw: number;
+  default_budget_kw?: number;
+  max_budget_kw?: number;
+  max_rack_kw?: number;
+  min_rack_kw?: number;
+  stay_under_pct?: number;
+  threshold_pct?: number;
+  total_budget_kw?: number;
+  envelope_kw?: number;
+  unplaced_budget_kw?: number;
+  power_source?: string;
+  halls?: number;
+  rack_count?: number;
+  rack_count_auto?: boolean;
+  racks_on?: number;
+  racks_pool?: number;
+  rack_avg_kw?: number;
+  rack_policy_kw?: number;
+  rack_share_kw?: number;
+  rack_hard_kw?: number;
   policy: {
     reduce_gap_pct: number;
     increase_gap_pct: number;
     target_headroom_pct: number;
     enable_per_tick: number;
+    default_mw?: number;
+    max_mw?: number;
+    min_rack_kw?: number;
+    max_rack_kw?: number;
+    stay_under_pct?: number;
+    threshold_pct?: number;
+    rack_avg_kw?: number;
+    rack_count?: number;
+    total_budget_kw?: number;
+    envelope_kw?: number;
   };
   tick: number;
   last_event: string;
@@ -419,4 +456,6 @@ export interface PowerLimiter {
   active: PowerSummary;
   showcase: PowerShowcaseSlot[];
   racks: PowerRack[];
+  static_racks?: PowerRack[];
+  dynamic_racks?: PowerRack[];
 }

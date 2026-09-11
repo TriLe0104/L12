@@ -3777,6 +3777,265 @@ button.jobcard-thumb:focus-visible {
   font-weight: 600;
 }
 
+/* ---------------- login claw shred ---------------- */
+.claw-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  overflow: hidden;
+  perspective: 1600px;
+  opacity: 0;
+  visibility: hidden;
+  background: #050505;
+}
+
+.claw-stage[data-phase="armed"],
+.claw-stage[data-phase="slash"],
+.claw-stage[data-phase="shred"] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.claw-power {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  opacity: 0;
+}
+
+.claw-stage[data-phase="slash"] .claw-power {
+  opacity: 0.2;
+  transition: opacity 0.35s ease;
+}
+
+.claw-stage[data-phase="shred"] .claw-power {
+  opacity: 1;
+  transition: opacity 0.45s ease;
+}
+
+.claw-power-fill rect {
+  fill: rgba(225, 6, 0, 0.06);
+  stroke: rgba(225, 6, 0, 0.35);
+  stroke-width: 1.2;
+}
+
+.claw-hall {
+  opacity: 0;
+  transform-origin: 50% 80%;
+  transform: scaleY(0.08);
+}
+
+.claw-stage[data-phase="shred"] .claw-hall {
+  animation: hall-fill 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes hall-fill {
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.claw-power-bus .bus {
+  fill: none;
+  stroke: url(#claw-bus);
+  stroke-width: 2.2;
+  stroke-dasharray: 10 14;
+  animation: power-flow 0.9s linear infinite;
+}
+
+.claw-power-bus .bus-hot {
+  stroke: #ff6b63;
+  stroke-width: 2.8;
+  animation-duration: 0.55s;
+}
+
+.claw-power-bus .spark {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-dasharray: 40 80;
+  animation: spark-run 0.7s linear infinite;
+  filter: drop-shadow(0 0 4px #e10600);
+}
+
+.claw-power-nodes circle {
+  fill: #e10600;
+  opacity: 0.35;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.claw-stage[data-phase="shred"] .claw-power-nodes circle {
+  animation: node-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes power-flow {
+  to {
+    stroke-dashoffset: -48;
+  }
+}
+
+@keyframes spark-run {
+  to {
+    stroke-dashoffset: -120;
+  }
+}
+
+@keyframes node-pulse {
+  from {
+    opacity: 0.25;
+    transform: scale(0.75);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.45);
+  }
+}
+
+.claw-pane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #070707;
+  clip-path: var(--clip);
+  transform-origin: 50% 40%;
+  will-change: transform, opacity;
+  z-index: 1;
+}
+
+.claw-clone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100%;
+}
+
+.claw-clone .login {
+  min-height: 100%;
+  pointer-events: none;
+}
+
+.claw-stage[data-phase="shred"] .claw-pane {
+  animation: shard-fall 0.95s cubic-bezier(0.55, 0.06, 0.9, 0.35) forwards;
+  animation-delay: var(--delay);
+}
+
+@keyframes shard-fall {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--dx), 118vh, 80px) rotate(var(--rot));
+    opacity: 0.15;
+  }
+}
+
+.claw-slashes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  fill: none;
+  stroke: #e10600;
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 7px rgba(225, 6, 0, 0.9));
+  opacity: 0;
+}
+
+.claw-slashes path:nth-child(2) {
+  stroke: #fff;
+  stroke-width: 0.28;
+}
+.claw-slashes path:nth-child(3) {
+  stroke-width: 0.95;
+}
+.claw-slashes path:nth-child(5) {
+  stroke-width: 0.4;
+  opacity: 0.8;
+}
+
+.claw-stage[data-phase="slash"] .claw-slashes,
+.claw-stage[data-phase="shred"] .claw-slashes {
+  opacity: 1;
+}
+
+.claw-stage[data-phase="slash"] .claw-slashes path {
+  stroke-dasharray: 180;
+  stroke-dashoffset: 180;
+  animation: claw-draw 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+.claw-stage[data-phase="slash"] .claw-slashes path:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.claw-stage[data-phase="slash"] .claw-slashes path:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.claw-stage[data-phase="slash"] .claw-slashes path:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.claw-stage[data-phase="slash"] .claw-slashes path:nth-child(5) {
+  animation-delay: 0.16s;
+}
+
+.claw-stage[data-phase="shred"] .claw-slashes {
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+@keyframes claw-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.claw-paw {
+  position: absolute;
+  z-index: 3;
+  height: min(78vh, 42rem);
+  width: auto;
+  top: -12%;
+  left: 48%;
+  opacity: 0;
+  mix-blend-mode: lighten;
+  pointer-events: none;
+  transform: translate3d(20%, -40%, 0) rotate(-42deg) scale(0.8);
+}
+
+.claw-stage[data-phase="slash"] .claw-paw {
+  animation: claw-swipe 0.56s cubic-bezier(0.18, 0.82, 0.2, 1) forwards;
+}
+
+@keyframes claw-swipe {
+  0% {
+    opacity: 0;
+    transform: translate3d(24%, -46%, 0) rotate(-48deg) scale(0.74);
+  }
+  16% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.18;
+    transform: translate3d(-58%, 58%, 0) rotate(-12deg) scale(1.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .claw-stage {
+    display: none;
+  }
+}
+
 /* ---------------- unsaved-changes prompt ---------------- */
 /* The third member of the overlay family, above both viewers so it is always the
    topmost layer and its Escape is the one that answers. */

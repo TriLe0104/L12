@@ -47,7 +47,7 @@ function Gauge({
             strokeLinecap="butt"
           />
         </svg>
-        <strong>{value}</strong>
+        <strong data-wide={value.length > 6 ? "true" : undefined}>{value}</strong>
       </div>
       <div className="gauge-foot">
         <div>
@@ -353,16 +353,16 @@ export function OverviewDash() {
           title="Total power"
           pct={
             power
-              ? (power.active.consumed_kw / Math.max(power.budget_kw, 1)) * 100
+              ? (power.active.consumed_kw / Math.max(power.max_budget_kw ?? power.nameplate_kw ?? power.budget_kw, 1)) * 100
               : data.now.power_pct
           }
           value={formatKw(power?.active.consumed_kw ?? last.power_kw)}
           used={formatKw(power?.active.consumed_kw ?? last.power_kw)}
-          total={formatKw(power?.budget_kw ?? data.size.nameplate_kw)}
+          total={formatKw(power?.max_budget_kw ?? power?.nameplate_kw ?? data.size.nameplate_kw)}
           detail={
             power
-              ? `${formatKw(power.budget_kw)} DC budget · ${power.active.racks_enabled} racks capped`
-              : `120 kW TDP / rack · IT load`
+              ? `${formatKw(power.envelope_kw ?? power.budget_kw)} envelope · ${power.rack_count ?? power.racks_on ?? 0} racks · [${Math.round(power.min_rack_kw ?? 40)}–${Math.round(power.max_rack_kw ?? 300)}] kW`
+              : `Set total power, threshold, min/max kW per rack`
           }
         />
         <article className="stat-panel">

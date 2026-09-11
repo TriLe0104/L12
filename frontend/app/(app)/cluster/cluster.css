@@ -314,13 +314,22 @@
 .gauge-arc strong {
   position: absolute;
   left: 50%;
-  top: 58%;
+  top: 60%;
   transform: translate(-50%, -50%);
   margin: 0;
-  font-size: clamp(0.88rem, 1.2vw, 1.12rem);
+  max-width: 4.8rem;
+  font-size: clamp(0.78rem, 1.05vw, 1.05rem);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.gauge-arc strong[data-wide="true"] {
+  font-size: clamp(0.58rem, 0.78vw, 0.76rem);
+  letter-spacing: -0.05em;
 }
 
 .gauge-foot {
@@ -670,6 +679,14 @@
 .cluster-floor {
   position: relative;
   flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.cluster-floor-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
 }
@@ -1340,6 +1357,58 @@
   text-transform: uppercase;
 }
 
+.lps-policy {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.45rem;
+  margin: 0.4rem 0 0.15rem;
+}
+
+.lps-policy p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #8a8a8a;
+  font-size: 0.55rem;
+}
+
+.lps-policy label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7a7a7a;
+}
+
+.lps-policy input {
+  height: 1.55rem;
+  width: 100%;
+  padding: 0 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #111;
+  color: #f0f0f0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lps-policy-pct {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #9a9a9a;
+  font-size: 0.68rem;
+}
+
+.lps-hud .lps-policy {
+  margin: 0.45rem 0 0.35rem;
+}
+
+.lps-hud .lps-policy p {
+  display: block;
+}
+
 .lps-head p {
   margin: 0.12rem 0 0;
   color: #3da35a;
@@ -1381,6 +1450,85 @@
   padding-top: 0.2rem;
 }
 
+.lps-summary {
+  flex: 1;
+  min-height: 8.2rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem 0.5rem;
+  align-items: end;
+  padding-top: 0.2rem;
+}
+
+.lps-sum-col {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.18rem;
+}
+
+.lps-sum-col .lps-stack {
+  max-width: none;
+  width: 100%;
+}
+
+.lps-sum-col b {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lps-sum-col small {
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+}
+
+.lps-float {
+  display: block;
+  width: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    #3a3a3a,
+    #3a3a3a 4px,
+    #2a2a2a 4px,
+    #2a2a2a 8px
+  );
+}
+
+.lps-rack-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 2px;
+  min-height: 1.7rem;
+}
+
+.lps-rack-strip span {
+  width: 0.42rem;
+  height: 1.55rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #181818;
+}
+
+.lps-rack-strip i[data-k="c"] { background: #3da35a; }
+.lps-rack-strip i[data-k="u"] { background: #b7bbc0; }
+
+.lps-rack-strip em {
+  margin-left: 0.4rem;
+  font-style: normal;
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+  align-self: center;
+}
+
 .lps-slot {
   min-width: 0;
   height: 100%;
@@ -1411,6 +1559,7 @@
 }
 
 .lps-stack {
+  position: relative;
   flex: 1;
   width: 100%;
   max-width: 2.6rem;
@@ -1420,6 +1569,16 @@
   justify-content: flex-end;
   background: #181818;
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lps-policy-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.42);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .lps-stack[data-denied="true"] {
@@ -1535,6 +1694,24 @@
 
 .lps-legend i[data-k="d"] {
   background: repeating-linear-gradient(-45deg, #1a1a1a, #1a1a1a 3px, #555 3px, #555 6px);
+}
+
+.lps-legend i[data-k="p"] {
+  background: transparent;
+  border-top: 1px dashed #c8c8c8;
+  height: 0;
+  width: 0.7rem;
+  vertical-align: 3px;
+}
+
+.lps-legend i[data-k="f"] {
+  background: repeating-linear-gradient(
+    -45deg,
+    #3a3a3a,
+    #3a3a3a 3px,
+    #2a2a2a 3px,
+    #2a2a2a 6px
+  );
 }
 
 .lps-legend i[data-k="e"] {

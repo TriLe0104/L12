@@ -1,30 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AuthScreen } from "@/components/AuthScreen";
+import { useClawReveal } from "@/components/ClawReveal";
 import { LANDING, useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
   const { user, loading, signIn } = useAuth();
+  const claw = useClawReveal();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const hold = useRef(false);
 
   useEffect(() => {
-    if (!loading && user) router.replace(LANDING);
-  }, [loading, user, router]);
+    if (!loading && user && !hold.current && !claw.active) router.replace(LANDING);
+  }, [loading, user, router, claw.active]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    hold.current = true;
     try {
       await signIn(email.trim(), password);
+      claw.arm();
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      router.replace(LANDING);
+      await claw.play();
     } catch (err) {
+      hold.current = false;
+      claw.disarm();
       setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
       setBusy(false);

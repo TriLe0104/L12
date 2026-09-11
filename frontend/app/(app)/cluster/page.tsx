@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 
 import { OverviewDash } from "@/components/OverviewDash";
-import { usePowerLimiter } from "@/components/PowerLimiter";
+import { PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
 import { RackBoard } from "@/components/RackBoard";
 import { RackPanel } from "@/components/RackPanel";
 import { SwitchPanel, type SelectedSwitch } from "@/components/SwitchPanel";
@@ -414,6 +414,7 @@ export default function ClusterPage() {
 
       {tab === "floor" && (
         <section className="cluster-floor">
+          <div className="cluster-floor-stage">
           {halls.length > 0 ? (
             <ClusterCanvas
               halls={halls}
@@ -462,7 +463,7 @@ export default function ClusterPage() {
               <div className="lps-hud-kicker">{power.mode === "dynamic" ? "MaxLPS" : "Static"}</div>
               <strong>{formatKw(power.active.consumed_kw)}</strong>
               <span className="lps-hud-sub">
-                {formatKw(power.budget_kw)} budget · {power.active.racks_enabled}/{power.racks.length} capped
+                {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · {power.rack_count ?? power.racks_on ?? 0} racks · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW · {power.active.racks_at_cap ?? 0} at cap
               </span>
               <dl>
                 <div>
@@ -470,8 +471,8 @@ export default function ClusterPage() {
                   <dd>{formatKw(power.active.stranded_kw)}</dd>
                 </div>
                 <div>
-                  <dt>Extra racks</dt>
-                  <dd>+{power.active.racks_extra}</dd>
+                  <dt>Hot racks</dt>
+                  <dd>{power.active.racks_hot ?? 0}</dd>
                 </div>
                 <div>
                   <dt>Headroom</dt>
@@ -482,6 +483,7 @@ export default function ClusterPage() {
                   <dd>{power.tick}</dd>
                 </div>
               </dl>
+              <PowerPolicyFields data={power} onChange={setPower} compact />
               <div className="lps-hud-modes">
                 <button
                   type="button"
@@ -594,6 +596,7 @@ export default function ClusterPage() {
               </button>
             </div>
           )}
+          </div>
           {selectedNet && (
             <SwitchPanel selected={selectedNet} onClose={() => setSelectedNet(null)} />
           )}

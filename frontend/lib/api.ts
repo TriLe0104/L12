@@ -130,7 +130,19 @@ export const api = {
     ),
   campus: () => request<Campus>("/api/cluster/campus"),
   clusterPower: () => request<import("./cluster").PowerLimiter>("/api/cluster/power"),
-  patchClusterPower: (payload: { mode?: string; budget_kw?: number; auto_budget?: boolean; reset?: boolean }) =>
+  patchClusterPower: (payload: {
+    mode?: string;
+    budget_kw?: number;
+    auto_budget?: boolean;
+    reset?: boolean;
+    max_rack_kw?: number;
+    max_hall_kw?: number;
+    max_pod_kw?: number;
+    stay_under_pct?: number;
+    total_budget_kw?: number;
+    rack_count?: number;
+    min_rack_kw?: number;
+  }) =>
     request<import("./cluster").PowerLimiter>("/api/cluster/power", {
       method: "PATCH",
       body: JSON.stringify(payload),

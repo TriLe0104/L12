@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>L12 MaxLPS — proposal flow</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #070707; }
+    .slide {
+      width: 1920px;
+      height: 1080px;
+      padding: 28px 44px 22px;
+      color: #f3f3f3;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: #0b0b0b;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    header { display: flex; justify-content: space-between; align-items: flex-start; flex: 0 0 auto; }
+    header h1 { margin: 0; font-size: 36px; font-weight: 700; letter-spacing: 0.02em; }
+    header .lede { margin: 8px 0 0; color: #a0a0a0; font-size: 18px; max-width: 52rem; }
+    .badge {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #e10600;
+      font-weight: 700;
+      border: 1px solid #e10600;
+      padding: 8px 12px;
+      white-space: nowrap;
+    }
+    .label {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #8a8a8a;
+      margin: 0 0 8px;
+    }
+    .card {
+      background: #141414;
+      border: 1px solid #2c2c2c;
+      padding: 16px 20px 18px;
+    }
+    .card h2 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
+    .card p { margin: 0; font-size: 16px; line-height: 1.4; color: #c6c6c6; }
+    .today { border-color: #3da35a; }
+    .future { border-color: #666; border-style: dashed; }
+    .write { border-color: #e10600; }
+    .pill {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 4px 9px;
+      font-size: 13px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      border: 1px solid #333;
+      background: #1b1b1b;
+    }
+    .get { color: #7dcea0; border-color: #2f5a40; }
+    .patch { color: #ff8a80; border-color: #5a2020; }
+    .post { color: #f0c27a; border-color: #5a4a20; }
+    .fork { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; }
+    .or {
+      align-self: center;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      color: #8a8a8a;
+      border: 1px solid #3a3a3a;
+      border-radius: 99px;
+      padding: 8px 12px;
+      background: #0b0b0b;
+    }
+    .down {
+      text-align: center;
+      color: #e10600;
+      font-size: 18px;
+      line-height: 1;
+      margin: -4px 0 0;
+    }
+    .formula {
+      background: #160808;
+      border: 1px solid #e10600;
+      padding: 14px 22px 16px;
+    }
+    .eq {
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 24px;
+      margin: 4px 0 12px;
+    }
+    .chips { display: flex; gap: 8px; flex-wrap: nowrap; }
+    .chip {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      padding: 7px 12px;
+      font-size: 16px;
+      white-space: nowrap;
+    }
+    .chip span { color: #8a8a8a; margin-right: 6px; }
+    .chip b { font-weight: 650; }
+    .loop { display: grid; grid-template-columns: 1fr 36px 1.4fr 36px 1fr; align-items: stretch; flex: 1; min-height: 0; }
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e10600;
+      font-size: 22px;
+    }
+    .rules { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .rules li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      padding: 6px 10px;
+      font-size: 15px;
+      color: #d4d4d4;
+    }
+    .tag {
+      flex: 0 0 108px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .tag.r { color: #9ad0aa; }
+    .tag.h { color: #c8c8c8; }
+    .tag.i { color: #e8a0a0; }
+    .bottom { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px; flex: 0 0 auto; }
+    .hosts { font-family: Consolas, "Cascadia Mono", monospace; font-size: 16px; color: #eee; margin-top: 8px; line-height: 1.55; }
+    footer {
+      display: flex;
+      justify-content: space-between;
+      color: #6a6a6a;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      flex: 0 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="slide" id="flow">
+    <header>
+      <div>
+        <h1>L12 MaxLPS — live closed loop</h1>
+        <p class="lede">Same math as the dashboard. On the floor, Redfish on each node BMC replaces simulated watts.</p>
+      </div>
+      <div class="badge">Figure 1 · the proposal</div>
+    </header>
+
+    <div>
+      <p class="label">1 · Total power source</p>
+      <div class="fork">
+        <article class="card today">
+          <h2>Today — type it in L12</h2>
+          <p>Operator sets total power, rack count, threshold %, min kW, and max kW.</p>
+          <span class="pill patch">PATCH /api/cluster/power</span>
+        </article>
+        <div class="or">OR</div>
+        <article class="card future">
+          <h2>Future — smart breaker</h2>
+          <p>A hall/floor meter fills total power. Threshold and min/max stay operator-set.</p>
+          <span class="pill get">GET FloorPDUs/{id}/Metrics · PowerWatts.Reading</span>
+        </article>
+      </div>
+    </div>
+    <div class="down">▼</div>
+
+    <div class="formula">
+      <p class="label" style="color:#e10600">2 · Default kW per rack</p>
+      <div class="eq">kW / rack = clamp( (total power × threshold %) / rack count , min , max )</div>
+      <div class="chips">
+        <div class="chip"><span>Total</span><b>32.40 MW</b></div>
+        <div class="chip"><span>×</span><b>80%</b></div>
+        <div class="chip"><span>÷</span><b>240 racks</b></div>
+        <div class="chip"><span>=</span><b>108 kW</b></div>
+        <div class="chip"><span>band</span><b>40 – 135 kW</b></div>
+        <div class="chip"><span>envelope</span><b>25.92 MW</b></div>
+      </div>
+    </div>
+    <div class="down">▼</div>
+
+    <div style="flex:1; min-height:0; display:flex; flex-direction:column">
+      <p class="label">3 · Each tick, steal idle slack and feed hot racks</p>
+      <div class="loop">
+        <article class="card write">
+          <h2>Read BMC</h2>
+          <p>GPU draw and the cap already set. Reading, SetPoint, AllowableMin/Max.</p>
+          <span class="pill get">GET EnvironmentMetrics</span>
+        </article>
+        <div class="arrow">→</div>
+        <article class="card">
+          <h2>Adjust</h2>
+          <p>gap = (allocated − consumed) / allocated. Stay in [min, max]. Leftover envelope brings up more racks.</p>
+          <ul class="rules">
+            <li><span class="tag r">Reduce</span> Idle &gt; 20% slack. Drop toward usage, ≥ min.</li>
+            <li><span class="tag h">Hold</span> 5–20% slack. No write.</li>
+            <li><span class="tag i">Increase</span> Hot &lt; 5% slack. Feed, ≤ max.</li>
+            <li><span class="tag r">Enable</span> Leftover ≥ min. Power another rack.</li>
+          </ul>
+        </article>
+        <div class="arrow">→</div>
+        <article class="card write">
+          <h2>Write BMC</h2>
+          <p>Split rack kW across GPUs. Skip if change &lt; 25 W. Non-persistent.</p>
+          <span class="pill patch">PATCH PowerLimitWatts.SetPoint</span>
+        </article>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <article class="card">
+        <h2>4 · Fail-safe</h2>
+        <p>Replay, or a dead allocator, drops every out-of-band cap. Never leave a raised limit on a node we cannot see.</p>
+        <span class="pill post">POST ClearOOBSetPoint</span>
+      </article>
+      <article class="card hosts">
+        <h2>BMC inventory</h2>
+        <p>One BMC per node from inventory. Same three verbs on every GPU.</p>
+        <span class="pill get">GET {bmc}/…/EnvironmentMetrics</span>
+        <span class="pill patch">PATCH … SetPoint</span>
+        <span class="pill post">POST … ClearOOBSetPoint</span>
+      </article>
+      <article class="card">
+        <h2>Same UI</h2>
+        <p>Overview, floor, and control loop stay. Sim for demos without BMCs. Flag POWER_BACKEND=sim | redfish.</p>
+      </article>
+    </div>
+
+    <footer>
+      <span>Walk this top to bottom</span>
+      <span>GET reading · PATCH setpoint · POST clear</span>
+      <span>DIY Redfish · not NVIDIA DPS</span>
+    </footer>
+  </div>
+</body>
+</html>
