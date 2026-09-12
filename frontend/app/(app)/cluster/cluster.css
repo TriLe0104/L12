@@ -1510,12 +1510,18 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 2px;
-  min-height: 1.7rem;
+  min-height: 2.2rem;
+}
+
+.lps-rack-strip span,
+.lps-heat-cell {
+  position: relative;
+  overflow: hidden;
 }
 
 .lps-rack-strip span {
   width: 0.42rem;
-  height: 1.55rem;
+  height: 2.05rem;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -1524,6 +1530,61 @@
 
 .lps-rack-strip i[data-k="c"] { background: #3da35a; }
 .lps-rack-strip i[data-k="u"] { background: #b7bbc0; }
+
+.lps-rack-strip i[data-k="floor"],
+.lps-heat-cell i[data-k="floor"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(232, 176, 72, 0.2);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.lps-rack-strip i[data-k="min"],
+.lps-heat-cell i[data-k="min"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid #e8b048;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.lps-rack-strip i[data-k="max"],
+.lps-heat-cell i[data-k="max"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.lps-rack-strip i[data-k="lim"],
+.lps-heat-cell i[data-k="lim"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed rgba(140, 190, 255, 0.85);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.lps-rack-strip span[data-lim="max"] i[data-k="c"],
+.lps-heat-cell[data-lim="max"] i[data-k="c"] {
+  background: #e10600;
+}
+
+.lps-rack-strip span[data-lim="min"] i[data-k="c"],
+.lps-heat-cell[data-lim="min"] i[data-k="c"] {
+  background: #c4a35a;
+}
 
 .lps-rack-strip em {
   margin-left: 0.4rem;
@@ -1665,11 +1726,13 @@
 
 .lps-heat-cell {
   width: 0.42rem;
-  height: 1.55rem;
+  height: 2.05rem;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   background: #181818;
+  position: relative;
+  overflow: hidden;
 }
 
 .lps-heat-cell[data-k="deny"] {
@@ -1731,6 +1794,28 @@
 .lps-legend i[data-k="e"] {
   background: #3da35a;
   box-shadow: 0 0 0 1px #3da35a;
+}
+
+.lps-legend i[data-k="min"] {
+  background: rgba(232, 176, 72, 0.35);
+  border-top: 2px solid #e8b048;
+  height: 0.45rem;
+}
+
+.lps-legend i[data-k="max"] {
+  background: transparent;
+  border-top: 2px solid #d8d8d8;
+  height: 0;
+  width: 0.7rem;
+  vertical-align: 3px;
+}
+
+.lps-legend i[data-k="lim"] {
+  background: transparent;
+  border-top: 2px dashed #8cbeff;
+  height: 0;
+  width: 0.7rem;
+  vertical-align: 3px;
 }
 
 .lps-hud {

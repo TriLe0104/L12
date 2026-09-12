@@ -11,13 +11,63 @@ function barPct(kw: number, tdp: number) {
   return Math.max(0, Math.min(100, (kw / tdp) * 100));
 }
 
-/** Actual usage as a percent of control-loop max kW. minKw is the allocation floor, not 0%. */
+/** Actual usage as a percent of control-loop max kW. */
 function usageInLoop(consumed: number, _minKw: number, maxKw: number, fallbackPct?: number) {
   if (fallbackPct != null && Number.isFinite(fallbackPct)) {
     return Math.max(0, Math.min(100, fallbackPct));
   }
   if (!(maxKw > 0)) return 0;
   return Math.max(0, Math.min(100, (consumed / maxKw) * 100));
+}
+
+function limPct(kw: number, maxKw: number) {
+  if (!(maxKw > 0)) return 0;
+  return Math.max(0, Math.min(100, (kw / maxKw) * 100));
+}
+
+function RackLimiter({
+  consumed,
+  allocated,
+  minKw,
+  maxKw,
+  usagePct,
+  extra,
+  denied,
+  label,
+}: {
+  consumed: number;
+  allocated: number;
+  minKw: number;
+  maxKw: number;
+  usagePct?: number;
+  extra?: boolean;
+  denied?: boolean;
+  label: string;
+}) {
+  if (denied) {
+    return <span className="lps-heat-cell" data-k="deny" title={`${label} · no budget`} />;
+  }
+  const used = usageInLoop(consumed, minKw, maxKw, usagePct);
+  const minP = limPct(minKw, maxKw);
+  const limP = limPct(allocated, maxKw);
+  const atMin = consumed <= minKw + 1.5;
+  const atMax = consumed >= maxKw - 1.5;
+  return (
+    <span
+      className="lps-heat-cell"
+      data-k={extra ? "extra" : "on"}
+      data-lim={atMax ? "max" : atMin ? "min" : "mid"}
+      title={`${label} · ${Math.round(consumed)} kW used · ${Math.round(allocated)} kW limit · [${Math.round(minKw)}–${Math.round(maxKw)}] kW`}
+    >
+      {minP > 2 ? <i data-k="floor" style={{ height: `${minP}%` }} /> : null}
+      <i data-k="c" style={{ height: `${used}%` }} />
+      {minP > 2 ? <i data-k="min" style={{ bottom: `${minP}%` }} /> : null}
+      {limP > 2 && Math.abs(limP - minP) > 3 && Math.abs(limP - 100) > 3 ? (
+        <i data-k="lim" style={{ bottom: `${limP}%` }} />
+      ) : null}
+      <i data-k="max" />
+    </span>
+  );
 }
 
 function Stack({
@@ -186,14 +236,17 @@ function SummaryBars({
         {pool.map((r) => {
           const lo = r.min_kw ?? minKw;
           const hi = r.max_kw ?? maxKw;
-          const pct = usageInLoop(r.consumed_kw, lo, hi, r.usage_pct);
           return (
-            <span
+            <RackLimiter
               key={r.id}
-              title={`${r.label} · ${Math.round(r.consumed_kw)} kW · ${Math.round(pct)}% of [${Math.round(lo)}–${Math.round(hi)}] kW`}
-            >
-              <i data-k="c" style={{ height: `${pct}%` }} />
-            </span>
+              label={r.label}
+              consumed={r.consumed_kw}
+              allocated={r.allocated_kw}
+              minKw={lo}
+              maxKw={hi}
+              usagePct={r.usage_pct}
+              extra={r.extra}
+            />
           );
         })}
         <em>{pool.length} rack{pool.length === 1 ? "" : "s"}</em>
@@ -210,25 +263,20 @@ function SummaryBars({
 function Heat({ racks, minKw, maxKw }: { racks: PowerRack[]; minKw: number; maxKw: number }) {
   const on = racks.filter((r) => r.power_state !== "off");
   return (
-    <div className="lps-heat" aria-label="Rack usage in the min–max band">
-      {on.map((r) => {
-        const hi = maxKw || r.max_kw || r.nameplate_kw || 120;
-        const lo = minKw || r.min_kw || 0;
-        if (r.denied || r.allocated_kw <= 0) {
-          return <span key={r.id} className="lps-heat-cell" data-k="deny" title={`${r.label} · no budget`} />;
-        }
-        const pct = usageInLoop(r.consumed_kw, lo, hi, r.usage_pct);
-        return (
-          <span
-            key={r.id}
-            className="lps-heat-cell"
-            data-k={r.extra ? "extra" : "on"}
-            title={`${r.label} · ${Math.round(r.consumed_kw)} kW · ${Math.round(pct)}% of [${Math.round(lo)}–${Math.round(hi)}] kW`}
-          >
-            <i style={{ height: `${pct}%` }} data-k="c" />
-          </span>
-        );
-      })}
+    <div className="lps-heat" aria-label="Rack usage in the min–max limiter band">
+      {on.map((r) => (
+        <RackLimiter
+          key={r.id}
+          label={r.label}
+          consumed={r.consumed_kw}
+          allocated={r.allocated_kw}
+          minKw={minKw || r.min_kw || 0}
+          maxKw={maxKw || r.max_kw || r.nameplate_kw || 120}
+          usagePct={r.usage_pct}
+          extra={r.extra}
+          denied={r.denied || r.allocated_kw <= 0}
+        />
+      ))}
     </div>
   );
 }
@@ -573,9 +621,10 @@ export function PowerLimiterPanel({
         </p>
         <Heat racks={(data.racks ?? []).filter((r) => r.enabled)} minKw={minKw} maxKw={maxKw} />
         <p className="lps-legend">
-          <i data-k="c" /> Usage in [min–max]
-          <i data-k="u" /> Available
-          <i data-k="f" /> Room to max
+          <i data-k="c" /> Usage
+          <i data-k="min" /> Min
+          <i data-k="max" /> Max
+          <i data-k="lim" /> Limit
         </p>
       </aside>
     </section>
