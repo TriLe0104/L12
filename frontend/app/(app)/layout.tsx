@@ -32,6 +32,11 @@ const IconProv = () => (
     <path d="M5 17.5h14v3H5z" fill="currentColor" />
   </svg>
 );
+const IconLps = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M13 2 4 14h7l-1 8 10-14h-7z" fill="currentColor" />
+  </svg>
+);
 const IconTest = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M9 3h6v2l-1.2 2.2v5.3L18 19.5H6l4.2-7V7.2L9 5z" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -46,6 +51,7 @@ const IconUser = () => (
 
 const navFor = (user: User | null) => [
   { href: "/cluster", label: "Cluster", icon: <IconCluster /> },
+  { href: "/maxlps", label: "MaxLPS", icon: <IconLps /> },
   { href: "/network", label: "Network", icon: <IconNet /> },
   { href: "/provision", label: "Provision", icon: <IconProv /> },
   { href: "/testing", label: "Testing", icon: <IconTest /> },

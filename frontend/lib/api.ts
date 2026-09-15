@@ -130,6 +130,13 @@ export const api = {
     ),
   campus: () => request<Campus>("/api/cluster/campus"),
   clusterPower: () => request<import("./cluster").PowerLimiter>("/api/cluster/power"),
+  maxlps: (params: { top?: number; rack_id?: string | null } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.top) qs.set("top", String(params.top));
+    if (params.rack_id) qs.set("rack_id", params.rack_id);
+    const q = qs.toString();
+    return request<import("./cluster").MaxLpsView>(`/api/cluster/maxlps${q ? `?${q}` : ""}`);
+  },
   patchClusterPower: (payload: {
     mode?: string;
     budget_kw?: number;

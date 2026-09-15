@@ -1,0 +1,382 @@
+.maxlps-page {
+  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 1rem 0.85rem;
+  background: #070707;
+  color: #f5f5f5;
+  overflow: hidden;
+}
+
+.maxlps-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.maxlps-kicker {
+  margin: 0;
+  font-size: 0.52rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+}
+
+.maxlps-head h1 {
+  margin: 0.08rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.maxlps-head p {
+  margin: 0.12rem 0 0;
+  color: #8a8a8a;
+  font-size: 0.68rem;
+}
+
+.maxlps-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.maxlps-stats article {
+  padding: 0.45rem 0.55rem;
+  background: #101010;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.maxlps-stats span {
+  display: block;
+  font-size: 0.5rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7a7a7a;
+}
+
+.maxlps-stats b {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.maxlps-stats b em {
+  font-style: normal;
+  color: #8a8a8a;
+  font-size: 0.72em;
+}
+
+.maxlps-stats small {
+  display: block;
+  margin-top: 0.08rem;
+  color: #6e6e6e;
+  font-size: 0.58rem;
+}
+
+.maxlps-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr) minmax(15rem, 18rem);
+  gap: 0.45rem;
+}
+
+.maxlps-shelves,
+.maxlps-gpus,
+.maxlps-loop {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #101010;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.4rem 0.5rem 0.45rem;
+}
+
+.maxlps-shelves header,
+.maxlps-gpus header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+}
+
+.maxlps-shelves h2,
+.maxlps-gpus h2,
+.maxlps-loop h2 {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c4c4c4;
+}
+
+.maxlps-shelves p,
+.maxlps-gpus p {
+  margin: 0;
+  color: #7a7a7a;
+  font-size: 0.58rem;
+}
+
+.maxlps-clear {
+  margin-left: auto;
+  height: 1.3rem;
+  padding: 0 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #161616;
+  color: #c8c8c8;
+  font: inherit;
+  font-size: 0.58rem;
+  cursor: pointer;
+}
+
+.maxlps-shelf-list,
+.maxlps-gpu-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.maxlps-shelf {
+  display: grid;
+  grid-template-columns: 3.6rem minmax(0, 1fr) 3.4rem;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  height: 1.45rem;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  background: #0c0c0c;
+  color: #d0d0d0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.maxlps-shelf:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.maxlps-shelf[data-active="true"] {
+  border-color: #e10600;
+  background: #160a0a;
+}
+
+.maxlps-shelf[data-hot="true"] .maxlps-shelf-id {
+  color: #e10600;
+}
+
+.maxlps-shelf[data-off="true"] {
+  opacity: 0.4;
+}
+
+.maxlps-shelf-id {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.maxlps-shelf-kw {
+  text-align: right;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: #b0b0b0;
+}
+
+.maxlps-shelf-bar {
+  position: relative;
+  height: 0.42rem;
+  background: #1a1a1a;
+}
+
+.maxlps-shelf-bar i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.maxlps-shelf-bar i[data-k="shelf"] {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.maxlps-shelf-bar i[data-k="gpu"] {
+  background: #3da35a;
+  z-index: 1;
+}
+
+.maxlps-gpu-cols,
+.maxlps-gpu {
+  display: grid;
+  grid-template-columns: 2.1rem 4.2rem 3.6rem 2.4rem 4.2rem 4.2rem minmax(6rem, 1fr);
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.maxlps-gpu-cols {
+  margin-top: 0.3rem;
+  padding: 0 0.35rem;
+  color: #6a6a6a;
+  font-size: 0.48rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.maxlps-gpu {
+  height: 1.7rem;
+  width: 100%;
+  padding: 0 0.35rem;
+  border: 0;
+  background: #0c0c0c;
+  color: #e8e8e8;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transform: translateZ(0);
+}
+
+.maxlps-gpu:hover {
+  background: #141414;
+}
+
+.maxlps-gpu[data-tone="max"] .maxlps-w {
+  color: #e10600;
+}
+
+.maxlps-gpu[data-tone="lim"] .maxlps-w {
+  color: #e8b048;
+}
+
+.maxlps-gpu[data-tone="min"] .maxlps-w {
+  color: #c4a35a;
+}
+
+.maxlps-rank,
+.maxlps-w,
+.maxlps-lim,
+.maxlps-node,
+.maxlps-rack,
+.maxlps-gid {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.maxlps-rank {
+  color: #7a7a7a;
+}
+
+.maxlps-gid {
+  letter-spacing: 0.04em;
+}
+
+.maxlps-rack,
+.maxlps-node,
+.maxlps-lim {
+  color: #9a9a9a;
+}
+
+.maxlps-meter {
+  position: relative;
+  height: 0.48rem;
+  background: #181818;
+}
+
+.maxlps-meter i[data-k="floor"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(232, 176, 72, 0.18);
+}
+
+.maxlps-meter i[data-k="used"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: #3da35a;
+  z-index: 1;
+}
+
+.maxlps-gpu[data-tone="max"] .maxlps-meter i[data-k="used"] {
+  background: #e10600;
+}
+
+.maxlps-gpu[data-tone="lim"] .maxlps-meter i[data-k="used"] {
+  background: #c4a35a;
+}
+
+.maxlps-meter i[data-k="lim"] {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 0;
+  border-left: 1px dashed rgba(140, 190, 255, 0.9);
+  z-index: 2;
+}
+
+.maxlps-meter i[data-k="max"] {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.maxlps-detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+}
+
+.maxlps-detail dt {
+  font-size: 0.48rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7a7a7a;
+}
+
+.maxlps-detail dd {
+  margin: 0.05rem 0 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.maxlps-hint {
+  margin: 0.55rem 0 0;
+  color: #7a7a7a;
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+.maxlps-loop .lps-policy {
+  margin-top: 0.2rem;
+}
+
+@media (max-width: 1100px) {
+  .maxlps-grid {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .maxlps-shelves,
+  .maxlps-gpus,
+  .maxlps-loop {
+    min-height: 16rem;
+  }
+
+  .maxlps-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

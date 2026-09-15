@@ -135,6 +135,86 @@ export function formatKw(kw: number): string {
   return `${kw.toFixed(0)} kW`;
 }
 
+export function formatW(w: number): string {
+  if (w >= 1000) return `${(w / 1000).toFixed(2)} kW`;
+  return `${Math.round(w)} W`;
+}
+
+export interface MaxLpsTopology {
+  model: string;
+  racks: number;
+  nodes_per_rack: number;
+  gpus_per_node: number;
+  gpus_per_rack: number;
+  gpu_tdp_w: number;
+  gpu_idle_w: number;
+  gpu_count: number;
+  node_count: number;
+}
+
+export interface MaxLpsGpu {
+  id: string;
+  rank: number;
+  rack_id: string;
+  rack_label: string;
+  hall_id: string;
+  node: number;
+  gpu: number;
+  watts: number;
+  setpoint_w: number;
+  tdp_w: number;
+  min_w: number;
+  pct_limit: number;
+  pct_tdp: number;
+  hot: boolean;
+  enabled: boolean;
+}
+
+export interface MaxLpsShelf {
+  id: string;
+  label: string;
+  name: string;
+  hall_id: string;
+  power_state: string;
+  enabled: boolean;
+  denied: boolean;
+  hot: boolean;
+  extra: boolean;
+  shelf_kw: number;
+  gpu_kw: number;
+  overhead_kw: number;
+  allocated_kw: number;
+  consumed_kw: number;
+  setpoint_w: number;
+  gpus_at_cap: number;
+}
+
+export interface MaxLpsView {
+  topology: MaxLpsTopology;
+  mode: string;
+  tick: number;
+  last_event: string;
+  min_rack_kw: number;
+  max_rack_kw: number;
+  total_budget_kw?: number;
+  envelope_kw?: number;
+  threshold_pct?: number;
+  racks_static_max?: number;
+  racks_lps_max?: number;
+  racks_lps_gain?: number;
+  filter_rack_id?: string | null;
+  totals: {
+    shelf_kw: number;
+    gpu_kw: number;
+    hottest_w: number;
+    gpus_at_cap: number;
+    gpus_listed: number;
+    gpus_total: number;
+  };
+  racks: MaxLpsShelf[];
+  gpus: MaxLpsGpu[];
+}
+
 export interface ClusterWorkload {
   id: string;
   name: string;

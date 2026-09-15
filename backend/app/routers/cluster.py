@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from ..db import get_db
 from ..fabric import live_traffic, build_fabric
 from ..models import DataHall, Device, Rack, Role, User, Workload, has_rank
-from .. import power_limit
+from .. import gpu_power, power_limit
 from ..schemas import (
     CampusOut,
     ClusterOverview,
@@ -73,8 +73,8 @@ def _occupied(db: Session, hall_id: str, x: int, y: int, ignore_id: str | None =
 
 
 RACK_TDP_KW = 120.0  # GB300 liquid-cooled rack, demo nameplate
-GPUS_PER_RACK = 72
-NODES_PER_RACK = 4
+GPUS_PER_RACK = gpu_power.GPUS_PER_RACK
+NODES_PER_RACK = gpu_power.NODES_PER_RACK
 CLUSTER_NAME = "Firmus"
 
 
@@ -403,6 +403,18 @@ def _running_workloads(db: Session) -> list[Workload]:
 def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
     return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
+
+
+@router.get("/maxlps")
+def maxlps_view(
+    top: int = Query(default=80, ge=8, le=240),
+    rack_id: str | None = Query(default=None),
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+    snap = power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
+    return gpu_power.snapshot(snap, top=top, rack_id=rack_id)
 
 
 @router.patch("/power")

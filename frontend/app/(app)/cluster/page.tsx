@@ -516,7 +516,7 @@ export default function ClusterPage() {
               </div>
               <strong>{formatKw(hudTelemetry.power_kw)}</strong>
               <span className="zoom-hud-sub">
-                {hudTelemetry.racks_on}/{hudTelemetry.racks_total} racks · {(hudTelemetry.racks_total * 4).toLocaleString()} nodes
+                {hudTelemetry.racks_on}/{hudTelemetry.racks_total} racks · {(hudTelemetry.racks_total * 18).toLocaleString()} nodes
               </span>
               <dl>
                 <div>
@@ -534,7 +534,7 @@ export default function ClusterPage() {
               </dl>
               <em className="zoom-hud-hint">
                 {zoom.level === "cluster"
-                  ? "Click a hall or a switch · 16×4 GB300"
+                  ? "Click a hall or a switch · 18 nodes · 4 GB300"
                   : zoom.level === "hall"
                     ? "Click a leaf/spine for ports · Ctrl+click racks"
                     : "Click switches for traffic · Ctrl+click racks"}
@@ -614,7 +614,7 @@ export default function ClusterPage() {
               </header>
               <div className="rack-panel-title">
                 <strong>{overviewHall.name}</strong>
-                <span>{overviewHall.racks.length} racks · 16×4 GB300</span>
+                <span>{overviewHall.racks.length} racks · 18 nodes · 4 GB300</span>
               </div>
               {overviewHall.telemetry && (
                 <div className="rack-usage">

@@ -276,8 +276,8 @@ export function OverviewDash() {
 
   const racks = data.size.racks;
   const racksOn = data.size.racks_on ?? data.nodes.total - data.nodes.off;
-  const compute = data.size.compute_nodes ?? racks * 4;
-  const computeOn = data.size.compute_on ?? (racksOn * 4);
+  const compute = data.size.compute_nodes ?? racks * 18;
+  const computeOn = data.size.compute_on ?? (racksOn * 18);
   const switches = data.size.switches ?? (data.size.spines ?? 8) + (data.size.leaves ?? 0);
 
   return (
