@@ -6,14 +6,14 @@ import { PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
 import { api } from "@/lib/api";
 import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView } from "@/lib/cluster";
 import { formatKw, formatW } from "@/lib/cluster";
-import { captureRects, playFlip } from "@/lib/flip";
+import { captureRects, playRankFlip } from "@/lib/flip";
 
 import "../cluster/cluster.css";
 import "./maxlps.css";
 
 const TOP = 80;
-const POLL_MS = 1100;
-const FLIP_MS = 620;
+const RANK_MS = 10_000;
+const FLIP_MS = 980;
 
 function barTone(gpu: MaxLpsGpu) {
   if (!gpu.enabled) return "off";
@@ -30,16 +30,27 @@ export default function MaxLpsPage() {
   const [rackId, setRackId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const gpuListRef = useRef<HTMLDivElement>(null);
-  const rackListRef = useRef<HTMLDivElement>(null);
   const gpuFlip = useRef<ReturnType<typeof captureRects> | null>(null);
-  const rackFlip = useRef<ReturnType<typeof captureRects> | null>(null);
+  const prevRank = useRef<Map<string, number>>(new Map());
+  const [eta, setEta] = useState(RANK_MS / 1000);
+  const [deltas, setDeltas] = useState<Record<string, number | "new">>({});
 
   const load = useCallback(async () => {
     gpuFlip.current = captureRects(gpuListRef.current);
-    rackFlip.current = captureRects(rackListRef.current);
     try {
       const next = await api.maxlps({ top: TOP, rack_id: rackId });
+      const firstBoard = prevRank.current.size === 0;
+      const nextDelta: Record<string, number | "new"> = {};
+      for (const g of next.gpus) {
+        const was = prevRank.current.get(g.id);
+        if (firstBoard) nextDelta[g.id] = 0;
+        else if (was == null) nextDelta[g.id] = "new";
+        else nextDelta[g.id] = was - g.rank;
+      }
+      prevRank.current = new Map(next.gpus.map((g) => [g.id, g.rank]));
+      setDeltas(nextDelta);
       setView(next);
+      setEta(RANK_MS / 1000);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "MaxLPS failed");
@@ -48,18 +59,21 @@ export default function MaxLpsPage() {
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), POLL_MS);
+    const id = window.setInterval(() => void load(), RANK_MS);
     return () => window.clearInterval(id);
   }, [load]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setEta((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   useLayoutEffect(() => {
     if (gpuFlip.current) {
-      playFlip(gpuListRef.current, gpuFlip.current, { duration: FLIP_MS });
+      playRankFlip(gpuListRef.current, gpuFlip.current, { duration: FLIP_MS, stagger: 18 });
       gpuFlip.current = null;
-    }
-    if (rackFlip.current) {
-      playFlip(rackListRef.current, rackFlip.current, { duration: FLIP_MS });
-      rackFlip.current = null;
     }
   }, [view]);
 
@@ -117,10 +131,14 @@ export default function MaxLpsPage() {
           <b>{formatKw(totals?.gpu_kw ?? 0)}</b>
           <small>Sum of GB300 readings</small>
         </article>
-        <article>
-          <span>Hottest GPU</span>
-          <b>{formatW(totals?.hottest_w ?? 0)}</b>
-          <small>of {formatW(topo?.gpu_tdp_w ?? 1400)} TDP</small>
+        <article data-lead="true">
+          <span>Most power</span>
+          <b>{formatW(view?.gpus[0]?.watts ?? totals?.hottest_w ?? 0)}</b>
+          <small>
+            {view?.gpus[0]
+              ? `${view.gpus[0].rack_label} · n${String(view.gpus[0].node).padStart(2, "0")}·g${view.gpus[0].gpu}`
+              : `of ${formatW(topo?.gpu_tdp_w ?? 1400)} TDP`}
+          </small>
         </article>
         <article>
           <span>At GPU limit</span>
@@ -148,7 +166,7 @@ export default function MaxLpsPage() {
               </button>
             ) : null}
           </header>
-          <div className="maxlps-shelf-list" ref={rackListRef}>
+          <div className="maxlps-shelf-list">
             {(view?.racks ?? []).map((r) => (
               <ShelfRow key={r.id} rack={r} active={r.id === rackId} onSelect={() => setRackId(r.id === rackId ? null : r.id)} />
             ))}
@@ -160,15 +178,15 @@ export default function MaxLpsPage() {
             <h2>
               {rackId && selected
                 ? `${selected.label} · ${topo?.gpus_per_rack ?? 72} GB300`
-                : `Hottest GPUs · top ${totals?.gpus_listed ?? TOP}`}
+                : `Power ranking · top ${totals?.gpus_listed ?? TOP}`}
             </h2>
             <p>
-              Sorted by watts · GPU limit is rack allocation / {topo?.gpus_per_rack ?? 72}
-              {view?.last_event ? ` · ${view.last_event}` : ""}
+              Highest wattage first · reshuffle in {eta}s · limit = rack allocation / {topo?.gpus_per_rack ?? 72}
             </p>
           </header>
           <div className="maxlps-gpu-cols" aria-hidden>
             <span>#</span>
+            <span>Δ</span>
             <span>GPU</span>
             <span>Rack</span>
             <span>Node</span>
@@ -178,7 +196,7 @@ export default function MaxLpsPage() {
           </div>
           <div className="maxlps-gpu-list" ref={gpuListRef}>
             {(view?.gpus ?? []).map((g) => (
-              <GpuRow key={g.id} gpu={g} onRack={() => setRackId(g.rack_id)} />
+              <GpuRow key={g.id} gpu={g} delta={deltas[g.id]} onRack={() => setRackId(g.rack_id)} />
             ))}
           </div>
         </section>
@@ -260,14 +278,45 @@ function ShelfRow({
   );
 }
 
-function GpuRow({ gpu, onRack }: { gpu: MaxLpsGpu; onRack: () => void }) {
+function GpuRow({
+  gpu,
+  delta,
+  onRack,
+}: {
+  gpu: MaxLpsGpu;
+  delta?: number | "new";
+  onRack: () => void;
+}) {
   const tone = barTone(gpu);
   const tdpPct = Math.max(0, Math.min(100, gpu.pct_tdp));
   const limPct = gpu.tdp_w > 0 ? Math.max(0, Math.min(100, (gpu.setpoint_w / gpu.tdp_w) * 100)) : 0;
   const minPct = gpu.tdp_w > 0 ? Math.max(0, Math.min(100, (gpu.min_w / gpu.tdp_w) * 100)) : 0;
+  const place = gpu.rank <= 3 ? String(gpu.rank) : undefined;
+  let deltaLabel = "–";
+  let deltaDir: "up" | "down" | "new" | "flat" = "flat";
+  if (delta === "new") {
+    deltaLabel = "NEW";
+    deltaDir = "new";
+  } else if (typeof delta === "number" && delta > 0) {
+    deltaLabel = `↑${delta}`;
+    deltaDir = "up";
+  } else if (typeof delta === "number" && delta < 0) {
+    deltaLabel = `↓${Math.abs(delta)}`;
+    deltaDir = "down";
+  }
   return (
-    <button type="button" className="maxlps-gpu" data-tone={tone} data-flip-id={gpu.id} onClick={onRack}>
-      <span className="maxlps-rank">{gpu.rank}</span>
+    <button
+      type="button"
+      className="maxlps-gpu"
+      data-tone={tone}
+      data-place={place}
+      data-flip-id={gpu.id}
+      onClick={onRack}
+    >
+      <span className="maxlps-rank">{gpu.rank === 1 ? "1st" : gpu.rank === 2 ? "2nd" : gpu.rank === 3 ? "3rd" : gpu.rank}</span>
+      <span className="maxlps-delta" data-dir={deltaDir}>
+        {deltaLabel}
+      </span>
       <span className="maxlps-gid">
         n{String(gpu.node).padStart(2, "0")}·g{gpu.gpu}
       </span>

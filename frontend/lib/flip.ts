@@ -57,3 +57,56 @@ export function playFlip(
     );
   }
 }
+
+/** Leaderboard shuffle: risers slide over fallers, staggered from the top. */
+export function playRankFlip(
+  root: ParentNode | null,
+  before: RectMap,
+  { duration = 920, stagger = 16 }: { duration?: number; stagger?: number } = {},
+) {
+  if (!root || prefersReducedMotion()) return;
+
+  const els = Array.from(root.querySelectorAll<HTMLElement>(SELECTOR));
+  els.forEach((el, i) => {
+    const id = el.dataset.flipId;
+    if (!id) return;
+    const from = before.get(id);
+    if (!from) {
+      el.animate(
+        [
+          { opacity: 0, transform: "translate3d(0, 10px, 0)" },
+          { opacity: 1, transform: "translate3d(0, 0, 0)" },
+        ],
+        { duration: 420, delay: i * stagger, easing: EASE_OUT, fill: "both" },
+      );
+      return;
+    }
+
+    const to = el.getBoundingClientRect();
+    const dy = from.top - to.top;
+    if (Math.abs(dy) < 1) return;
+
+    const rose = dy > 0;
+    const travel = Math.min(1, Math.abs(dy) / 420);
+    const dur = duration + travel * 280;
+    el.style.zIndex = rose ? "3" : "1";
+    const anim = el.animate(
+      [
+        { transform: `translate3d(0, ${dy}px, 0)`, offset: 0 },
+        { transform: `translate3d(0, ${dy * 0.12}px, 0)`, offset: 0.72 },
+        { transform: "translate3d(0, 0, 0)", offset: 1 },
+      ],
+      {
+        duration: dur,
+        delay: Math.min(i, 28) * stagger,
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+        fill: "both",
+      },
+    );
+    anim.finished.then(() => {
+      if (el.style.zIndex === "3" || el.style.zIndex === "1") el.style.zIndex = "";
+    }).catch(() => {
+      el.style.zIndex = "";
+    });
+  });
+}

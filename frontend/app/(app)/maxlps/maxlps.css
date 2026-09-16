@@ -77,6 +77,14 @@
   font-size: 0.58rem;
 }
 
+.maxlps-stats article[data-lead="true"] {
+  border-color: rgba(232, 176, 72, 0.45);
+}
+
+.maxlps-stats article[data-lead="true"] b {
+  color: #e8b048;
+}
+
 .maxlps-grid {
   flex: 1;
   min-height: 0;
@@ -216,7 +224,7 @@
 .maxlps-gpu-cols,
 .maxlps-gpu {
   display: grid;
-  grid-template-columns: 2.1rem 4.2rem 3.6rem 2.4rem 4.2rem 4.2rem minmax(6rem, 1fr);
+  grid-template-columns: 2.6rem 2.4rem 4.2rem 3.6rem 2.4rem 4.2rem 4.2rem minmax(6rem, 1fr);
   gap: 0.35rem;
   align-items: center;
 }
@@ -241,6 +249,25 @@
   text-align: left;
   cursor: pointer;
   transform: translateZ(0);
+  position: relative;
+}
+
+.maxlps-gpu[data-place="1"] {
+  height: 2.15rem;
+  background: linear-gradient(90deg, rgba(232, 176, 72, 0.16), #0c0c0c 42%);
+  box-shadow: inset 3px 0 0 #e8b048;
+}
+
+.maxlps-gpu[data-place="2"] {
+  height: 1.95rem;
+  background: linear-gradient(90deg, rgba(180, 180, 190, 0.12), #0c0c0c 38%);
+  box-shadow: inset 3px 0 0 #b8b8c0;
+}
+
+.maxlps-gpu[data-place="3"] {
+  height: 1.85rem;
+  background: linear-gradient(90deg, rgba(183, 112, 58, 0.14), #0c0c0c 38%);
+  box-shadow: inset 3px 0 0 #b7703a;
 }
 
 .maxlps-gpu:hover {
@@ -271,6 +298,40 @@
 
 .maxlps-rank {
   color: #7a7a7a;
+  font-weight: 700;
+}
+
+.maxlps-gpu[data-place="1"] .maxlps-rank {
+  color: #e8b048;
+  font-size: 0.78rem;
+}
+
+.maxlps-gpu[data-place="2"] .maxlps-rank {
+  color: #c8c8d0;
+}
+
+.maxlps-gpu[data-place="3"] .maxlps-rank {
+  color: #c4844a;
+}
+
+.maxlps-delta {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: #6a6a6a;
+}
+
+.maxlps-delta[data-dir="up"] {
+  color: #4ade80;
+}
+
+.maxlps-delta[data-dir="down"] {
+  color: #e10600;
+}
+
+.maxlps-delta[data-dir="new"] {
+  color: #8cbeff;
+  font-size: 0.52rem;
 }
 
 .maxlps-gid {
