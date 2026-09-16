@@ -164,6 +164,8 @@ export interface MaxLpsGpu {
   setpoint_w: number;
   tdp_w: number;
   min_w: number;
+  max_w?: number;
+  curve?: number[];
   pct_limit: number;
   pct_tdp: number;
   hot: boolean;
@@ -212,8 +214,20 @@ export interface MaxLpsView {
     gpus_at_cap: number;
     gpus_listed: number;
     gpus_total: number;
+    cap_kw?: number;
+    allowable_kw?: number;
+    best_cap_percent?: number;
   };
-  history?: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number }[];
+  algo?: {
+    power_budget_w: number;
+    budget_grace: number;
+    gpu_power_percent: number;
+    desired_cap_percent: number;
+    max_allowable_w: number;
+    best_cap_percent: number;
+    n: number;
+  };
+  history?: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number; cap_kw?: number; allowable_kw?: number }[];
   racks: MaxLpsShelf[];
   gpus: MaxLpsGpu[];
 }

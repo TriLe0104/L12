@@ -87,12 +87,18 @@
 
 .maxlps-mix {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 11rem;
+  grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 22rem);
   gap: 0.55rem 0.7rem;
   align-items: center;
   padding: 0.4rem 0.55rem;
   background: #101010;
   border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.maxlps-algo {
+  margin: 0.28rem 0 0;
+  color: #7a7a7a;
+  font-size: 0.55rem;
 }
 
 .maxlps-mix-bar {
@@ -108,6 +114,10 @@
 
 .maxlps-mix-bar i[data-k="oh"] {
   background: #c4a35a;
+}
+
+.maxlps-mix-bar i[data-k="cap"] {
+  background: repeating-linear-gradient(-45deg, #3a5a8a, #3a5a8a 3px, #2a4060 3px, #2a4060 6px);
 }
 
 .maxlps-mix ul {
@@ -135,6 +145,10 @@
   background: #c4a35a;
 }
 
+.maxlps-mix li[data-k="cap"]::before {
+  background: #4a7ab0;
+}
+
 .maxlps-mix li[data-k="shelf"]::before {
   background: #6a6a6a;
 }
@@ -145,8 +159,8 @@
 }
 
 .maxlps-spark {
-  width: 11rem;
-  height: 2.6rem;
+  width: 100%;
+  height: 4.4rem;
   display: block;
 }
 
@@ -159,6 +173,17 @@
 
 .maxlps-spark polyline[data-k="gpu"] {
   stroke: #3da35a;
+}
+
+.maxlps-spark polyline[data-k="cap"] {
+  stroke: #8cbeff;
+  stroke-dasharray: 4 3;
+}
+
+.maxlps-spark polyline[data-k="allow"] {
+  stroke: #666;
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
 }
 
 .maxlps-spark polyline[data-k="oh"] {
@@ -307,11 +332,27 @@
   z-index: 2;
 }
 
+.maxlps-gpu-virt {
+  position: relative;
+  min-height: 100%;
+}
+
+.maxlps-gpu-abs {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.maxlps-gpu-abs[data-moved="true"] {
+  z-index: 2;
+  transition: top 0.95s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .maxlps-gpu-cols,
 .maxlps-gpu {
   display: grid;
-  grid-template-columns: 2.6rem 2.4rem 4.2rem 3.6rem 2.4rem 4.2rem 4.2rem minmax(6rem, 1fr);
-  gap: 0.35rem;
+  grid-template-columns: 2.4rem 2.1rem 3.8rem 3.2rem 3.6rem 3.6rem 5.4rem minmax(5rem, 1fr) 4.6rem;
+  gap: 0.3rem;
   align-items: center;
 }
 
@@ -325,7 +366,7 @@
 }
 
 .maxlps-gpu {
-  height: 1.7rem;
+  height: 100%;
   width: 100%;
   padding: 0 0.35rem;
   border: 0;
@@ -423,8 +464,45 @@
 
 .maxlps-rack,
 .maxlps-node,
-.maxlps-lim {
+.maxlps-lim,
+.maxlps-minmax {
   color: #9a9a9a;
+}
+
+.maxlps-minmax {
+  font-size: 0.58rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.maxlps-spark-mini {
+  width: 4.5rem;
+  height: 1.35rem;
+  display: block;
+}
+
+.maxlps-spark-mini polyline {
+  fill: none;
+  stroke: #3da35a;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+}
+
+.maxlps-spark-mini line[data-k="min"] {
+  stroke: #e8b048;
+  stroke-dasharray: 2 2;
+  stroke-width: 1;
+}
+
+.maxlps-spark-mini line[data-k="max"] {
+  stroke: #c8c8c8;
+  stroke-dasharray: 2 2;
+  stroke-width: 1;
+}
+
+.maxlps-spark-mini line[data-k="cap"] {
+  stroke: #8cbeff;
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
 }
 
 .maxlps-meter {

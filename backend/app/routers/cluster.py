@@ -407,7 +407,7 @@ def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends
 
 @router.get("/maxlps")
 def maxlps_view(
-    top: int = Query(default=80, ge=8, le=240),
+    top: int = Query(default=0, ge=0, le=30000),
     rack_id: str | None = Query(default=None),
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

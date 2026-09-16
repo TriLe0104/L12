@@ -132,7 +132,7 @@ export const api = {
   clusterPower: () => request<import("./cluster").PowerLimiter>("/api/cluster/power"),
   maxlps: (params: { top?: number; rack_id?: string | null } = {}) => {
     const qs = new URLSearchParams();
-    if (params.top) qs.set("top", String(params.top));
+    if (params.top != null) qs.set("top", String(params.top));
     if (params.rack_id) qs.set("rack_id", params.rack_id);
     const q = qs.toString();
     return request<import("./cluster").MaxLpsView>(`/api/cluster/maxlps${q ? `?${q}` : ""}`);

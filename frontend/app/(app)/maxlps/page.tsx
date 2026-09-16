@@ -1,19 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
 import { api } from "@/lib/api";
 import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView } from "@/lib/cluster";
 import { formatKw, formatW } from "@/lib/cluster";
-import { captureRects, playRankFlip } from "@/lib/flip";
 
 import "../cluster/cluster.css";
 import "./maxlps.css";
 
-const TOP = 80;
 const RANK_MS = 10_000;
-const FLIP_MS = 980;
+const ROW_H = 34;
 
 function barTone(gpu: MaxLpsGpu) {
   if (!gpu.enabled) return "off";
@@ -29,39 +27,31 @@ export default function MaxLpsPage() {
   const [error, setError] = useState<string | null>(null);
   const [rackId, setRackId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const gpuListRef = useRef<HTMLDivElement>(null);
-  const gpuFlip = useRef<ReturnType<typeof captureRects> | null>(null);
-  const movers = useRef<Set<string>>(new Set());
   const prevRank = useRef<Map<string, number>>(new Map());
   const prevWatts = useRef<Map<string, number>>(new Map());
   const [eta, setEta] = useState(RANK_MS / 1000);
   const [deltas, setDeltas] = useState<Record<string, number | "new">>({});
   const [wattDelta, setWattDelta] = useState<Record<string, number>>({});
+  const [scroll, setScroll] = useState(0);
+  const [viewH, setViewH] = useState(640);
+  const listOuter = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    gpuFlip.current = captureRects(gpuListRef.current);
     try {
-      const next = await api.maxlps({ top: TOP, rack_id: rackId });
+      const next = await api.maxlps({ top: 0, rack_id: rackId });
       const firstBoard = prevRank.current.size === 0;
       const nextDelta: Record<string, number | "new"> = {};
       const nextWatt: Record<string, number> = {};
-      const moved = new Set<string>();
       for (const g of next.gpus) {
         const was = prevRank.current.get(g.id);
         const prevW = prevWatts.current.get(g.id);
         nextWatt[g.id] = prevW == null ? 0 : Math.round(g.watts - prevW);
         if (firstBoard) nextDelta[g.id] = 0;
-        else if (was == null) {
-          nextDelta[g.id] = "new";
-          moved.add(g.id);
-        } else {
-          nextDelta[g.id] = was - g.rank;
-          if (was !== g.rank) moved.add(g.id);
-        }
+        else if (was == null) nextDelta[g.id] = "new";
+        else nextDelta[g.id] = was - g.rank;
       }
       prevRank.current = new Map(next.gpus.map((g) => [g.id, g.rank]));
       prevWatts.current = new Map(next.gpus.map((g) => [g.id, g.watts]));
-      movers.current = moved;
       setDeltas(nextDelta);
       setWattDelta(nextWatt);
       setView(next);
@@ -85,15 +75,13 @@ export default function MaxLpsPage() {
     return () => window.clearInterval(id);
   }, []);
 
-  useLayoutEffect(() => {
-    if (gpuFlip.current) {
-      playRankFlip(gpuListRef.current, gpuFlip.current, {
-        duration: FLIP_MS,
-        stagger: 28,
-        only: movers.current,
-      });
-      gpuFlip.current = null;
-    }
+  useEffect(() => {
+    const el = listOuter.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setViewH(el.clientHeight));
+    ro.observe(el);
+    setViewH(el.clientHeight);
+    return () => ro.disconnect();
   }, [view]);
 
   async function setMode(mode: "static" | "dynamic", reset = false) {
@@ -176,7 +164,10 @@ export default function MaxLpsPage() {
         overheadKw={totals?.overhead_kw ?? 0}
         shelfKw={totals?.shelf_kw ?? 0}
         envelopeKw={view?.envelope_kw ?? 0}
+        capKw={totals?.cap_kw ?? 0}
+        allowableKw={totals?.allowable_kw ?? 0}
         history={view?.history ?? []}
+        algo={view?.algo}
       />
 
       <div className="maxlps-grid">
@@ -204,10 +195,10 @@ export default function MaxLpsPage() {
             <h2>
               {rackId && selected
                 ? `${selected.label} · ${topo?.gpus_per_rack ?? 72} GB300`
-                : `Power ranking · top ${totals?.gpus_listed ?? TOP}`}
+                : `Power ranking · ${(totals?.gpus_listed ?? 0).toLocaleString()} / ${(totals?.gpus_total ?? 0).toLocaleString()} GPU`}
             </h2>
             <p>
-              Highest wattage first · next rank in {eta}s · limit follows usage (idle GPUs drop to {formatW(topo?.gpu_idle_w ?? 180)})
+              All GPUs · highest watts first · next rank in {eta}s · cap = usage / max({view?.algo?.desired_cap_percent ?? 80}%, budget fit)
             </p>
           </header>
           <div className="maxlps-gpu-cols" aria-hidden>
@@ -215,21 +206,25 @@ export default function MaxLpsPage() {
             <span>Δ</span>
             <span>GPU</span>
             <span>Rack</span>
-            <span>Node</span>
-            <span>Reading</span>
-            <span>Limit</span>
-            <span>vs TDP</span>
+            <span>W</span>
+            <span>Cap</span>
+            <span>Min–max</span>
+            <span>Range</span>
+            <span>Curve</span>
           </div>
-          <div className="maxlps-gpu-list" ref={gpuListRef}>
-            {(view?.gpus ?? []).map((g) => (
-              <GpuRow
-                key={g.id}
-                gpu={g}
-                delta={deltas[g.id]}
-                wattDelta={wattDelta[g.id] ?? 0}
-                onRack={() => setRackId(g.rack_id)}
-              />
-            ))}
+          <div
+            className="maxlps-gpu-list"
+            ref={listOuter}
+            onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
+          >
+            <VirtualGpus
+              gpus={view?.gpus ?? []}
+              scroll={scroll}
+              viewH={viewH}
+              deltas={deltas}
+              wattDelta={wattDelta}
+              onRack={(id) => setRackId(id)}
+            />
           </div>
         </section>
 
@@ -272,7 +267,11 @@ export default function MaxLpsPage() {
               </div>
             </dl>
           ) : (
-            <p className="maxlps-hint">Click a shelf to pin one rack’s 72 GPUs. Limits move with MaxLPS.</p>
+            <p className="maxlps-hint">
+              {view?.algo
+                ? `N=${view.algo.n.toLocaleString()} · budget ${formatW(view.algo.power_budget_w)} × ${view.algo.budget_grace}% grace × ${view.algo.gpu_power_percent}% GPU · allowable ${formatW(view.algo.max_allowable_w)} · best cap% ${view.algo.best_cap_percent}`
+                : "Click a shelf to pin one rack’s 72 GPUs."}
+            </p>
           )}
         </aside>
       </div>
@@ -280,63 +279,130 @@ export default function MaxLpsPage() {
   );
 }
 
+function logApproach(min: number, current: number, n = 12) {
+  const pts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const u = n === 1 ? 1 : i / (n - 1);
+    const logu = Math.log1p(9 * u) / Math.log(10);
+    pts.push(min + (current - min) * logu);
+  }
+  return pts;
+}
+
+function logY(v: number, vmin: number, vmax: number, h: number, pad: number) {
+  const a = Math.log10(Math.max(v, vmin));
+  const b = Math.log10(vmin);
+  const c = Math.log10(Math.max(vmax, vmin * 10));
+  const t = (a - b) / Math.max(c - b, 1e-6);
+  return h - pad - t * (h - pad * 2);
+}
+
 function MixChart({
   gpuKw,
   overheadKw,
   shelfKw,
   envelopeKw,
+  capKw,
+  allowableKw,
   history,
+  algo,
 }: {
   gpuKw: number;
   overheadKw: number;
   shelfKw: number;
   envelopeKw: number;
-  history: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number }[];
+  capKw: number;
+  allowableKw: number;
+  history: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number; cap_kw?: number; allowable_kw?: number }[];
+  algo?: MaxLpsView["algo"];
 }) {
-  const scale = Math.max(envelopeKw, shelfKw, gpuKw + overheadKw, 1);
+  const scale = Math.max(envelopeKw, shelfKw, gpuKw + overheadKw, capKw, allowableKw, 1);
   const gpuPct = (gpuKw / scale) * 100;
   const ohPct = (overheadKw / scale) * 100;
-  const unused = Math.max(0, envelopeKw - shelfKw);
-  const w = 320;
-  const h = 56;
-  const pad = 2;
-  const maxY = Math.max(...history.map((p) => p.shelf_kw), scale, 1);
-  const pts = (key: "gpu_kw" | "overhead_kw" | "shelf_kw") => {
+  const capPct = Math.max(0, (capKw / scale) * 100 - gpuPct);
+  const unused = Math.max(0, allowableKw - capKw);
+  const w = 420;
+  const h = 72;
+  const pad = 4;
+  const ymin = 1;
+  const ymax = Math.max(...history.map((p) => Math.max(p.shelf_kw, p.cap_kw ?? 0, p.allowable_kw ?? 0)), scale, 10);
+  const pts = (key: "gpu_kw" | "overhead_kw" | "shelf_kw" | "cap_kw" | "allowable_kw") => {
     if (history.length < 2) return "";
     return history
       .map((p, i) => {
+        const raw = (p[key as keyof typeof p] as number | undefined) ?? 0;
         const x = pad + (i / Math.max(1, history.length - 1)) * (w - pad * 2);
-        const y = h - pad - (p[key] / maxY) * (h - pad * 2);
+        const y = logY(raw, ymin, ymax, h, pad);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(" ");
   };
   return (
     <section className="maxlps-mix">
-      <div className="maxlps-mix-bar" title={`GPU ${formatKw(gpuKw)} · overhead ${formatKw(overheadKw)} · shelf ${formatKw(shelfKw)}`}>
-        <i data-k="gpu" style={{ width: `${gpuPct}%` }} />
-        <i data-k="oh" style={{ width: `${ohPct}%` }} />
+      <div>
+        <div className="maxlps-mix-bar" title={`GPU ${formatKw(gpuKw)} · overhead ${formatKw(overheadKw)} · caps ${formatKw(capKw)}`}>
+          <i data-k="gpu" style={{ width: `${gpuPct}%` }} />
+          <i data-k="oh" style={{ width: `${ohPct}%` }} />
+          <i data-k="cap" style={{ width: `${Math.max(0, capPct)}%` }} />
+        </div>
+        <ul>
+          <li data-k="gpu">GPU {formatKw(gpuKw)}</li>
+          <li data-k="oh">Overhead {formatKw(overheadKw)}</li>
+          <li data-k="cap">GPU caps {formatKw(capKw)}</li>
+          <li data-k="shelf">Shelf {formatKw(shelfKw)}</li>
+          <li data-k="free">Headroom {formatKw(unused)}</li>
+        </ul>
+        {algo ? (
+          <p className="maxlps-algo">
+            cap_i = usage_i / {algo.best_cap_percent}% · allowable {formatKw(algo.max_allowable_w / 1000)} = budget × {algo.budget_grace}% × {algo.gpu_power_percent}%
+          </p>
+        ) : null}
       </div>
-      <ul>
-        <li data-k="gpu">
-          GPU {formatKw(gpuKw)}
-        </li>
-        <li data-k="oh">
-          Overhead {formatKw(overheadKw)}
-        </li>
-        <li data-k="shelf">
-          Shelf {formatKw(shelfKw)}
-        </li>
-        <li data-k="free">
-          Unused envelope {formatKw(unused)}
-        </li>
-      </ul>
-      <svg className="maxlps-spark" viewBox={`0 0 ${w} ${h}`} aria-label="GPU vs overhead over time">
+      <svg className="maxlps-spark" viewBox={`0 0 ${w} ${h}`} aria-label="Log power curve">
+        <polyline data-k="allow" points={pts("allowable_kw")} />
+        <polyline data-k="cap" points={pts("cap_kw")} />
         <polyline data-k="shelf" points={pts("shelf_kw")} />
         <polyline data-k="oh" points={pts("overhead_kw")} />
         <polyline data-k="gpu" points={pts("gpu_kw")} />
       </svg>
     </section>
+  );
+}
+
+function VirtualGpus({
+  gpus,
+  scroll,
+  viewH,
+  deltas,
+  wattDelta,
+  onRack,
+}: {
+  gpus: MaxLpsGpu[];
+  scroll: number;
+  viewH: number;
+  deltas: Record<string, number | "new">;
+  wattDelta: Record<string, number>;
+  onRack: (rackId: string) => void;
+}) {
+  const start = Math.max(0, Math.floor(scroll / ROW_H) - 6);
+  const end = Math.min(gpus.length, start + Math.ceil(viewH / ROW_H) + 12);
+  return (
+    <div className="maxlps-gpu-virt" style={{ height: Math.max(gpus.length * ROW_H, viewH) }}>
+      {gpus.slice(start, end).map((g) => {
+        const d = deltas[g.id];
+        const moved = d === "new" || (typeof d === "number" && d !== 0);
+        return (
+          <div
+            key={g.id}
+            className="maxlps-gpu-abs"
+            data-moved={moved ? "true" : undefined}
+            style={{ top: (g.rank - 1) * ROW_H, height: ROW_H }}
+          >
+            <GpuRow gpu={g} delta={d} wattDelta={wattDelta[g.id] ?? 0} onRack={() => onRack(g.rack_id)} />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -422,9 +488,11 @@ function GpuRow({
         n{String(gpu.node).padStart(2, "0")}·g{gpu.gpu}
       </span>
       <span className="maxlps-rack">{gpu.rack_label}</span>
-      <span className="maxlps-node">N{gpu.node}</span>
       <span className="maxlps-w">{formatW(gpu.watts)}</span>
       <span className="maxlps-lim">{formatW(gpu.setpoint_w)}</span>
+      <span className="maxlps-minmax">
+        {formatW(gpu.min_w)}–{formatW(gpu.max_w ?? gpu.tdp_w)}
+      </span>
       <span className="maxlps-meter" aria-hidden>
         <i data-k="floor" style={{ width: `${minPct}%` }} />
         <i data-k="used" style={{ width: `${Math.min(prevPct, tdpPct)}%` }} />
@@ -443,6 +511,39 @@ function GpuRow({
           </em>
         ) : null}
       </span>
+      <LogSpark
+        points={gpu.curve ?? logApproach(gpu.min_w, gpu.watts)}
+        min={gpu.min_w}
+        max={gpu.max_w ?? gpu.tdp_w}
+        cap={gpu.setpoint_w}
+      />
     </button>
+  );
+}
+
+function LogSpark({ points, min, max, cap }: { points: number[]; min: number; max: number; cap: number }) {
+  const w = 72;
+  const h = 22;
+  const pad = 1;
+  const lo = Math.max(1, min * 0.8);
+  const hi = Math.max(max, cap, 10);
+  if (points.length < 2) return <span className="maxlps-spark-mini" />;
+  const line = points
+    .map((v, i) => {
+      const x = pad + (i / (points.length - 1)) * (w - pad * 2);
+      const y = logY(v, lo, hi, h, pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const capY = logY(cap, lo, hi, h, pad);
+  const minY = logY(min, lo, hi, h, pad);
+  const maxY = logY(max, lo, hi, h, pad);
+  return (
+    <svg className="maxlps-spark-mini" viewBox={`0 0 ${w} ${h}`} aria-hidden>
+      <line data-k="max" x1="0" x2={w} y1={maxY} y2={maxY} />
+      <line data-k="min" x1="0" x2={w} y1={minY} y2={minY} />
+      <line data-k="cap" x1="0" x2={w} y1={capY} y2={capY} />
+      <polyline points={line} />
+    </svg>
   );
 }
