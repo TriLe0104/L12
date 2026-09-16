@@ -253,19 +253,16 @@
 }
 
 .maxlps-gpu[data-place="1"] {
-  height: 2.15rem;
   background: linear-gradient(90deg, rgba(232, 176, 72, 0.16), #0c0c0c 42%);
   box-shadow: inset 3px 0 0 #e8b048;
 }
 
 .maxlps-gpu[data-place="2"] {
-  height: 1.95rem;
   background: linear-gradient(90deg, rgba(180, 180, 190, 0.12), #0c0c0c 38%);
   box-shadow: inset 3px 0 0 #b8b8c0;
 }
 
 .maxlps-gpu[data-place="3"] {
-  height: 1.85rem;
   background: linear-gradient(90deg, rgba(183, 112, 58, 0.14), #0c0c0c 38%);
   box-shadow: inset 3px 0 0 #b7703a;
 }
@@ -346,8 +343,9 @@
 
 .maxlps-meter {
   position: relative;
-  height: 0.48rem;
+  height: 0.55rem;
   background: #181818;
+  overflow: visible;
 }
 
 .maxlps-meter i[data-k="floor"] {
@@ -355,7 +353,7 @@
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(232, 176, 72, 0.18);
+  background: rgba(232, 176, 72, 0.14);
 }
 
 .maxlps-meter i[data-k="used"] {
@@ -367,6 +365,22 @@
   z-index: 1;
 }
 
+.maxlps-meter i[data-k="gain"],
+.maxlps-meter i[data-k="loss"] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+}
+
+.maxlps-meter i[data-k="gain"] {
+  background: #4ade80;
+}
+
+.maxlps-meter i[data-k="loss"] {
+  background: #e10600;
+}
+
 .maxlps-gpu[data-tone="max"] .maxlps-meter i[data-k="used"] {
   background: #e10600;
 }
@@ -375,22 +389,52 @@
   background: #c4a35a;
 }
 
-.maxlps-meter i[data-k="lim"] {
+.maxlps-meter i[data-k="min"],
+.maxlps-meter i[data-k="lim"],
+.maxlps-meter i[data-k="max"] {
   position: absolute;
-  top: -1px;
-  bottom: -1px;
+  top: -3px;
+  bottom: -3px;
   width: 0;
-  border-left: 1px dashed rgba(140, 190, 255, 0.9);
-  z-index: 2;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.maxlps-meter i[data-k="min"] {
+  border-left: 1px dotted #e8b048;
+}
+
+.maxlps-meter i[data-k="lim"] {
+  border-left: 1px dashed rgba(140, 190, 255, 0.95);
 }
 
 .maxlps-meter i[data-k="max"] {
-  position: absolute;
   right: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  left: auto;
+  border-right: 1px dotted #d8d8d8;
+}
+
+.maxlps-meter em {
+  position: absolute;
+  right: -0.15rem;
+  top: 50%;
+  transform: translate(100%, -50%);
+  margin-left: 0.2rem;
+  font-style: normal;
+  font-size: 0.52rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  z-index: 4;
+  padding-left: 0.25rem;
+}
+
+.maxlps-meter em[data-off="up"] {
+  color: #4ade80;
+}
+
+.maxlps-meter em[data-off="down"] {
+  color: #e10600;
 }
 
 .maxlps-detail {

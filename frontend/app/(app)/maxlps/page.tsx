@@ -31,9 +31,12 @@ export default function MaxLpsPage() {
   const [pending, setPending] = useState(false);
   const gpuListRef = useRef<HTMLDivElement>(null);
   const gpuFlip = useRef<ReturnType<typeof captureRects> | null>(null);
+  const movers = useRef<Set<string>>(new Set());
   const prevRank = useRef<Map<string, number>>(new Map());
+  const prevWatts = useRef<Map<string, number>>(new Map());
   const [eta, setEta] = useState(RANK_MS / 1000);
   const [deltas, setDeltas] = useState<Record<string, number | "new">>({});
+  const [wattDelta, setWattDelta] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     gpuFlip.current = captureRects(gpuListRef.current);
@@ -41,14 +44,26 @@ export default function MaxLpsPage() {
       const next = await api.maxlps({ top: TOP, rack_id: rackId });
       const firstBoard = prevRank.current.size === 0;
       const nextDelta: Record<string, number | "new"> = {};
+      const nextWatt: Record<string, number> = {};
+      const moved = new Set<string>();
       for (const g of next.gpus) {
         const was = prevRank.current.get(g.id);
+        const prevW = prevWatts.current.get(g.id);
+        nextWatt[g.id] = prevW == null ? 0 : Math.round(g.watts - prevW);
         if (firstBoard) nextDelta[g.id] = 0;
-        else if (was == null) nextDelta[g.id] = "new";
-        else nextDelta[g.id] = was - g.rank;
+        else if (was == null) {
+          nextDelta[g.id] = "new";
+          moved.add(g.id);
+        } else {
+          nextDelta[g.id] = was - g.rank;
+          if (was !== g.rank) moved.add(g.id);
+        }
       }
       prevRank.current = new Map(next.gpus.map((g) => [g.id, g.rank]));
+      prevWatts.current = new Map(next.gpus.map((g) => [g.id, g.watts]));
+      movers.current = moved;
       setDeltas(nextDelta);
+      setWattDelta(nextWatt);
       setView(next);
       setEta(RANK_MS / 1000);
       setError(null);
@@ -72,7 +87,11 @@ export default function MaxLpsPage() {
 
   useLayoutEffect(() => {
     if (gpuFlip.current) {
-      playRankFlip(gpuListRef.current, gpuFlip.current, { duration: FLIP_MS, stagger: 18 });
+      playRankFlip(gpuListRef.current, gpuFlip.current, {
+        duration: FLIP_MS,
+        stagger: 28,
+        only: movers.current,
+      });
       gpuFlip.current = null;
     }
   }, [view]);
@@ -167,9 +186,11 @@ export default function MaxLpsPage() {
             ) : null}
           </header>
           <div className="maxlps-shelf-list">
-            {(view?.racks ?? []).map((r) => (
-              <ShelfRow key={r.id} rack={r} active={r.id === rackId} onSelect={() => setRackId(r.id === rackId ? null : r.id)} />
-            ))}
+            {[...(view?.racks ?? [])]
+              .sort((a, b) => a.label.localeCompare(b.label))
+              .map((r) => (
+                <ShelfRow key={r.id} rack={r} active={r.id === rackId} onSelect={() => setRackId(r.id === rackId ? null : r.id)} />
+              ))}
           </div>
         </aside>
 
@@ -181,7 +202,7 @@ export default function MaxLpsPage() {
                 : `Power ranking · top ${totals?.gpus_listed ?? TOP}`}
             </h2>
             <p>
-              Highest wattage first · reshuffle in {eta}s · limit = rack allocation / {topo?.gpus_per_rack ?? 72}
+              Highest wattage first · next rank in {eta}s · only movers slide · dotted = min / max
             </p>
           </header>
           <div className="maxlps-gpu-cols" aria-hidden>
@@ -196,7 +217,13 @@ export default function MaxLpsPage() {
           </div>
           <div className="maxlps-gpu-list" ref={gpuListRef}>
             {(view?.gpus ?? []).map((g) => (
-              <GpuRow key={g.id} gpu={g} delta={deltas[g.id]} onRack={() => setRackId(g.rack_id)} />
+              <GpuRow
+                key={g.id}
+                gpu={g}
+                delta={deltas[g.id]}
+                wattDelta={wattDelta[g.id] ?? 0}
+                onRack={() => setRackId(g.rack_id)}
+              />
             ))}
           </div>
         </section>
@@ -265,7 +292,6 @@ function ShelfRow({
       data-active={active ? "true" : undefined}
       data-hot={rack.hot ? "true" : undefined}
       data-off={rack.power_state === "off" || !rack.enabled ? "true" : undefined}
-      data-flip-id={`shelf-${rack.id}`}
       onClick={onSelect}
     >
       <span className="maxlps-shelf-id">{rack.label}</span>
@@ -281,16 +307,22 @@ function ShelfRow({
 function GpuRow({
   gpu,
   delta,
+  wattDelta,
   onRack,
 }: {
   gpu: MaxLpsGpu;
   delta?: number | "new";
+  wattDelta: number;
   onRack: () => void;
 }) {
   const tone = barTone(gpu);
   const tdpPct = Math.max(0, Math.min(100, gpu.pct_tdp));
   const limPct = gpu.tdp_w > 0 ? Math.max(0, Math.min(100, (gpu.setpoint_w / gpu.tdp_w) * 100)) : 0;
   const minPct = gpu.tdp_w > 0 ? Math.max(0, Math.min(100, (gpu.min_w / gpu.tdp_w) * 100)) : 0;
+  const dPct = gpu.tdp_w > 0 ? (wattDelta / gpu.tdp_w) * 100 : 0;
+  const prevPct = Math.max(0, Math.min(100, tdpPct - dPct));
+  const gainLeft = Math.min(prevPct, tdpPct);
+  const gainWidth = Math.abs(tdpPct - prevPct);
   const place = gpu.rank <= 3 ? String(gpu.rank) : undefined;
   let deltaLabel = "–";
   let deltaDir: "up" | "down" | "new" | "flat" = "flat";
@@ -304,6 +336,8 @@ function GpuRow({
     deltaLabel = `↓${Math.abs(delta)}`;
     deltaDir = "down";
   }
+  const offLabel =
+    Math.abs(wattDelta) >= 4 ? `${wattDelta > 0 ? "+" : ""}${Math.round(wattDelta)}` : "";
   return (
     <button
       type="button"
@@ -326,9 +360,21 @@ function GpuRow({
       <span className="maxlps-lim">{formatW(gpu.setpoint_w)}</span>
       <span className="maxlps-meter" aria-hidden>
         <i data-k="floor" style={{ width: `${minPct}%` }} />
-        <i data-k="used" style={{ width: `${tdpPct}%` }} />
+        <i data-k="used" style={{ width: `${Math.min(prevPct, tdpPct)}%` }} />
+        {gainWidth > 0.4 ? (
+          <i
+            data-k={wattDelta >= 0 ? "gain" : "loss"}
+            style={{ left: `${gainLeft}%`, width: `${gainWidth}%` }}
+          />
+        ) : null}
+        <i data-k="min" style={{ left: `${minPct}%` }} />
         <i data-k="lim" style={{ left: `${limPct}%` }} />
         <i data-k="max" />
+        {offLabel ? (
+          <em data-off={wattDelta >= 0 ? "up" : "down"}>
+            {offLabel}
+          </em>
+        ) : null}
       </span>
     </button>
   );
