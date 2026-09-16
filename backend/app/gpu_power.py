@@ -28,15 +28,59 @@ def _h01(key: str) -> float:
     return int(hashlib.md5(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
 
 
-def _frac(gpu_id: str, now: float, hot: bool) -> float:
-    """Share of the per-GPU setpoint this device is drawing (0–1)."""
+HEADROOM = 0.12
+_HISTORY: list[dict[str, float]] = []
+_HISTORY_N = 36
+
+
+def _mix(gpu_id: str, now: float) -> float:
     phase = _h01(gpu_id) * math.tau
-    a = 0.5 + 0.5 * math.sin(now / 3.3 + phase)
-    b = 0.5 + 0.5 * math.sin(now / 7.6 + phase * 1.73)
-    mix = 0.72 * a + 0.28 * b
+    a = 0.5 + 0.5 * math.sin(now / 5.8 + phase)
+    b = 0.5 + 0.5 * math.sin(now / 11.4 + phase * 1.73)
+    return 0.72 * a + 0.28 * b
+
+
+def _activity(gpu_id: str, now: float, hot: bool, run_status: str) -> float:
+    """0–1 GPU load. Unused devices sit near idle so MaxLPS can reclaim their limit."""
+    mix = _mix(gpu_id, now)
+    busy_gate = _h01(gpu_id + ":busy")
     if hot:
-        return 0.55 + 0.45 * mix
-    return 0.16 + 0.74 * mix
+        return (0.86 + 0.14 * mix) if busy_gate > 0.70 else (0.02 + 0.06 * mix)
+    if run_status == "running":
+        return (0.50 + 0.38 * mix) if busy_gate > 0.55 else (0.03 + 0.10 * mix)
+    return 0.02 + 0.10 * mix
+
+
+def _allocate(
+    activities: list[float],
+    budget_w: float,
+    dynamic: bool,
+) -> tuple[list[float], list[float]]:
+    """Return (watts, setpoint_w) per GPU. Dynamic steals unused limits."""
+    n = len(activities)
+    if n <= 0:
+        return [], []
+    tdp, idle = GPU_TDP_W, GPU_IDLE_W
+    demands = [idle + (tdp - idle) * max(0.0, min(1.0, a)) for a in activities]
+    if not dynamic:
+        fair = max(0.0, budget_w) / n
+        sps = [min(tdp, max(idle, fair)) for _ in range(n)]
+        return [min(d, s) for d, s in zip(demands, sps)], sps
+
+    sps = [idle] * n
+    left = max(0.0, budget_w - idle * n)
+    order = sorted(range(n), key=lambda i: -demands[i])
+    for i in order:
+        if left <= 0.05:
+            break
+        if activities[i] < 0.12:
+            continue
+        want = min(tdp, max(idle, demands[i] / (1.0 - HEADROOM)))
+        take = min(left, max(0.0, want - sps[i]))
+        sps[i] += take
+        left -= take
+    watts = [min(d, s) for d, s in zip(demands, sps)]
+    return watts, sps
 
 
 def _short(name: str) -> str:
@@ -67,16 +111,20 @@ def snapshot(
     rows = power_snap.get("racks") or []
     lo_kw = float(power_snap.get("min_rack_kw") or 40.0)
     hi_kw = float(power_snap.get("max_rack_kw") or 135.0)
-    min_w = max(GPU_IDLE_W, lo_kw * 1000.0 / GPUS_PER_RACK)
+    min_w = GPU_IDLE_W
     tdp_w = GPU_TDP_W
     top_n = max(8, min(int(top), 240))
+    dynamic = (power_snap.get("mode") or "dynamic") == "dynamic"
 
     rack_out: list[dict[str, Any]] = []
     gpu_pool: list[dict[str, Any]] = []
     shelf_total = 0.0
     gpu_total_w = 0.0
+    overhead_total_w = 0.0
     at_cap = 0
     hottest_w = 0.0
+    sp_sum = 0.0
+    sp_n = 0
 
     for r in rows:
         rid = r["id"]
@@ -86,53 +134,68 @@ def snapshot(
         hot = bool(r.get("hot") or r.get("at_cap"))
         alloc_kw = float(r.get("allocated_kw") or 0.0)
         used_kw = float(r.get("consumed_kw") or 0.0)
-        setpoint_w = 0.0 if alloc_kw <= 0 or off else min(tdp_w, max(min_w, alloc_kw * 1000.0 / GPUS_PER_RACK))
+        run_status = r.get("run_status") or "ready"
         label = r.get("label") or _short(r.get("name") or "")
         hall_id = r.get("hall_id") or ""
         keep = (not rack_id) or rid == rack_id
-        rack_gpu_w = 0.0
-        rack_cap = 0
-        for n in range(1, NODES_PER_RACK + 1):
-            for g in range(1, GPUS_PER_NODE + 1):
-                gid = f"{rid}-n{n:02d}-g{g}"
-                if off or setpoint_w <= 0:
-                    watts = 0.0
-                else:
-                    watts = min(tdp_w, max(GPU_IDLE_W, setpoint_w * _frac(gid, now, hot)))
-                watts = round(watts, 1)
-                pct_lim = (watts / setpoint_w * 100.0) if setpoint_w > 1 else 0.0
-                if watts >= setpoint_w - 8 and setpoint_w > min_w + 20:
-                    rack_cap += 1
-                rack_gpu_w += watts
-                if watts > hottest_w:
-                    hottest_w = watts
-                if keep:
-                    gpu_pool.append(
-                        {
-                            "id": gid,
-                            "rack_id": rid,
-                            "rack_label": label,
-                            "hall_id": hall_id,
-                            "node": n,
-                            "gpu": g,
-                            "watts": watts,
-                            "setpoint_w": round(setpoint_w, 1),
-                            "tdp_w": tdp_w,
-                            "min_w": round(min_w, 1),
-                            "pct_limit": round(pct_lim, 1),
-                            "pct_tdp": round(watts / tdp_w * 100.0, 1),
-                            "hot": hot,
-                            "enabled": enabled and not off,
-                        }
-                    )
-
         load = 0.0 if off else min(1.0, used_kw / max(alloc_kw, hi_kw, 1.0))
         overhead_w = 0.0 if off else NODES_PER_RACK * NODE_OH_W * (0.35 + 0.65 * load) + SHELF_OH_W
+        gpu_budget_w = 0.0 if off or alloc_kw <= 0 else max(0.0, alloc_kw * 1000.0 - overhead_w)
+
+        slots: list[tuple[str, int, int]] = [
+            (f"{rid}-n{n:02d}-g{g}", n, g)
+            for n in range(1, NODES_PER_RACK + 1)
+            for g in range(1, GPUS_PER_NODE + 1)
+        ]
+        activities = [_activity(gid, now, hot, run_status) if not off else 0.0 for gid, _, _ in slots]
+        if off or gpu_budget_w <= 0:
+            watts_l = [0.0] * len(slots)
+            sps_l = [0.0] * len(slots)
+        else:
+            watts_l, sps_l = _allocate(activities, gpu_budget_w, dynamic)
+
+        rack_gpu_w = 0.0
+        rack_cap = 0
+        rack_sp = 0.0
+        for (gid, n, g), watts, sp, act in zip(slots, watts_l, sps_l, activities):
+            watts = round(watts, 1)
+            sp = round(sp, 1)
+            pct_lim = (watts / sp * 100.0) if sp > 1 else 0.0
+            if sp >= tdp_w - 8:
+                rack_cap += 1
+            rack_gpu_w += watts
+            rack_sp += sp
+            if watts > hottest_w:
+                hottest_w = watts
+            if keep:
+                gpu_pool.append(
+                    {
+                        "id": gid,
+                        "rack_id": rid,
+                        "rack_label": label,
+                        "hall_id": hall_id,
+                        "node": n,
+                        "gpu": g,
+                        "watts": watts,
+                        "setpoint_w": sp,
+                        "tdp_w": tdp_w,
+                        "min_w": round(min_w, 1),
+                        "pct_limit": round(pct_lim, 1),
+                        "pct_tdp": round(watts / tdp_w * 100.0, 1),
+                        "hot": hot and act >= 0.5,
+                        "enabled": enabled and not off,
+                    }
+                )
+
         shelf_kw = round((rack_gpu_w + overhead_w) / 1000.0, 2)
         gpu_kw = round(rack_gpu_w / 1000.0, 2)
         shelf_total += shelf_kw
         gpu_total_w += rack_gpu_w
+        overhead_total_w += overhead_w
         at_cap += rack_cap
+        n_on = GPUS_PER_RACK if not off else 0
+        sp_sum += rack_sp
+        sp_n += n_on
 
         rack_out.append(
             {
@@ -150,7 +213,7 @@ def snapshot(
                 "overhead_kw": round(overhead_w / 1000.0, 2),
                 "allocated_kw": round(alloc_kw, 1),
                 "consumed_kw": round(used_kw, 1),
-                "setpoint_w": round(setpoint_w, 1),
+                "setpoint_w": round(rack_sp / n_on, 1) if n_on else 0.0,
                 "gpus_at_cap": rack_cap,
             }
         )
@@ -162,6 +225,15 @@ def snapshot(
     rack_out.sort(key=lambda r: (-r["shelf_kw"], r["label"]))
 
     n_racks = len(rows)
+    _HISTORY.append(
+        {
+            "t": round(now, 1),
+            "gpu_kw": round(gpu_total_w / 1000.0, 1),
+            "overhead_kw": round(overhead_total_w / 1000.0, 1),
+            "shelf_kw": round(shelf_total, 1),
+        }
+    )
+    del _HISTORY[:-_HISTORY_N]
     return {
         "topology": topology(n_racks),
         "mode": power_snap.get("mode"),
@@ -182,11 +254,14 @@ def snapshot(
         "totals": {
             "shelf_kw": round(shelf_total, 1),
             "gpu_kw": round(gpu_total_w / 1000.0, 1),
+            "overhead_kw": round(overhead_total_w / 1000.0, 1),
             "hottest_w": round(hottest_w, 1),
+            "avg_setpoint_w": round(sp_sum / sp_n, 1) if sp_n else 0.0,
             "gpus_at_cap": at_cap,
             "gpus_listed": len(shown),
             "gpus_total": n_racks * GPUS_PER_RACK if not rack_id else GPUS_PER_RACK,
         },
+        "history": list(_HISTORY),
         "racks": rack_out,
         "gpus": shown,
         "limiter": {

@@ -150,6 +150,11 @@ export default function MaxLpsPage() {
           <b>{formatKw(totals?.gpu_kw ?? 0)}</b>
           <small>Sum of GB300 readings</small>
         </article>
+        <article>
+          <span>Overhead</span>
+          <b>{formatKw(totals?.overhead_kw ?? 0)}</b>
+          <small>Nodes + PSU / busbar</small>
+        </article>
         <article data-lead="true">
           <span>Most power</span>
           <b>{formatW(view?.gpus[0]?.watts ?? totals?.hottest_w ?? 0)}</b>
@@ -160,19 +165,19 @@ export default function MaxLpsPage() {
           </small>
         </article>
         <article>
-          <span>At GPU limit</span>
-          <b>{(totals?.gpus_at_cap ?? 0).toLocaleString()}</b>
-          <small>Redfish SetPoint cap</small>
-        </article>
-        <article>
-          <span>Racks</span>
-          <b>
-            {view?.racks_static_max ?? 0}
-            <em> / {view?.racks_lps_max ?? 0}</em>
-          </b>
-          <small>Static max · MaxLPS cap</small>
+          <span>Avg GPU limit</span>
+          <b>{formatW(totals?.avg_setpoint_w ?? 0)}</b>
+          <small>TDP {formatW(topo?.gpu_tdp_w ?? 1400)} · unused drops to idle</small>
         </article>
       </section>
+
+      <MixChart
+        gpuKw={totals?.gpu_kw ?? 0}
+        overheadKw={totals?.overhead_kw ?? 0}
+        shelfKw={totals?.shelf_kw ?? 0}
+        envelopeKw={view?.envelope_kw ?? 0}
+        history={view?.history ?? []}
+      />
 
       <div className="maxlps-grid">
         <aside className="maxlps-shelves">
@@ -202,7 +207,7 @@ export default function MaxLpsPage() {
                 : `Power ranking · top ${totals?.gpus_listed ?? TOP}`}
             </h2>
             <p>
-              Highest wattage first · next rank in {eta}s · only movers slide · dotted = min / max
+              Highest wattage first · next rank in {eta}s · limit follows usage (idle GPUs drop to {formatW(topo?.gpu_idle_w ?? 180)})
             </p>
           </header>
           <div className="maxlps-gpu-cols" aria-hidden>
@@ -275,6 +280,66 @@ export default function MaxLpsPage() {
   );
 }
 
+function MixChart({
+  gpuKw,
+  overheadKw,
+  shelfKw,
+  envelopeKw,
+  history,
+}: {
+  gpuKw: number;
+  overheadKw: number;
+  shelfKw: number;
+  envelopeKw: number;
+  history: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number }[];
+}) {
+  const scale = Math.max(envelopeKw, shelfKw, gpuKw + overheadKw, 1);
+  const gpuPct = (gpuKw / scale) * 100;
+  const ohPct = (overheadKw / scale) * 100;
+  const unused = Math.max(0, envelopeKw - shelfKw);
+  const w = 320;
+  const h = 56;
+  const pad = 2;
+  const maxY = Math.max(...history.map((p) => p.shelf_kw), scale, 1);
+  const pts = (key: "gpu_kw" | "overhead_kw" | "shelf_kw") => {
+    if (history.length < 2) return "";
+    return history
+      .map((p, i) => {
+        const x = pad + (i / Math.max(1, history.length - 1)) * (w - pad * 2);
+        const y = h - pad - (p[key] / maxY) * (h - pad * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  };
+  return (
+    <section className="maxlps-mix">
+      <div className="maxlps-mix-bar" title={`GPU ${formatKw(gpuKw)} · overhead ${formatKw(overheadKw)} · shelf ${formatKw(shelfKw)}`}>
+        <i data-k="gpu" style={{ width: `${gpuPct}%` }} />
+        <i data-k="oh" style={{ width: `${ohPct}%` }} />
+      </div>
+      <ul>
+        <li data-k="gpu">
+          GPU {formatKw(gpuKw)}
+        </li>
+        <li data-k="oh">
+          Overhead {formatKw(overheadKw)}
+        </li>
+        <li data-k="shelf">
+          Shelf {formatKw(shelfKw)}
+        </li>
+        <li data-k="free">
+          Unused envelope {formatKw(unused)}
+        </li>
+      </ul>
+      <svg className="maxlps-spark" viewBox={`0 0 ${w} ${h}`} aria-label="GPU vs overhead over time">
+        <polyline data-k="shelf" points={pts("shelf_kw")} />
+        <polyline data-k="oh" points={pts("overhead_kw")} />
+        <polyline data-k="gpu" points={pts("gpu_kw")} />
+      </svg>
+    </section>
+  );
+}
+
 function ShelfRow({
   rack,
   active,
@@ -285,6 +350,8 @@ function ShelfRow({
   onSelect: () => void;
 }) {
   const cap = Math.max(rack.allocated_kw, rack.shelf_kw, 1);
+  const gpuPct = Math.min(100, (rack.gpu_kw / cap) * 100);
+  const ohPct = Math.min(100 - gpuPct, (rack.overhead_kw / cap) * 100);
   return (
     <button
       type="button"
@@ -296,8 +363,8 @@ function ShelfRow({
     >
       <span className="maxlps-shelf-id">{rack.label}</span>
       <span className="maxlps-shelf-bar" aria-hidden>
-        <i data-k="gpu" style={{ width: `${Math.min(100, (rack.gpu_kw / cap) * 100)}%` }} />
-        <i data-k="shelf" style={{ width: `${Math.min(100, (rack.shelf_kw / cap) * 100)}%` }} />
+        <i data-k="gpu" style={{ width: `${gpuPct}%` }} />
+        <i data-k="oh" style={{ left: `${gpuPct}%`, width: `${ohPct}%` }} />
       </span>
       <span className="maxlps-shelf-kw">{formatKw(rack.shelf_kw)}</span>
     </button>

@@ -206,11 +206,14 @@ export interface MaxLpsView {
   totals: {
     shelf_kw: number;
     gpu_kw: number;
+    overhead_kw?: number;
     hottest_w: number;
+    avg_setpoint_w?: number;
     gpus_at_cap: number;
     gpus_listed: number;
     gpus_total: number;
   };
+  history?: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number }[];
   racks: MaxLpsShelf[];
   gpus: MaxLpsGpu[];
 }
