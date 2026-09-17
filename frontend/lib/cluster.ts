@@ -150,6 +150,7 @@ export interface MaxLpsTopology {
   gpu_idle_w: number;
   gpu_count: number;
   node_count: number;
+  shelves_per_rack?: number;
 }
 
 export interface MaxLpsGpu {
@@ -165,11 +166,18 @@ export interface MaxLpsGpu {
   tdp_w: number;
   min_w: number;
   max_w?: number;
-  curve?: number[];
+  spark?: number[];
+  curve?: { t: number; w: number; cap: number; min?: number; max?: number }[] | number[];
   pct_limit: number;
   pct_tdp: number;
   hot: boolean;
   enabled: boolean;
+  bounded?: boolean;
+  process?: string;
+  workload?: string;
+  workload_kind?: string;
+  pid?: number;
+  workload_id?: string | null;
 }
 
 export interface MaxLpsShelf {
@@ -189,12 +197,15 @@ export interface MaxLpsShelf {
   consumed_kw: number;
   setpoint_w: number;
   gpus_at_cap: number;
+  shelf_count?: number;
+  shelves?: { id: string; index: number; kw: number }[];
 }
 
 export interface MaxLpsView {
   topology: MaxLpsTopology;
   mode: string;
   tick: number;
+  loop_step?: number;
   last_event: string;
   min_rack_kw: number;
   max_rack_kw: number;
@@ -206,6 +217,11 @@ export interface MaxLpsView {
   racks_lps_gain?: number;
   filter_rack_id?: string | null;
   totals: {
+    total_kw?: number;
+    available_kw?: number;
+    used_kw?: number;
+    free_kw?: number;
+    used_delta_kw?: number;
     shelf_kw: number;
     gpu_kw: number;
     overhead_kw?: number;
@@ -219,15 +235,28 @@ export interface MaxLpsView {
     best_cap_percent?: number;
   };
   algo?: {
+    interval_s?: number;
     power_budget_w: number;
     budget_grace: number;
     gpu_power_percent: number;
     desired_cap_percent: number;
+    gpu_min_w?: number;
+    gpu_max_w?: number;
     max_allowable_w: number;
     best_cap_percent: number;
     n: number;
   };
-  history?: { t: number; gpu_kw: number; overhead_kw: number; shelf_kw: number; cap_kw?: number; allowable_kw?: number }[];
+  history?: {
+    t: number;
+    gpu_kw: number;
+    overhead_kw: number;
+    shelf_kw: number;
+    used_kw?: number;
+    available_kw?: number;
+    free_kw?: number;
+    cap_kw?: number;
+    allowable_kw?: number;
+  }[];
   racks: MaxLpsShelf[];
   gpus: MaxLpsGpu[];
 }
@@ -531,6 +560,7 @@ export interface PowerLimiter {
   halls?: number;
   rack_count?: number;
   rack_count_auto?: boolean;
+  racks_wanted?: number;
   racks_on?: number;
   racks_pool?: number;
   racks_static_max?: number;

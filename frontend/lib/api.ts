@@ -130,13 +130,28 @@ export const api = {
     ),
   campus: () => request<Campus>("/api/cluster/campus"),
   clusterPower: () => request<import("./cluster").PowerLimiter>("/api/cluster/power"),
-  maxlps: (params: { top?: number; rack_id?: string | null } = {}) => {
+  maxlps: (params: { top?: number; rack_id?: string | null; gpu_id?: string | null } = {}) => {
     const qs = new URLSearchParams();
     if (params.top != null) qs.set("top", String(params.top));
     if (params.rack_id) qs.set("rack_id", params.rack_id);
+    if (params.gpu_id) qs.set("gpu_id", params.gpu_id);
     const q = qs.toString();
     return request<import("./cluster").MaxLpsView>(`/api/cluster/maxlps${q ? `?${q}` : ""}`);
   },
+  maxlpsGpuCurve: (gpuId: string) =>
+    request<{
+      id: string;
+      watts: number;
+      setpoint_w: number;
+      min_w: number;
+      max_w: number;
+      curve: { t: number; w: number; cap: number; min?: number; max?: number }[];
+    }>(`/api/cluster/maxlps/gpus/${encodeURIComponent(gpuId)}/curve`),
+  patchMaxlpsGpu: (gpuId: string, payload: { min_w?: number; max_w?: number }) =>
+    request<import("./cluster").MaxLpsView>(`/api/cluster/maxlps/gpus/${encodeURIComponent(gpuId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   patchClusterPower: (payload: {
     mode?: string;
     budget_kw?: number;
@@ -149,6 +164,11 @@ export const api = {
     total_budget_kw?: number;
     rack_count?: number;
     min_rack_kw?: number;
+    interval_s?: number;
+    gpu_power_percent?: number;
+    desired_cap_percent?: number;
+    gpu_min_w?: number;
+    gpu_max_w?: number;
   }) =>
     request<import("./cluster").PowerLimiter>("/api/cluster/power", {
       method: "PATCH",

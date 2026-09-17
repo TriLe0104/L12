@@ -373,6 +373,11 @@ class PowerPatch(BaseModel):
     total_budget_kw: float | None = Field(default=None, ge=100, le=10_000_000)
     rack_count: int | None = Field(default=None, ge=1, le=2000)
     min_rack_kw: float | None = Field(default=None, ge=8, le=2000)
+    interval_s: float | None = Field(default=None, ge=1, le=300)
+    gpu_power_percent: float | None = Field(default=None, ge=10, le=100)
+    desired_cap_percent: float | None = Field(default=None, ge=10, le=100)
+    gpu_min_w: float | None = Field(default=None, ge=50, le=2000)
+    gpu_max_w: float | None = Field(default=None, ge=50, le=2000)
 
 
 def _power_samples(rack_rows: list[Rack], workloads: list[Workload] | None = None) -> list[dict]:
@@ -409,12 +414,48 @@ def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends
 def maxlps_view(
     top: int = Query(default=0, ge=0, le=30000),
     rack_id: str | None = Query(default=None),
+    gpu_id: str | None = Query(default=None),
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    snap = power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
-    return gpu_power.snapshot(snap, top=top, rack_id=rack_id)
+    works = _running_workloads(db)
+    snap = power_limit.snapshot(_power_samples(rack_rows, works))
+    jobs = [
+        {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
+        for w in works
+    ]
+    return gpu_power.snapshot(snap, top=top, rack_id=rack_id, gpu_id=gpu_id, workloads=jobs)
+
+
+class GpuBoundPatch(BaseModel):
+    min_w: float | None = Field(default=None, ge=50, le=2000)
+    max_w: float | None = Field(default=None, ge=50, le=2000)
+
+
+@router.get("/maxlps/gpus/{gpu_id}/curve")
+def maxlps_gpu_curve(gpu_id: str, _user: User = Depends(get_current_user)) -> dict:
+    return gpu_power.watch_curve(gpu_id)
+
+
+@router.patch("/maxlps/gpus/{gpu_id}")
+def patch_gpu_bounds(
+    gpu_id: str,
+    payload: GpuBoundPatch,
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if payload.min_w is None and payload.max_w is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "min_w or max_w required")
+    gpu_power.set_bounds(gpu_id, min_w=payload.min_w, max_w=payload.max_w)
+    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+    works = _running_workloads(db)
+    snap = power_limit.snapshot(_power_samples(rack_rows, works))
+    jobs = [
+        {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
+        for w in works
+    ]
+    return gpu_power.snapshot(snap, top=0, gpu_id=gpu_id, workloads=jobs)
 
 
 @router.patch("/power")
@@ -438,6 +479,25 @@ def patch_power_limiter(
         rack_count=payload.rack_count,
         min_rack_kw=payload.min_rack_kw,
     )
+    gpu_power.apply_loop(
+        interval_s=payload.interval_s,
+        gpu_power_percent=payload.gpu_power_percent,
+        desired_cap_percent=payload.desired_cap_percent,
+        gpu_min_w=payload.gpu_min_w,
+        gpu_max_w=payload.gpu_max_w,
+    )
+    if (
+        payload.total_budget_kw is not None
+        or payload.stay_under_pct is not None
+        or payload.reset
+        or payload.interval_s is not None
+        or payload.gpu_power_percent is not None
+        or payload.desired_cap_percent is not None
+        or payload.gpu_min_w is not None
+        or payload.gpu_max_w is not None
+    ):
+        gpu_power.LOOP.force = True
+        gpu_power.LOOP.last_caps = None
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
     return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
 

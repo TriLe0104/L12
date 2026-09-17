@@ -15,9 +15,10 @@ from typing import Any, Iterable
 
 CLUSTER_MAX_KW = 135_000.0  # legacy demo ceiling; allocation is capped by envelope and max kW/rack
 MAX_TOTAL_KW = 10_000_000.0  # 10 GW planning cap for typed total power
-DEFAULT_MAX_RACK_KW = 300.0
+DEFAULT_MAX_RACK_KW = 135.0
 DEFAULT_MIN_RACK_KW = 40.0
 DEFAULT_STAY_UNDER_PCT = 80.0
+DEFAULT_TOTAL_KW = 10_000.0  # 10 MW
 REDUCE_GAP = 0.20
 INCREASE_GAP = 0.05
 TARGET_HEADROOM = 0.12
@@ -67,7 +68,7 @@ def envelope_kw(n_on: int = 0) -> float:
     pct = threshold_pct() / 100.0
     if STATE.total_budget_kw is not None:
         return STATE.total_budget_kw * pct
-    return _plan_n(n_on) * STATE.max_rack_kw * pct
+    return DEFAULT_TOTAL_KW * pct
 
 
 def _fit_n(budget: float, kw: float, live: int) -> int:
@@ -96,8 +97,26 @@ def n_lps_cap(n_on: int = 0) -> int:
     return _fit_n(envelope_kw(live), rack_min_kw(), live)
 
 
+def n_wanted(n_on: int = 0) -> int:
+    """Racks to feed: user count clamped to [envelope/max, envelope/min] and live floor."""
+    live = n_on or STATE.live_on
+    lo, hi = n_static_cap(n_on), n_lps_cap(n_on)
+    if hi < lo:
+        hi = lo
+    if STATE.rack_count is None:
+        return hi if STATE.mode == "dynamic" else lo
+    n = int(STATE.rack_count)
+    if live > 0:
+        n = min(n, live)
+    if hi <= 0:
+        return 0
+    return max(lo, min(hi, n))
+
+
 def n_feed(n_on: int = 0) -> int:
-    """Static pool size — MaxLPS grows this toward n_lps_cap."""
+    """Seed pool size. User rack_count wins when set; else static max packing."""
+    if STATE.rack_count is not None:
+        return n_wanted(n_on)
     return n_static_cap(n_on)
 
 
@@ -171,7 +190,7 @@ def cluster_policy_budget(n_on: int) -> float:
         return 0.0
     env = envelope_kw(n_on)
     if STATE.mode == "dynamic":
-        n = max(len(STATE.pool_ids), n_lps_cap(n_on))
+        n = max(len(STATE.pool_ids), n_wanted(n_on) if STATE.rack_count is not None else n_lps_cap(n_on))
         return min(env, n * rack_hard_kw())
     n = n_static_cap(n_on)
     return min(env, n * rack_policy_kw(), n * rack_hard_kw()) if n else 0.0
@@ -259,7 +278,7 @@ class LimiterState:
     max_rack_kw: float = DEFAULT_MAX_RACK_KW
     min_rack_kw: float = DEFAULT_MIN_RACK_KW
     stay_under_pct: float = DEFAULT_STAY_UNDER_PCT
-    total_budget_kw: float | None = None
+    total_budget_kw: float | None = DEFAULT_TOTAL_KW
     rack_count: int | None = None
     live_on: int = 0
     power_source: str = "manual"
@@ -603,7 +622,7 @@ def _enable_extras(samples: list[Sample]) -> int:
     """Spend leftover envelope on more racks at min kW (MaxLPS packing)."""
     floor = min_alloc_kw()
     hard = rack_hard_kw()
-    cap = n_lps_cap(STATE.live_on)
+    cap = n_wanted(STATE.live_on) if STATE.rack_count is not None else n_lps_cap(STATE.live_on)
     leftover = envelope_kw(STATE.live_on) - sum(
         STATE.alloc.get(s.id, 0.0) for s in samples if _on(s)
     )
@@ -705,8 +724,11 @@ def apply_patch(
         STATE.min_rack_kw = v
     if STATE.min_rack_kw > STATE.max_rack_kw:
         STATE.min_rack_kw = STATE.max_rack_kw
-    STATE.rack_count = None  # derived from envelope / min / max; ignore client rack_count
-    _ = rack_count
+    if rack_count is not None:
+        v = max(1, min(2000, int(rack_count)))
+        if STATE.rack_count != v:
+            reset = True
+        STATE.rack_count = v
     if total_budget_kw is not None:
         v = min(MAX_TOTAL_KW, max(100.0, float(total_budget_kw)))
         if STATE.total_budget_kw is None or abs(v - STATE.total_budget_kw) >= 0.5:
@@ -772,6 +794,13 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
         live = {s.id for s in parsed if _on(s)}
         kept = tuple(i for i in STATE.pool_ids if i in live)
         STATE.pool_ids = kept or base
+        want = n_wanted(n_on) if STATE.rack_count is not None else None
+        if want is not None and len(STATE.pool_ids) > want:
+            drop = set(STATE.pool_ids[want:])
+            STATE.pool_ids = STATE.pool_ids[:want]
+            for rid in drop:
+                STATE.alloc.pop(rid, None)
+                STATE.action.pop(rid, None)
     share = rack_policy_kw()
     policy_budget = cluster_policy_budget(n_on)
     hard_budget = cluster_hard_budget(n_on)
@@ -801,7 +830,7 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
     dynamic_rows = _rows_from_alloc(parsed, STATE.alloc, STATE.action, counts)
     active_rows = static_rows if STATE.mode == "static" else dynamic_rows
     planned = _plan_n(n_on)
-    total = STATE.total_budget_kw if STATE.total_budget_kw is not None else (planned * STATE.max_rack_kw)
+    total = STATE.total_budget_kw if STATE.total_budget_kw is not None else DEFAULT_TOTAL_KW
     env = envelope_kw(n_on)
     stay = threshold_pct()
     static_sum = _summarize(static_rows, policy_budget, env)
@@ -826,8 +855,9 @@ def snapshot(samples: Iterable[dict[str, Any]] | Iterable[Sample]) -> dict[str, 
         "threshold_pct": _r(stay),
         "power_source": STATE.power_source,
         "halls": n_halls,
-        "rack_count": planned,
-        "rack_count_auto": True,
+        "rack_count": n_wanted(n_on) if STATE.rack_count is not None else planned,
+        "rack_count_auto": STATE.rack_count is None,
+        "racks_wanted": n_wanted(n_on),
         "racks_on": n_on,
         "racks_pool": len(STATE.pool_ids),
         "racks_static_max": n_static_cap(n_on),

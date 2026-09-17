@@ -113,3 +113,109 @@ export function playRankFlip(
       });
   });
 }
+
+/** Slot tops relative to the list, so a scroll between ticks does not pollute dy. */
+export function captureFlipTops(root: ParentNode | null): Map<string, number> {
+  const tops = new Map<string, number>();
+  if (!root) return tops;
+  for (const el of root.querySelectorAll<HTMLElement>(SELECTOR)) {
+    const id = el.dataset.flipId;
+    if (id) tops.set(id, el.offsetTop);
+  }
+  return tops;
+}
+
+/** Dashboard ranking swap: invert each entry from its previous slot, then play
+ *  a transform-only ease. Rank numbers live outside these nodes so they stay put. */
+export function playEntrySwap(
+  root: ParentNode | null,
+  before: Map<string, number>,
+  { duration = 680 }: { duration?: number } = {},
+) {
+  if (!root || prefersReducedMotion() || before.size === 0) return;
+
+  for (const el of root.querySelectorAll<HTMLElement>(SELECTOR)) {
+    const id = el.dataset.flipId;
+    if (!id) continue;
+    const from = before.get(id);
+    if (from == null) continue;
+
+    const dy = from - el.offsetTop;
+    if (Math.abs(dy) < 1) continue;
+
+    for (const anim of el.getAnimations()) anim.cancel();
+
+    const rose = dy > 0;
+    const dist = Math.abs(dy);
+    const dur = duration + Math.min(280, dist * 0.32);
+    el.style.zIndex = rose ? "5" : "2";
+    const next = el.animate(
+      [
+        { transform: `translate3d(0, ${dy}px, 0)` },
+        { transform: "translate3d(0, 0, 0)" },
+      ],
+      {
+        duration: dur,
+        easing: EASE_OUT,
+        fill: "both",
+      },
+    );
+    next.finished
+      .then(() => {
+        el.style.zIndex = "";
+        next.cancel();
+      })
+      .catch(() => {
+        el.style.zIndex = "";
+      });
+  }
+}
+
+/** Ranking list: drag each moved row from its previous index to the new one.
+ *  Works with virtualized rows as long as movers stay mounted. */
+export function playListDrag(
+  root: ParentNode | null,
+  prevIndex: Map<string, number>,
+  nextIndex: Map<string, number>,
+  rowH: number,
+  { duration = 1080 }: { duration?: number } = {},
+) {
+  if (!root || prefersReducedMotion() || prevIndex.size === 0) return;
+
+  for (const el of root.querySelectorAll<HTMLElement>(SELECTOR)) {
+    const id = el.dataset.flipId;
+    if (!id) continue;
+    const fromI = prevIndex.get(id);
+    const toI = nextIndex.get(id);
+    if (fromI == null || toI == null || fromI === toI) continue;
+    const dy = (fromI - toI) * rowH;
+    if (Math.abs(dy) < 2) continue;
+    const rose = dy > 0;
+    const dist = Math.abs(fromI - toI);
+    const dur = duration + Math.min(420, dist * 14);
+    const drift = rose ? 10 : -8;
+    el.style.zIndex = rose ? "6" : "3";
+    el.dataset.drag = "true";
+    const anim = el.animate(
+      [
+        { transform: `translate3d(0, ${dy}px, 0)`, boxShadow: "0 2px 6px rgba(0,0,0,0.25)", offset: 0 },
+        {
+          transform: `translate3d(${drift}px, ${dy * 0.14}px, 0)`,
+          boxShadow: "0 16px 28px rgba(0,0,0,0.5)",
+          offset: 0.58,
+        },
+        { transform: "translate3d(0, 0, 0)", boxShadow: "0 0 0 rgba(0,0,0,0)", offset: 1 },
+      ],
+      { duration: dur, easing: "cubic-bezier(0.18, 0.72, 0.12, 1)", fill: "both" },
+    );
+    anim.finished
+      .then(() => {
+        el.style.zIndex = "";
+        delete el.dataset.drag;
+      })
+      .catch(() => {
+        el.style.zIndex = "";
+        delete el.dataset.drag;
+      });
+  }
+}

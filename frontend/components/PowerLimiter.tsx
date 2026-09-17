@@ -308,7 +308,8 @@ export function PowerPolicyFields({
   const [budgetMw, setBudgetMw] = useState(mwText(totalKw));
   const [pct, setPct] = useState(String(Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)));
   const [minKw, setMinKw] = useState(String(Math.round(data.min_rack_kw ?? 40)));
-  const [rackKw, setRackKw] = useState(String(Math.round(data.max_rack_kw ?? 300)));
+  const [rackKw, setRackKw] = useState(String(Math.round(data.max_rack_kw ?? 135)));
+  const [nRacks, setNRacks] = useState(String(data.racks_wanted ?? data.racks_pool ?? ""));
   const editing = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
 
@@ -320,8 +321,10 @@ export function PowerPolicyFields({
     if (nextPct !== pct) setPct(nextPct);
     const nextMin = String(Math.round(data.min_rack_kw ?? 40));
     if (nextMin !== minKw) setMinKw(nextMin);
-    const nextMax = String(Math.round(data.max_rack_kw ?? 300));
+    const nextMax = String(Math.round(data.max_rack_kw ?? 135));
     if (nextMax !== rackKw) setRackKw(nextMax);
+    const nextN = String(data.racks_wanted ?? data.racks_pool ?? "");
+    if (nextN && nextN !== nRacks) setNRacks(nextN);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     data.total_budget_kw,
@@ -330,6 +333,8 @@ export function PowerPolicyFields({
     data.stay_under_pct,
     data.min_rack_kw,
     data.max_rack_kw,
+    data.racks_wanted,
+    data.racks_pool,
   ]);
 
   async function commit(
@@ -337,11 +342,20 @@ export function PowerPolicyFields({
     nextPct = pct,
     nextMin = minKw,
     nextMax = rackKw,
+    nextN = nRacks,
   ) {
     const total_budget_kw = Math.min(10_000_000, Math.max(100, Number(nextMw) * 1000));
     const stay_under_pct = Number(nextPct);
     const min_rack_kw = Number(nextMin);
     const max_rack_kw = Number(nextMax);
+    const env = (total_budget_kw * stay_under_pct) / 100;
+    const nLo = max_rack_kw > 0 ? Math.floor(env / max_rack_kw) : 0;
+    const nHi = min_rack_kw > 0 ? Math.floor(env / min_rack_kw) : 0;
+    const rawN = Number(nextN);
+    let rack_count = Number.NaN;
+    if (nextN !== "" && Number.isFinite(rawN) && rawN > 0 && nHi > 0) {
+      rack_count = Math.max(Math.max(1, nLo), Math.min(nHi, Math.round(rawN)));
+    }
     if (![total_budget_kw, stay_under_pct, min_rack_kw, max_rack_kw].every(Number.isFinite)) return;
     if (stay_under_pct < 10 || stay_under_pct > 100) return;
     if (min_rack_kw < 8 || max_rack_kw < 20 || max_rack_kw > 2000 || min_rack_kw > max_rack_kw) return;
@@ -349,13 +363,15 @@ export function PowerPolicyFields({
     const samePct = stay_under_pct === (data.threshold_pct ?? data.stay_under_pct);
     const sameMin = min_rack_kw === data.min_rack_kw;
     const sameMax = max_rack_kw === data.max_rack_kw;
-    if (sameBudget && samePct && sameMin && sameMax) return;
+    const sameN = Number.isFinite(rack_count) && rack_count === (data.racks_wanted ?? data.racks_pool);
+    if (sameBudget && samePct && sameMin && sameMax && sameN) return;
     try {
       const res = await api.patchClusterPower({
         total_budget_kw,
         stay_under_pct,
         min_rack_kw,
         max_rack_kw,
+        ...(Number.isFinite(rack_count) ? { rack_count } : {}),
       });
       onChange?.(res);
     } catch {
@@ -457,16 +473,30 @@ export function PowerPolicyFields({
           type="number"
           min={20}
           max={2000}
-          step={10}
+          step={5}
           value={rackKw}
           aria-label="Maximum kilowatts per rack"
           {...bind(setRackKw)}
         />
       </label>
+      <label>
+        Racks
+        <span className="lps-policy-pct">
+          <input
+            type="number"
+            min={nStatic || 1}
+            max={nLps || live || 1}
+            step={1}
+            value={nRacks}
+            aria-label="Number of racks to feed"
+            {...bind(setNRacks)}
+          />
+        </span>
+      </label>
       <p className="lps-rack-diff">
-        Static {nStatic} rack{nStatic === 1 ? "" : "s"} at {Number.isFinite(maxLocal) ? Math.round(maxLocal) : "—"} kW
-        {" · "}
-        MaxLPS {nLps} rack{nLps === 1 ? "" : "s"} at ≥{Number.isFinite(minLocal) ? Math.round(minLocal) : "—"} kW
+        Range {nStatic}–{nLps} · envelope / max {Number.isFinite(maxLocal) ? Math.round(maxLocal) : "—"} kW
+        {" → "}
+        envelope / min {Number.isFinite(minLocal) ? Math.round(minLocal) : "—"} kW
         {gain > 0 ? ` · +${gain} vs static` : live > 0 && nLps >= live ? " · floor is the limit" : ""}
       </p>
       <p>
@@ -631,7 +661,7 @@ export function PowerLimiterPanel({
   );
 }
 
-export function usePowerLimiter(active: boolean) {
+export function usePowerLimiter(active: boolean, intervalMs = 1200) {
   const [data, setData] = useState<PowerLimiterData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -652,12 +682,17 @@ export function usePowerLimiter(active: boolean) {
         });
     };
     load();
-    const id = window.setInterval(load, 1200);
+    if (!(intervalMs > 0)) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const id = window.setInterval(load, intervalMs);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [active]);
+  }, [active, intervalMs]);
 
   const byId = useMemo(() => {
     const map: Record<string, PowerRack> = {};

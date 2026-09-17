@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 
 from . import migrations
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="L12 App API", version="0.2.0", lifespan=lifespan)
 
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
