@@ -130,7 +130,7 @@ export function captureFlipTops(root: ParentNode | null): Map<string, number> {
 export function playEntrySwap(
   root: ParentNode | null,
   before: Map<string, number>,
-  { duration = 680 }: { duration?: number } = {},
+  { duration = 860 }: { duration?: number } = {},
 ) {
   if (!root || prefersReducedMotion() || before.size === 0) return;
 
@@ -138,7 +138,15 @@ export function playEntrySwap(
     const id = el.dataset.flipId;
     if (!id) continue;
     const from = before.get(id);
-    if (from == null) continue;
+    if (from == null) {
+      for (const anim of el.getAnimations()) anim.cancel();
+      el.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: Math.min(420, duration * 0.45),
+        easing: EASE_OUT,
+        fill: "both",
+      });
+      continue;
+    }
 
     const dy = from - el.offsetTop;
     if (Math.abs(dy) < 1) continue;
@@ -147,8 +155,9 @@ export function playEntrySwap(
 
     const rose = dy > 0;
     const dist = Math.abs(dy);
-    const dur = duration + Math.min(280, dist * 0.32);
-    el.style.zIndex = rose ? "5" : "2";
+    const dur = duration + Math.min(180, dist * 0.18);
+    el.style.zIndex = rose ? "6" : "3";
+    el.dataset.flip = "1";
     const next = el.animate(
       [
         { transform: `translate3d(0, ${dy}px, 0)` },
@@ -156,17 +165,19 @@ export function playEntrySwap(
       ],
       {
         duration: dur,
-        easing: EASE_OUT,
+        easing: "cubic-bezier(0.25, 0.82, 0.18, 1)",
         fill: "both",
       },
     );
     next.finished
       .then(() => {
         el.style.zIndex = "";
+        delete el.dataset.flip;
         next.cancel();
       })
       .catch(() => {
         el.style.zIndex = "";
+        delete el.dataset.flip;
       });
   }
 }

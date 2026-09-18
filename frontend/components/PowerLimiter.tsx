@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { api } from "@/lib/api";
 import type { PowerLimiter as PowerLimiterData, PowerRack, PowerShowcaseSlot } from "@/lib/cluster";
@@ -293,6 +293,64 @@ function fitRacks(envKw: number, perKw: number, live: number) {
   return Math.max(0, fit);
 }
 
+function placeTip(field: HTMLElement, tip: HTMLElement) {
+  const pad = 10;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxW = Math.min(280, Math.max(160, vw - pad * 2));
+  tip.style.position = "fixed";
+  tip.style.width = `${maxW}px`;
+  tip.style.maxWidth = `${maxW}px`;
+  tip.style.left = "0px";
+  tip.style.top = "0px";
+  tip.style.right = "auto";
+  tip.style.bottom = "auto";
+  tip.style.transform = "none";
+  tip.style.maxHeight = `${vh - pad * 2}px`;
+  const r = field.getBoundingClientRect();
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  const spaceLeft = r.left - pad;
+  const spaceRight = vw - r.right - pad;
+  let left = spaceLeft >= tw + 6 || spaceLeft >= spaceRight ? r.left - tw - 8 : r.right + 8;
+  left = Math.min(Math.max(pad, left), vw - tw - pad);
+  let top = r.top;
+  if (top + th > vh - pad) top = vh - th - pad;
+  if (top < pad) top = pad;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+export function PolicyField({
+  label,
+  tip,
+  children,
+}: {
+  label: string;
+  tip: string;
+  children: ReactNode;
+}) {
+  const fieldRef = useRef<HTMLLabelElement | null>(null);
+  const tipRef = useRef<HTMLSpanElement | null>(null);
+
+  function showTip() {
+    const field = fieldRef.current;
+    const box = tipRef.current;
+    if (!field || !box) return;
+    placeTip(field, box);
+  }
+
+  return (
+    <label className="lps-field" ref={fieldRef} onMouseEnter={showTip} onFocus={showTip}>
+      <span className="lps-field-name">{label}</span>
+      {children}
+      <span className="lps-tip" ref={tipRef} role="tooltip">
+        {tip}
+      </span>
+    </label>
+  );
+}
+
 export function PowerPolicyFields({
   data,
   onChange,
@@ -349,12 +407,11 @@ export function PowerPolicyFields({
     const min_rack_kw = Number(nextMin);
     const max_rack_kw = Number(nextMax);
     const env = (total_budget_kw * stay_under_pct) / 100;
-    const nLo = max_rack_kw > 0 ? Math.floor(env / max_rack_kw) : 0;
     const nHi = min_rack_kw > 0 ? Math.floor(env / min_rack_kw) : 0;
     const rawN = Number(nextN);
     let rack_count = Number.NaN;
     if (nextN !== "" && Number.isFinite(rawN) && rawN > 0 && nHi > 0) {
-      rack_count = Math.max(Math.max(1, nLo), Math.min(nHi, Math.round(rawN)));
+      rack_count = Math.max(1, Math.min(nHi, Math.round(rawN)));
     }
     if (![total_budget_kw, stay_under_pct, min_rack_kw, max_rack_kw].every(Number.isFinite)) return;
     if (stay_under_pct < 10 || stay_under_pct > 100) return;
@@ -397,14 +454,17 @@ export function PowerPolicyFields({
   const maxLocal = Number(rackKw);
   const totalLocal = Number(budgetMw) * 1000;
   const envLocal = Number.isFinite(totalLocal) && Number.isFinite(pctLocal) ? (totalLocal * pctLocal) / 100 : 0;
-  const live = data.racks_on ?? 0;
-  const nStatic =
-    Number.isFinite(maxLocal) && maxLocal > 0
-      ? fitRacks(envLocal, maxLocal, live) || (envLocal >= minLocal && live > 0 ? 1 : 0)
-      : (data.racks_static_max ?? 0);
-  const nLps = Number.isFinite(minLocal) && minLocal > 0 ? fitRacks(envLocal, minLocal, live) : (data.racks_lps_max ?? 0);
-  const gain = Math.max(0, nLps - nStatic);
-  const source = data.power_source === "breaker" ? "smart breaker" : "manual";
+  const nMin =
+    Number.isFinite(maxLocal) && maxLocal > 0 ? Math.max(0, Math.floor(envLocal / maxLocal)) : 0;
+  const nMax =
+    Number.isFinite(minLocal) && minLocal > 0 ? Math.max(0, Math.floor(envLocal / minLocal)) : 0;
+
+  useEffect(() => {
+    if (editing.current) return;
+    const n = Number(nRacks);
+    if (!Number.isFinite(n) || nRacks === "") return;
+    if (n > nMax) setNRacks(String(nMax));
+  }, [nMax, nRacks]);
 
   return (
     <form
@@ -425,8 +485,10 @@ export function PowerPolicyFields({
         void commit();
       }}
     >
-      <label>
-        Total power
+      <PolicyField
+        label="Total power"
+        tip="Site budget for this cluster. Every rack and GPU stays under this cap."
+      >
         <span className="lps-policy-pct">
           <input
             type="number"
@@ -439,9 +501,11 @@ export function PowerPolicyFields({
           />
           MW
         </span>
-      </label>
-      <label>
-        Threshold
+      </PolicyField>
+      <PolicyField
+        label="Threshold"
+        tip="How much of the budget you actually allow to run. The rest is spare headroom for spikes."
+      >
         <span className="lps-policy-pct">
           <input
             type="number"
@@ -454,9 +518,11 @@ export function PowerPolicyFields({
           />
           %
         </span>
-      </label>
-      <label>
-        Min kW / rack
+      </PolicyField>
+      <PolicyField
+        label="Min kW / rack"
+        tip="Lowest power a fed rack may sit at. A lower floor lets more racks stay on."
+      >
         <input
           type="number"
           min={8}
@@ -466,9 +532,11 @@ export function PowerPolicyFields({
           aria-label="Minimum kilowatts per rack"
           {...bind(setMinKw)}
         />
-      </label>
-      <label>
-        Max kW / rack
+      </PolicyField>
+      <PolicyField
+        label="Max kW / rack"
+        tip="Highest power a rack may draw. Static mode runs every fed rack at this level."
+      >
         <input
           type="number"
           min={20}
@@ -478,32 +546,42 @@ export function PowerPolicyFields({
           aria-label="Maximum kilowatts per rack"
           {...bind(setRackKw)}
         />
-      </label>
-      <label>
-        Racks
+      </PolicyField>
+      <PolicyField
+        label="Racks"
+        tip="Suggested range from this budget: fewest at max kW/rack, most at min kW/rack. You can go below the low number; you cannot go above the high number."
+      >
         <span className="lps-policy-pct">
           <input
             type="number"
-            min={nStatic || 1}
-            max={nLps || live || 1}
+            min={1}
+            max={Math.max(1, nMax)}
             step={1}
             value={nRacks}
             aria-label="Number of racks to feed"
-            {...bind(setNRacks)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const n = Number(raw);
+              if (!Number.isFinite(n) || raw === "") {
+                setNRacks(raw);
+                return;
+              }
+              const hi = Math.max(1, nMax);
+              setNRacks(String(Math.max(1, Math.min(hi, Math.round(n)))));
+            }}
+            disabled={locked}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commit();
+              }
+            }}
           />
+          <small className="lps-field-hint">
+            {nMin}–{nMax}
+          </small>
         </span>
-      </label>
-      <p className="lps-rack-diff">
-        Range {nStatic}–{nLps} · envelope / max {Number.isFinite(maxLocal) ? Math.round(maxLocal) : "—"} kW
-        {" → "}
-        envelope / min {Number.isFinite(minLocal) ? Math.round(minLocal) : "—"} kW
-        {gain > 0 ? ` · +${gain} vs static` : live > 0 && nLps >= live ? " · floor is the limit" : ""}
-      </p>
-      <p>
-        {formatKw(Number.isFinite(totalLocal) ? totalLocal : 0)} × {Number.isFinite(pctLocal) ? Math.round(pctLocal) : 0}% = {formatKw(envLocal)} envelope
-        {live > 0 ? ` · ${live} live` : ""}
-        {` · ${source}`}
-      </p>
+      </PolicyField>
     </form>
   );
 }

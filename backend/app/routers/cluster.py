@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -404,6 +406,35 @@ def _running_workloads(db: Session) -> list[Workload]:
     return list(db.scalars(select(Workload).where(Workload.status == "running")).all())
 
 
+_POWER_CACHE: tuple[float, dict, list] | None = None
+
+
+def _invalidate_power_cache() -> None:
+    global _POWER_CACHE
+    _POWER_CACHE = None
+
+
+def _maxlps_inputs(db: Session) -> tuple[dict, list]:
+    """Reuse the limiter snapshot for ~1s so MaxLPS polls skip SQLite."""
+    global _POWER_CACHE
+    now = time.time()
+    if _POWER_CACHE and now - _POWER_CACHE[0] < 1.0:
+        return _POWER_CACHE[1], _POWER_CACHE[2]
+    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+    works = _running_workloads(db)
+    snap = power_limit.snapshot(_power_samples(rack_rows, works))
+    jobs = [
+        {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
+        for w in works
+    ]
+    _POWER_CACHE = (now, snap, jobs)
+    return snap, jobs
+
+
+def _json(data: dict) -> Response:
+    return Response(content=json.dumps(data, separators=(",", ":")), media_type="application/json")
+
+
 @router.get("/power")
 def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
@@ -417,15 +448,9 @@ def maxlps_view(
     gpu_id: str | None = Query(default=None),
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> dict:
-    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    works = _running_workloads(db)
-    snap = power_limit.snapshot(_power_samples(rack_rows, works))
-    jobs = [
-        {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
-        for w in works
-    ]
-    return gpu_power.snapshot(snap, top=top, rack_id=rack_id, gpu_id=gpu_id, workloads=jobs)
+) -> Response:
+    snap, jobs = _maxlps_inputs(db)
+    return _json(gpu_power.snapshot(snap, top=top, rack_id=rack_id, gpu_id=gpu_id, workloads=jobs))
 
 
 class GpuBoundPatch(BaseModel):
@@ -448,14 +473,9 @@ def patch_gpu_bounds(
     if payload.min_w is None and payload.max_w is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "min_w or max_w required")
     gpu_power.set_bounds(gpu_id, min_w=payload.min_w, max_w=payload.max_w)
-    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    works = _running_workloads(db)
-    snap = power_limit.snapshot(_power_samples(rack_rows, works))
-    jobs = [
-        {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
-        for w in works
-    ]
-    return gpu_power.snapshot(snap, top=0, gpu_id=gpu_id, workloads=jobs)
+    _invalidate_power_cache()
+    snap, jobs = _maxlps_inputs(db)
+    return _json(gpu_power.snapshot(snap, top=0, gpu_id=gpu_id, workloads=jobs))
 
 
 @router.patch("/power")
@@ -498,6 +518,7 @@ def patch_power_limiter(
     ):
         gpu_power.LOOP.force = True
         gpu_power.LOOP.last_caps = None
+    _invalidate_power_cache()
     rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
     return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
 

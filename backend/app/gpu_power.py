@@ -33,11 +33,13 @@ def _h01(key: str) -> float:
     return h / 0xFFFFFFFF
 
 
-GPU_POWER_PERCENT = 0.86
+GPU_POWER_PERCENT = 0.75
 DESIRED_CAP_PERCENT = 0.80  # usage should sit at this fraction of the posted cap
 DEFAULT_INTERVAL_S = 10.0
+DEFAULT_GPU_MIN_W = 200.0
+DEFAULT_GPU_MAX_W = 1200.0
 _HISTORY: list[dict[str, float]] = []
-_HISTORY_N = 48
+_HISTORY_N = 120
 HIST_N = 128
 HIST_DT = 0.25
 BACKFILL_N = 100
@@ -48,8 +50,8 @@ class LoopState:
         self.interval_s = DEFAULT_INTERVAL_S
         self.gpu_power_percent = GPU_POWER_PERCENT
         self.desired_cap_percent = DESIRED_CAP_PERCENT
-        self.gpu_min_w = GPU_IDLE_W
-        self.gpu_max_w = GPU_TDP_W
+        self.gpu_min_w = DEFAULT_GPU_MIN_W
+        self.gpu_max_w = DEFAULT_GPU_MAX_W
         self.last_step = 0.0
         self.last_used_kw = 0.0
         self.last_caps: list[float] | None = None
@@ -61,9 +63,13 @@ class LoopState:
         self.prev_usage: dict[str, float] = {}
         self.prev_usage_t: dict[str, float] = {}
         self.gpu_hist: dict[str, deque[dict[str, float]]] = {}
+        self.gpu_meta: dict[str, tuple[float, float]] = {}
+        self.usage_win: dict[str, deque[float]] = {}
+        self.sample_t: dict[str, float] = {}
         self.cached_out: dict[str, Any] | None = None
         self.cached_key: tuple[Any, ...] | None = None
         self.cache_t = 0.0
+        self.hist_t = 0.0
 
 
 LOOP = LoopState()
@@ -79,6 +85,7 @@ def apply_loop(
 ) -> bool:
     """Tune the GPU cap loop. Percents may be 0–1 or 10–100."""
     changed = False
+    reset_caps = False
     if interval_s is not None:
         v = max(1.0, min(300.0, float(interval_s)))
         if abs(v - LOOP.interval_s) >= 0.049:
@@ -97,27 +104,34 @@ def apply_loop(
         v = max(0.10, min(1.0, v))
         if abs(v - LOOP.desired_cap_percent) >= 0.0005:
             changed = True
+            reset_caps = True
         LOOP.desired_cap_percent = v
     if gpu_min_w is not None:
         v = max(50.0, min(GPU_TDP_W, float(gpu_min_w)))
         if abs(v - LOOP.gpu_min_w) >= 0.5:
             changed = True
+            reset_caps = True
         LOOP.gpu_min_w = v
     if gpu_max_w is not None:
         v = max(50.0, min(GPU_TDP_W, float(gpu_max_w)))
         if abs(v - LOOP.gpu_max_w) >= 0.5:
             changed = True
+            reset_caps = True
         LOOP.gpu_max_w = v
     if LOOP.gpu_min_w > LOOP.gpu_max_w:
         LOOP.gpu_min_w, LOOP.gpu_max_w = LOOP.gpu_max_w, LOOP.gpu_min_w
         changed = True
+        reset_caps = True
     if changed:
+        LOOP.cached_out = None
+    if reset_caps:
         LOOP.force = True
         LOOP.last_caps = None
         LOOP.last_cap_by_id.clear()
-        LOOP.cached_out = None
         LOOP.prev_usage.clear()
         LOOP.prev_usage_t.clear()
+        LOOP.usage_win.clear()
+        LOOP.sample_t.clear()
     return changed
 
 
@@ -183,11 +197,18 @@ def _smoothstep(u: float) -> float:
     return u * u * (3.0 - 2.0 * u)
 
 
+def _gpu_meta(gpu_id: str) -> tuple[float, float]:
+    meta = LOOP.gpu_meta.get(gpu_id)
+    if meta is None:
+        meta = (_h01(gpu_id + ":wl") * 160.0, _h01(gpu_id + ":busy"))
+        LOOP.gpu_meta[gpu_id] = meta
+    return meta
+
+
 def _workload_load(gpu_id: str, now: float) -> float:
     """0–1 envelope: idle → ramp up → hold → ramp down → idle."""
-    cycle = 160.0
-    phase = _h01(gpu_id + ":wl") * cycle
-    t = (now + phase) % cycle
+    phase, _ = _gpu_meta(gpu_id)
+    t = (now + phase) % 160.0
     idle0, up, hold, down = 28.0, 22.0, 72.0, 26.0
     if t < idle0:
         return 0.0
@@ -205,8 +226,21 @@ def _workload_load(gpu_id: str, now: float) -> float:
 
 def _activity(gpu_id: str, now: float, hot: bool, run_status: str) -> float:
     """0–1 GPU load with workload ramp-up / ramp-down."""
-    load = _workload_load(gpu_id, now)
-    busy = _h01(gpu_id + ":busy")
+    phase, busy = _gpu_meta(gpu_id)
+    t = (now + phase) % 160.0
+    idle0, up, hold, down = 28.0, 22.0, 72.0, 26.0
+    if t < idle0:
+        load = 0.0
+    else:
+        t -= idle0
+        if t < up:
+            load = _smoothstep(t / up)
+        elif t < up + hold:
+            load = 1.0
+        elif t < up + hold + down:
+            load = _smoothstep(1.0 - (t - up - hold) / down)
+        else:
+            load = 0.0
     if hot:
         lo_a, hi_a = (0.06, 0.92) if busy > 0.32 else (0.04, 0.18)
     elif run_status == "running":
@@ -337,22 +371,28 @@ def watch_curve(gpu_id: str) -> dict[str, Any]:
                 break
     act = 0.0 if off else _activity(gpu_id, now, hot, run)
     demand = 0.0 if off else _usage_w(act)
+    ceil = _cap_ceiling(lo, hi)
     if gpu_id in LOOP.last_cap_by_id:
-        sp = min(hi, max(lo, LOOP.last_cap_by_id[gpu_id]))
+        sp = min(ceil, max(lo, LOOP.last_cap_by_id[gpu_id]))
     elif cached and cached.get("setpoint_w") is not None:
-        sp = float(cached["setpoint_w"])
+        sp = min(ceil, max(lo, float(cached["setpoint_w"])))
     else:
-        sp = min(hi, max(lo, demand / max(LOOP.desired_cap_percent, 0.1)))
+        sp = min(ceil, max(lo, demand / max(LOOP.desired_cap_percent, 0.1)))
     target = min(demand, sp)
     u = 0.0 if off else _smooth_usage(gpu_id, target, now)
     watts = 0.0 if off else min(u, sp)
     curve = _ensure_hist(gpu_id, now, watts, sp, lo, hi, hot=hot, run=run, off=off)
+    job = _process(gpu_id, act, hot, run, [])
     return {
         "id": gpu_id,
         "watts": round(watts, 1),
         "setpoint_w": round(sp, 1),
         "min_w": round(lo, 1),
         "max_w": round(hi, 1),
+        "process": job["process"],
+        "workload": job["workload"],
+        "workload_kind": job["workload_kind"],
+        "pid": job["pid"],
         "curve": curve,
     }
 
@@ -363,32 +403,60 @@ def _usage_w(activity: float) -> float:
     return lo + (hi - lo) * a
 
 
+def _cap_ceiling(lo: float, hi: float) -> float:
+    """Posted cap never reaches the GPU max the operator set."""
+    if hi <= lo + 1:
+        return lo
+    return min(hi - 12.0, lo + (hi - lo) * 0.96)
+
+
+def _note_usage(gid: str, watts: float, now: float) -> None:
+    last = LOOP.sample_t.get(gid, 0.0)
+    if now - last < 0.7:
+        return
+    LOOP.sample_t[gid] = now
+    q = LOOP.usage_win.get(gid)
+    if q is None:
+        q = deque(maxlen=400)
+        LOOP.usage_win[gid] = q
+    q.append(watts)
+
+
+def _window_avg(gid: str, fallback: float) -> float:
+    q = LOOP.usage_win.get(gid)
+    if not q:
+        return fallback
+    return sum(q) / len(q)
+
+
 def _post_caps(
     usages: list[float],
     max_allowable_w: float,
     desired_p: float,
+    bounds: list[tuple[float, float]],
 ) -> tuple[list[float], float]:
-    """cap_i = usage_i / bestCapPercent, with bestCapPercent high enough that
-    sum(caps) fits in max_allowable_w.
+    """cap_i = avg_usage_i / bestCapPercent, fitted to the GPU share of the envelope.
 
     DESIRED_CAP_PERCENT is usage/cap (e.g. 0.80 → cap is 125% of usage).
-    If the cluster is short on budget, usage/cap is raised so total caps fit.
-    (p_fit = sum(usage)/allowable, not allowable/sum(usage).)
+    Caps stay below each GPU's max. If the cluster is short on budget,
+    usage/cap is raised so total caps fit (p_fit = sum(usage)/allowable).
     """
     n = len(usages)
-    idle, tdp = LOOP.gpu_min_w, LOOP.gpu_max_w
-    s = sum(usages)
     if n <= 0:
         return [], desired_p
+    s = sum(usages)
     if s <= 1:
-        return [idle] * n, desired_p
+        return [lo for lo, _hi in bounds], desired_p
     p_fit = s / max(max_allowable_w, 1.0)
     best_p = max(desired_p, p_fit, 1e-6)
-    caps = [min(tdp, max(idle, u / best_p)) for u in usages]
+    caps: list[float] = []
+    for u, (lo, hi) in zip(usages, bounds):
+        ceil = _cap_ceiling(lo, hi)
+        caps.append(min(ceil, max(lo, u / best_p)))
     total_cap = sum(caps)
     if total_cap > max_allowable_w and total_cap > 0:
         scale = max_allowable_w / total_cap
-        caps = [min(tdp, max(idle, c * scale)) for c in caps]
+        caps = [min(_cap_ceiling(lo, hi), max(lo, c * scale)) for c, (lo, hi) in zip(caps, bounds)]
     return caps, best_p
 
 
@@ -408,6 +476,32 @@ def _rack_label(name: str, fallback: str = "") -> str:
     if prefix:
         return f"{prefix}-{short}"
     return short or raw
+
+
+def _rack_shelves(rid: str, shelf_w: list[float], oh_w: float, shelf_kw: float) -> list[dict[str, Any]]:
+    n = SHELVES_PER_RACK
+    raw: list[float] = []
+    for i in range(n):
+        jitter = 0.9 + 0.2 * _h01(f"{rid}-ps{i}")
+        gpu_w = shelf_w[i] if i < len(shelf_w) else 0.0
+        raw.append(max(0.0, gpu_w + (oh_w / n) * jitter))
+    total = sum(raw)
+    out: list[dict[str, Any]] = []
+    if total <= 0:
+        even = round(shelf_kw / n, 2) if n else 0.0
+        for i in range(n):
+            kw = even if i < n - 1 else round(shelf_kw - even * (n - 1), 2)
+            out.append({"id": f"{rid}-ps{i + 1}", "index": i + 1, "kw": max(0.0, kw)})
+        return out
+    acc_kw = 0.0
+    for i, w in enumerate(raw):
+        if i == n - 1:
+            kw = round(shelf_kw - acc_kw, 2)
+        else:
+            kw = round(shelf_kw * (w / total), 2)
+            acc_kw += kw
+        out.append({"id": f"{rid}-ps{i + 1}", "index": i + 1, "kw": max(0.0, kw)})
+    return out
 
 
 def topology(n_racks: int) -> dict[str, Any]:
@@ -516,47 +610,40 @@ def snapshot(
     due = LOOP.force or (now - LOOP.last_step >= LOOP.interval_s)
     best_p = LOOP.last_best_p
     caps: list[float] = []
+    bounds: list[tuple[float, float]] = []
     for rec in records:
         lo, hi = _bounds_of(rec["id"])
+        bounds.append((lo, hi))
         stored = LOOP.last_cap_by_id.get(rec["id"])
         if stored is None:
             stored = rec["demand"] / max(desired_p, 0.1)
-        caps.append(min(hi, max(lo, stored)))
+        caps.append(min(_cap_ceiling(lo, hi), max(lo, stored)))
 
     usages: list[float] = []
-    at_posted: list[bool] = []
-    for rec, cap in zip(records, caps):
-        lo, hi = _bounds_of(rec["id"])
-        posted = min(hi, max(lo, cap))
+    for rec, cap, (lo, hi) in zip(records, caps, bounds):
+        posted = min(_cap_ceiling(lo, hi), max(lo, cap))
         demand = rec["demand"]
         target = min(demand, posted)
         u = 0.0 if rec["off"] else _smooth_usage(rec["id"], target, now)
         rec["usage"] = u
         usages.append(u)
-        at_posted.append(
-            (not rec["off"]) and u >= posted - 12 and demand > posted + 8 and posted < hi - 4
-        )
+        if not rec["off"]:
+            _note_usage(rec["id"], u, now)
 
-    hitting = any(at_posted)
     if due:
         LOOP.last_step = now
         LOOP.force = False
         LOOP.step_n += 1
-        caps, best_p = _post_caps(usages, max_allowable_w, desired_p)
+        avgs = [_window_avg(rec["id"], u) for rec, u in zip(records, usages)]
+        new_caps, best_p = _post_caps(avgs, max_allowable_w, desired_p, bounds)
+        blended: list[float] = []
+        for old, new, (lo, hi) in zip(caps, new_caps, bounds):
+            nxt = old * 0.4 + new * 0.6
+            blended.append(min(_cap_ceiling(lo, hi), max(lo, nxt)))
+        caps = blended
         LOOP.last_best_p = best_p
-    elif hitting:
-        new_caps, best_p = _post_caps(usages, max_allowable_w, desired_p)
-        merged: list[float] = []
-        for old, new, rec, at in zip(caps, new_caps, records, at_posted):
-            lo, hi = _bounds_of(rec["id"])
-            merged.append(min(hi, max(lo, new if at else old)))
-        total_cap = sum(merged)
-        if total_cap > max_allowable_w and total_cap > 0:
-            scale = max_allowable_w / total_cap
-            merged = [min(_bounds_of(rec["id"])[1], max(_bounds_of(rec["id"])[0], c * scale)) for rec, c in zip(records, merged)]
-        caps = merged
-        LOOP.last_best_p = max(best_p, LOOP.last_best_p)
-        LOOP.force = False
+        LOOP.usage_win.clear()
+        LOOP.sample_t.clear()
 
     LOOP.last_caps = caps
     for rec, c in zip(records, caps):
@@ -566,7 +653,7 @@ def snapshot(
         rack_usage_acc[rec["rack_id"]] = rack_usage_acc.get(rec["rack_id"], 0.0) + u
     shelf_pre += sum(rack_usage_acc.values())
 
-    gpu_pool: list[dict[str, Any]] = []
+    gpu_pool: list[tuple] = []
     rack_acc: dict[str, dict[str, Any]] = {}
     gpu_total_w = 0.0
     cap_total_w = 0.0
@@ -576,15 +663,11 @@ def snapshot(
     sp_n = 0
 
     jobs = workloads or []
-    running_jobs = [w for w in jobs if (w.get("status") or "") == "running"]
-    track_hist: set[str] = set(LOOP.bounds)
-    if gpu_id:
-        track_hist.add(gpu_id)
-    track_hist.update(LOOP.gpu_hist)
+    running_jobs = [w for w in jobs if (w.get("status") or "") == "running"] if gpu_id else []
 
     for rec, u, cap in zip(records, usages, caps):
         lo, hi = _bounds_of(rec["id"])
-        sp = round(min(hi, max(lo, cap)), 1)
+        sp = round(min(_cap_ceiling(lo, hi), max(lo, cap)), 1)
         watts = round(min(u, sp), 1)
         if rec["off"]:
             watts = 0.0
@@ -600,38 +683,7 @@ def snapshot(
             sp_n += 1
         keep = (not rack_id) or rec["rack_id"] == rack_id
         if keep:
-            job = _process(rec["id"], rec["act"], rec["hot_rack"], rec["run"], running_jobs)
-            item = {
-                "id": rec["id"],
-                "rack_id": rec["rack_id"],
-                "rack_label": rec["rack_label"],
-                "node": rec["node"],
-                "gpu": rec["gpu"],
-                "watts": watts,
-                "setpoint_w": sp,
-                "min_w": round(lo, 1),
-                "max_w": round(hi, 1),
-                "enabled": rec["enabled"],
-                "process": job["process"],
-                "workload": job["workload"],
-                "pid": job["pid"],
-                "spark": _spark_curve(rec["id"], now, rec["hot_rack"], rec["run"]),
-            }
-            if gpu_id and rec["id"] == gpu_id:
-                item["tdp_w"] = tdp_w
-                item["workload_kind"] = job["workload_kind"]
-                item["curve"] = _ensure_hist(
-                    rec["id"],
-                    now,
-                    watts,
-                    sp,
-                    lo,
-                    hi,
-                    hot=rec["hot_rack"],
-                    run=rec["run"],
-                    off=rec["off"],
-                )
-            gpu_pool.append(item)
+            gpu_pool.append((watts, rec["id"], rec, sp, lo, hi))
         acc = rack_acc.setdefault(
             rec["rack_id"],
             {
@@ -650,11 +702,16 @@ def snapshot(
                 "alloc_kw": rec["alloc_kw"],
                 "gpus_at_cap": 0,
                 "n": 0,
+                "shelf_w": [0.0] * SHELVES_PER_RACK,
             },
         )
         acc["gpu_w"] += watts
         acc["cap_w"] += sp
         acc["n"] += 1
+        gpus_per_shelf = max(1, GPUS_PER_RACK // SHELVES_PER_RACK)
+        gpu_i = (int(rec["node"]) - 1) * GPUS_PER_NODE + (int(rec["gpu"]) - 1)
+        si = min(SHELVES_PER_RACK - 1, max(0, gpu_i // gpus_per_shelf))
+        acc["shelf_w"][si] += watts
         if sp >= tdp_w - 8:
             acc["gpus_at_cap"] += 1
 
@@ -666,6 +723,7 @@ def snapshot(
         shelf_kw = round(gpu_kw + oh_kw, 2)
         shelf_total += shelf_kw
         n_on = acc["n"] if acc["power_state"] != "off" else 0
+        shelves = _rack_shelves(str(acc["id"]), list(acc.get("shelf_w") or []), acc["overhead_w"], shelf_kw)
         rack_out.append(
             {
                 "id": acc["id"],
@@ -679,6 +737,7 @@ def snapshot(
                 "extra": acc["extra"],
                 "shelf_kw": shelf_kw,
                 "shelf_count": SHELVES_PER_RACK,
+                "shelves": shelves,
                 "gpu_kw": round(gpu_kw, 2),
                 "overhead_kw": round(oh_kw, 2),
                 "allocated_kw": round(acc["alloc_kw"], 1),
@@ -701,44 +760,50 @@ def snapshot(
         used_kw = nxt
     rack_out = kept
     keep_ids = {r["id"] for r in rack_out}
-    gpu_pool = [g for g in gpu_pool if g["rack_id"] in keep_ids]
-    gpu_pool.sort(key=lambda g: (-g["watts"], g["id"]))
-    for i, g in enumerate(gpu_pool, start=1):
-        g["rank"] = i
-    if gpu_id:
-        for g in gpu_pool:
-            if g["id"] != gpu_id:
-                continue
-            g["curve"] = _ensure_hist(
-                g["id"],
-                now,
-                g["watts"],
-                g["setpoint_w"],
-                g["min_w"],
-                g["max_w"],
-                hot=bool(g.get("hot")),
-                run="running",
-                off=not g.get("enabled", True),
+    gpu_pool = [row for row in gpu_pool if row[2]["rack_id"] in keep_ids]
+    gpu_pool.sort(key=lambda row: (-row[0], row[1]))
+    limit = len(gpu_pool) if (not top or rack_id) else max(8, min(int(top), len(gpu_pool)))
+    shown: list[dict[str, Any]] = []
+    picked: dict[str, Any] | None = None
+    gpu_total_w = 0.0
+    cap_total_w = 0.0
+    for i, (watts, gid, rec, sp, lo, hi) in enumerate(gpu_pool, start=1):
+        gpu_total_w += watts
+        cap_total_w += sp
+        if i > limit and not (gpu_id and gid == gpu_id):
+            continue
+        item = {
+            "id": gid,
+            "rack_id": rec["rack_id"],
+            "rack_label": rec["rack_label"],
+            "node": rec["node"],
+            "gpu": rec["gpu"],
+            "watts": watts,
+            "setpoint_w": sp,
+            "min_w": round(lo, 1),
+            "max_w": round(hi, 1),
+            "enabled": rec["enabled"],
+            "rank": i,
+        }
+        if gpu_id and gid == gpu_id:
+            job = _process(gid, rec["act"], rec["hot_rack"], rec["run"], running_jobs)
+            item["process"] = job["process"]
+            item["workload"] = job["workload"]
+            item["pid"] = job["pid"]
+            item["tdp_w"] = tdp_w
+            item["workload_kind"] = job["workload_kind"]
+            item["curve"] = _ensure_hist(
+                gid, now, watts, sp, lo, hi, hot=rec["hot_rack"], run=rec["run"], off=rec["off"]
             )
-            break
-    if due:
-        for g in gpu_pool[:32]:
-            track_hist.add(g["id"])
-        if gpu_id:
-            track_hist.add(gpu_id)
-        by_id = {g["id"]: g for g in gpu_pool}
-        for gid in list(track_hist):
-            g = by_id.get(gid)
-            if not g:
-                continue
-            _record_hist(gid, now, g["watts"], g["setpoint_w"], g["min_w"], g["max_w"])
-            if gpu_id and gid == gpu_id:
-                hist = LOOP.gpu_hist.get(gid)
-                if hist:
-                    g["curve"] = list(hist)
-    shown = gpu_pool if (not top or rack_id) else gpu_pool[: max(8, min(int(top), len(gpu_pool)))]
-    gpu_total_w = sum(float(g["watts"]) for g in gpu_pool)
-    cap_total_w = sum(float(g["setpoint_w"]) for g in gpu_pool)
+            picked = item
+        shown.append(item)
+        if due and i <= 32:
+            _record_hist(gid, now, watts, sp, lo, hi)
+    if due and gpu_id and picked:
+        _record_hist(gpu_id, now, picked["watts"], picked["setpoint_w"], picked["min_w"], picked["max_w"])
+        hist = LOOP.gpu_hist.get(gpu_id)
+        if hist:
+            picked["curve"] = list(hist)
     overhead_total_w = sum(float(r["overhead_kw"]) for r in rack_out) * 1000.0
     n_racks = len(rack_out)
     free_kw = available_kw - used_kw
@@ -748,6 +813,8 @@ def snapshot(
     if due:
         used_delta = 0.0 if prev_used <= 0 else used_kw - prev_used
         LOOP.last_used_kw = used_kw
+    if now - LOOP.hist_t >= 0.85:
+        LOOP.hist_t = now
         _HISTORY.append(
             {
                 "t": round(now, 1),

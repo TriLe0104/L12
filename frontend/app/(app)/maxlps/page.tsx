@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
+import { PolicyField, PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
 import { api } from "@/lib/api";
 import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView } from "@/lib/cluster";
 import { formatKw, formatW } from "@/lib/cluster";
@@ -12,7 +12,33 @@ import "./maxlps.css";
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const ROW_H = 34;
-const SWAP_MS = 720;
+const SWAP_MS = 880;
+
+function mergeRankBoard(prevIds: string[] | null, incoming: MaxLpsGpu[]): MaxLpsGpu[] {
+  if (!incoming.length) return incoming;
+  const byId = new Map(incoming.map((g) => [g.id, g]));
+  if (!prevIds?.length) return incoming;
+  const inSet = new Set(incoming.map((g) => g.id));
+  const kept = prevIds.filter((id) => inSet.has(id));
+  kept.sort((a, b) => {
+    const ra = byId.get(a)?.rank ?? 0;
+    const rb = byId.get(b)?.rank ?? 0;
+    return ra - rb || a.localeCompare(b);
+  });
+  const have = new Set(kept);
+  const board = kept.slice();
+  for (const g of incoming) {
+    if (have.has(g.id)) continue;
+    const idx = board.findIndex((id) => (byId.get(id)?.rank ?? 0) > g.rank);
+    if (idx === -1) board.push(g.id);
+    else board.splice(idx, 0, g.id);
+    have.add(g.id);
+  }
+  return board
+    .slice(0, incoming.length)
+    .map((id) => byId.get(id))
+    .filter((g): g is MaxLpsGpu => Boolean(g));
+}
 
 function rankLabel(n: number) {
   if (n === 1) return "1st";
@@ -37,6 +63,7 @@ export default function MaxLpsPage() {
   const [view, setView] = useState<MaxLpsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rackId, setRackId] = useState<string | null>(null);
+  const [openRacks, setOpenRacks] = useState<Record<string, boolean>>({});
   const [gpuId, setGpuId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -60,12 +87,13 @@ export default function MaxLpsPage() {
   const prevUsed = useRef<number | null>(null);
   const pollMs = 1000;
   const loopStepRef = useRef<number | null>(null);
+  const reshuffleRef = useRef(false);
   const [wattTick, setWattTick] = useState(0);
 
   const load = useCallback(async () => {
     const gen = ++loadGen.current;
     try {
-      const next = await api.maxlps({ top: 0, rack_id: rackId, gpu_id: gpuIdRef.current });
+      const next = await api.maxlps({ top: 0, rack_id: rackId });
       if (gen !== loadGen.current) return;
       const firstBoard = prevRank.current.size === 0;
       const nextDelta: Record<string, number | "new"> = {};
@@ -97,7 +125,8 @@ export default function MaxLpsPage() {
       const step = next.loop_step ?? next.tick ?? 0;
       if (loopStepRef.current == null || step !== loopStepRef.current) {
         loopStepRef.current = step;
-        frozenIds.current = null;
+        if (sortKeyRef.current === "rank") reshuffleRef.current = true;
+        else frozenIds.current = null;
         setLoopReset((n) => n + 1);
       }
       setError(null);
@@ -138,7 +167,7 @@ export default function MaxLpsPage() {
   const locked = pending;
   const totalKw = totals?.total_kw ?? view?.total_budget_kw ?? 0;
   const gracePct = view?.threshold_pct ?? view?.algo?.budget_grace ?? 80;
-  const gpuPct = view?.algo?.gpu_power_percent ?? 86;
+  const gpuPct = view?.algo?.gpu_power_percent ?? 75;
   const rackAvailKw = totalKw * (gracePct / 100);
   const gpuAvailKw = rackAvailKw * (gpuPct / 100);
   const rackUsedKw = useMemo(
@@ -213,7 +242,28 @@ export default function MaxLpsPage() {
       return rows;
     };
     const byId = new Map(src.map((g) => [g.id, g]));
-    if (sortKey === "rank" && !frozenIds.current?.length) {
+    if (sortKey === "rank") {
+      if (reshuffleRef.current) {
+        reshuffleRef.current = false;
+        const merged = mergeRankBoard(frozenIds.current, sortDir === "asc" ? src : sortOnce(src.slice()));
+        frozenIds.current = merged.map((g) => g.id);
+        return merged;
+      }
+      if (frozenIds.current?.length) {
+        const have = new Set<string>();
+        const ordered: MaxLpsGpu[] = [];
+        for (const id of frozenIds.current) {
+          const g = byId.get(id);
+          if (!g) continue;
+          ordered.push(g);
+          have.add(id);
+        }
+        for (const g of src) {
+          if (!have.has(g.id)) ordered.push(g);
+        }
+        frozenIds.current = ordered.map((g) => g.id);
+        return ordered;
+      }
       const rows = sortDir === "asc" ? src : sortOnce(src.slice());
       frozenIds.current = rows.map((g) => g.id);
       return rows;
@@ -291,17 +341,17 @@ export default function MaxLpsPage() {
       {error ? <p className="cluster-error">{error}</p> : null}
 
       <section className="maxlps-stats">
-        <article>
-          <span>Total power</span>
-          <b>{formatKw(totalKw)}</b>
-          <small>Cap · POWER_BUDGET</small>
-        </article>
         <article data-lead="true">
-          <span>Available</span>
+          <span>Total power</span>
           <b>{formatKw(rackAvailKw)}</b>
           <small>
             {formatKw(totalKw)} × {Math.round(gracePct)}%
           </small>
+        </article>
+        <article data-free={rackAvailKw - rackUsedKw < 0 ? "over" : "ok"}>
+          <span>Free</span>
+          <b>{formatKw(Math.max(0, rackAvailKw - rackUsedKw))}</b>
+          <small>Not in use</small>
         </article>
         <article>
           <span>Rack sum</span>
@@ -315,7 +365,7 @@ export default function MaxLpsPage() {
             ) : null}
           </b>
           <small>
-            Σ {nRacks.toLocaleString()} rack shelves
+            Σ {nRacks.toLocaleString()} racks
           </small>
         </article>
         <article>
@@ -330,7 +380,7 @@ export default function MaxLpsPage() {
             ) : null}
           </b>
           <small>
-            Σ {nGpus.toLocaleString()} GPU · share {formatKw(gpuAvailKw)}
+            Σ {nGpus.toLocaleString()} GPU
           </small>
         </article>
       </section>
@@ -348,8 +398,6 @@ export default function MaxLpsPage() {
         history={view?.history}
         nRacks={nRacks}
         nGpus={nGpus}
-        gracePct={gracePct}
-        gpuPct={gpuPct}
       />
 
       <div className="maxlps-grid">
@@ -357,7 +405,7 @@ export default function MaxLpsPage() {
           <header>
             <h2>Racks</h2>
             <p>
-              Power shelves summed per rack
+              Sum of power shelves per rack
               {view?.racks?.length ? ` · ${formatKw(rackUsedKw)} cluster` : ""}
             </p>
             {rackId ? (
@@ -370,7 +418,14 @@ export default function MaxLpsPage() {
             {[...(view?.racks ?? [])]
               .sort((a, b) => a.label.localeCompare(b.label))
               .map((r) => (
-                <ShelfRow key={r.id} rack={r} active={r.id === rackId} onSelect={() => setRackId(r.id === rackId ? null : r.id)} />
+                <ShelfRow
+                  key={r.id}
+                  rack={r}
+                  active={r.id === rackId}
+                  open={Boolean(openRacks[r.id])}
+                  onSelect={() => setRackId(r.id === rackId ? null : r.id)}
+                  onToggle={() => setOpenRacks((cur) => ({ ...cur, [r.id]: !cur[r.id] }))}
+                />
               ))}
           </div>
         </aside>
@@ -465,10 +520,10 @@ export default function MaxLpsPage() {
               )}
               <LoopFields
                 intervalS={view?.algo?.interval_s ?? 10}
-                gpuPowerPct={view?.algo?.gpu_power_percent ?? 86}
+                gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 desiredCapPct={view?.algo?.desired_cap_percent ?? 80}
-                gpuMinW={view?.algo?.gpu_min_w ?? 180}
-                gpuMaxW={view?.algo?.gpu_max_w ?? 1400}
+                gpuMinW={view?.algo?.gpu_min_w ?? 200}
+                gpuMaxW={view?.algo?.gpu_max_w ?? 1200}
                 locked={locked}
                 onChange={() => void load()}
               />
@@ -524,6 +579,11 @@ function logApproach(min: number, current: number, n = 12) {
   return pts;
 }
 
+function plotY(v: number, vmin: number, vmax: number, h: number, pad: number) {
+  const t = (v - vmin) / Math.max(vmax - vmin, 1e-6);
+  return h - pad - Math.max(0, Math.min(1, t)) * (h - pad * 2);
+}
+
 function logY(v: number, vmin: number, vmax: number, h: number, pad: number) {
   const a = Math.log10(Math.max(v, vmin));
   const b = Math.log10(vmin);
@@ -554,7 +614,7 @@ function MixBar({
   tick,
   tone,
   capName,
-  formula,
+  endName = "Total",
 }: {
   title: string;
   countLabel: string;
@@ -565,7 +625,7 @@ function MixBar({
   tick: number;
   tone: "racks" | "gpus";
   capName: string;
-  formula?: string;
+  endName?: string;
 }) {
   const scale = Math.max(totalKw, usedKw, capKw, 1);
   const usedPct = Math.min(100, (usedKw / scale) * 100);
@@ -579,16 +639,25 @@ function MixBar({
   const gainWidth = Math.abs(usedPct - prevPct);
   const offLabel =
     Math.abs(usedDelta) >= 0.5 ? `${usedDelta > 0 ? "+" : ""}${formatKw(usedDelta)}` : "";
+  const sumEdge = usedPct < 10 ? "start" : usedPct > 92 ? "end" : "mid";
   return (
     <div className="maxlps-mix-row">
       <div className="maxlps-mix-head">
         <strong>{title}</strong>
         <span>{countLabel}</span>
+        <div className="maxlps-mix-metrics">
+          <b data-k="cap">
+            {capName} {formatKw(capKw)}
+          </b>
+          <b data-k="total">
+            {endName} {formatKw(totalKw)}
+          </b>
+        </div>
       </div>
       <div
         className="maxlps-mix-bar"
         data-readjust={offLabel ? "true" : undefined}
-        title={`${title} sum ${formatKw(usedKw)} · ${capName} ${formatKw(capKw)} · total ${formatKw(totalKw)}`}
+        title={`${title} sum ${formatKw(usedKw)} · ${capName} ${formatKw(capKw)} · ${endName} ${formatKw(totalKw)}`}
       >
         {usedDelta < -0.5 ? (
           <i
@@ -604,7 +673,7 @@ function MixBar({
         {overPct > 0 ? <i data-k="over" style={{ left: `${usedPct - overPct}%`, width: `${overPct}%` }} /> : null}
         <i data-k="free" style={{ left: `${usedPct}%`, width: `${freePct}%` }} />
         <b data-k="cap" style={{ left: `${capPct}%` }} title={`${capName} ${formatKw(capKw)}`} />
-        <b data-k="total" title={`Total ${formatKw(totalKw)}`} />
+        <b data-k="total" title={`${endName} ${formatKw(totalKw)}`} />
         {offLabel ? (
           <em key={`d-${tick}`} data-off={usedDelta >= 0 ? "up" : "down"}>
             {offLabel}
@@ -612,15 +681,10 @@ function MixBar({
         ) : null}
       </div>
       <div className="maxlps-mix-marks">
-        <span data-k="sum" style={{ left: `min(${usedPct}%, 86%)` }}>
+        <span data-k="sum" data-edge={sumEdge} style={{ left: `${Math.min(usedPct, 100)}%` }}>
           Σ {formatKw(usedKw)}
         </span>
-        <span data-k="cap" style={{ left: `${capPct}%` }}>
-          {capName} {formatKw(capKw)}
-        </span>
-        <span data-k="total">Total {formatKw(totalKw)}</span>
       </div>
-      {formula ? <p className="maxlps-algo">{formula}</p> : null}
     </div>
   );
 }
@@ -638,8 +702,6 @@ const MixChart = memo(function MixChart({
   history,
   nRacks,
   nGpus,
-  gracePct,
-  gpuPct,
 }: {
   totalKw: number;
   rackAvailKw: number;
@@ -653,32 +715,33 @@ const MixChart = memo(function MixChart({
   history: MaxLpsView["history"];
   nRacks: number;
   nGpus: number;
-  gracePct: number;
-  gpuPct: number;
 }) {
   const w = 420;
   const h = 72;
   const pad = 4;
-  const scale = Math.max(totalKw, rackUsedKw, gpuUsedKw, rackAvailKw, 1);
   const lines = useMemo(() => {
-    const rows = history ?? [];
-    let ymax = Math.max(scale, totalKw, 10);
-    for (const p of rows) {
-      ymax = Math.max(
-        ymax,
-        p.used_kw ?? p.shelf_kw,
-        p.gpu_kw,
-        p.available_kw ?? 0,
-        p.allowable_kw ?? 0,
-      );
-    }
-    const ymin = 1;
+    const rows = [...(history ?? [])];
+    rows.push({
+      t: Date.now() / 1000,
+      gpu_kw: gpuUsedKw,
+      overhead_kw: overheadKw,
+      shelf_kw: rackUsedKw,
+      used_kw: rackUsedKw,
+      available_kw: rackAvailKw,
+      allowable_kw: gpuAvailKw,
+    });
+    const focus = rows.flatMap((p) => [p.used_kw ?? p.shelf_kw, p.gpu_kw]).filter((n) => n > 0);
+    let ymin = focus.length ? Math.min(...focus) : 0;
+    let ymax = focus.length ? Math.max(...focus) : Math.max(rackAvailKw, totalKw, 10);
+    const span = Math.max(ymax - ymin, ymax * 0.08, 8);
+    ymin = Math.max(0, ymin - span * 0.25);
+    ymax = ymax + span * 0.2;
     const toPts = (pick: (p: (typeof rows)[number]) => number) => {
       if (rows.length < 2) return "";
       return rows
         .map((p, i) => {
           const x = pad + (i / Math.max(1, rows.length - 1)) * (w - pad * 2);
-          const y = logY(pick(p), ymin, ymax, h, pad);
+          const y = plotY(pick(p), ymin, ymax, h, pad);
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         })
         .join(" ");
@@ -690,13 +753,13 @@ const MixChart = memo(function MixChart({
       oh: toPts((p) => p.overhead_kw),
       gpu: toPts((p) => p.gpu_kw),
     };
-  }, [history, scale, totalKw]);
+  }, [history, totalKw, gpuUsedKw, rackUsedKw, overheadKw, rackAvailKw, gpuAvailKw]);
   return (
     <section className="maxlps-mix">
       <div className="maxlps-mix-bars">
         <MixBar
           title="Racks"
-          countLabel={`${nRacks.toLocaleString()} · shelves`}
+          countLabel={`${nRacks.toLocaleString()} · racks`}
           usedKw={rackUsedKw}
           capKw={rackAvailKw}
           totalKw={totalKw}
@@ -704,19 +767,18 @@ const MixChart = memo(function MixChart({
           tick={tick}
           tone="racks"
           capName="Available"
-          formula={`Σ ${nRacks} rack shelves · available = budget × ${Math.round(gracePct)}%`}
         />
         <MixBar
           title="GPUs"
           countLabel={`${nGpus.toLocaleString()} · GB300`}
           usedKw={gpuUsedKw}
           capKw={gpuAvailKw}
-          totalKw={totalKw}
+          totalKw={rackAvailKw}
           usedDelta={gpuDelta}
           tick={tick}
           tone="gpus"
           capName="GPU share"
-          formula={`Σ GPU watts · share = budget × ${Math.round(gracePct)}% × ${Math.round(gpuPct)}% GPU`}
+          endName="Available"
         />
         <ul>
           <li data-k="used">Rack sum {formatKw(rackUsedKw)}</li>
@@ -768,6 +830,7 @@ function VirtualGpus({
   }, [gpus]);
   const prevPos = useRef<Map<string, number>>(new Map());
   const prevTops = useRef<Map<string, number>>(new Map());
+  const prevOrder = useRef<string>("");
   const prevWindow = useRef({ start: 0, end: 0 });
   const holdIds = useRef<Set<string>>(new Set());
   const [holdGen, setHoldGen] = useState(0);
@@ -809,14 +872,16 @@ function VirtualGpus({
 
   const slots: number[] = [];
   for (let i = start; i < end; i++) slots.push(i);
+  const orderKey = useMemo(() => gpus.map((g) => g.id).join("|"), [gpus]);
 
   useLayoutEffect(() => {
     const last = captureFlipTops(rootRef.current);
-    if (prevTops.current.size) {
+    if (prevOrder.current && prevOrder.current !== orderKey && prevTops.current.size) {
       playEntrySwap(rootRef.current, prevTops.current, { duration: SWAP_MS });
     }
+    prevOrder.current = orderKey;
     prevTops.current = last;
-  }, [gpus, shuffle, tick]);
+  }, [orderKey]);
 
   useLayoutEffect(() => {
     const next = new Map<string, number>();
@@ -841,9 +906,8 @@ function VirtualGpus({
   return (
     <div ref={rootRef} className="maxlps-gpu-virt" style={{ height: Math.max(gpus.length * ROW_H, viewH) }}>
       {slots.map((i) => {
-        const g = gpus[i];
-        if (!g) return null;
-        const place = g.rank <= 3 ? String(g.rank) : undefined;
+        if (!gpus[i]) return null;
+        const place = shuffle && i < 3 ? String(i + 1) : undefined;
         return (
           <div
             key={`place-${i}`}
@@ -855,9 +919,8 @@ function VirtualGpus({
       })}
       <div className="maxlps-rank-overlay" aria-hidden>
         {slots.map((i) => {
-          const g = gpus[i];
-          if (!g) return null;
-          const place = g.rank <= 3 ? String(g.rank) : undefined;
+          if (!gpus[i]) return null;
+          const place = shuffle && i < 3 ? String(i + 1) : undefined;
           return (
             <span
               key={i}
@@ -865,7 +928,7 @@ function VirtualGpus({
               data-place={place}
               style={{ top: i * ROW_H, height: ROW_H }}
             >
-              {rankLabel(g.rank)}
+              {place ? rankLabel(i + 1) : String(i + 1)}
             </span>
           );
         })}
@@ -891,34 +954,71 @@ function VirtualGpus({
   );
 }
 
+function formatShelfKw(kw: number) {
+  if (kw >= 100) return formatKw(kw);
+  return `${kw.toFixed(1)} kW`;
+}
+
 function ShelfRow({
   rack,
   active,
+  open,
   onSelect,
+  onToggle,
 }: {
   rack: MaxLpsShelf;
   active: boolean;
+  open: boolean;
   onSelect: () => void;
+  onToggle: () => void;
 }) {
+  const shelves = rack.shelves ?? [];
   const cap = Math.max(rack.allocated_kw, rack.shelf_kw, 1);
   const pct = Math.min(100, (rack.shelf_kw / cap) * 100);
+  const shelfCap = Math.max(...shelves.map((s) => s.kw), 0.1);
   return (
-    <button
-      type="button"
-      className="maxlps-shelf"
-      data-active={active ? "true" : undefined}
-      data-hot={rack.hot ? "true" : undefined}
-      data-off={rack.power_state === "off" || !rack.enabled ? "true" : undefined}
-      onClick={onSelect}
-    >
-      <span className="maxlps-shelf-id">{rack.label}</span>
-      <span className="maxlps-shelf-bar" aria-hidden>
-        <i data-k="ps" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="maxlps-shelf-kw" title="Sum of power shelves">
-        {formatKw(rack.shelf_kw)}
-      </span>
-    </button>
+    <div className="maxlps-rack-block" data-open={open ? "true" : undefined}>
+      <div
+        className="maxlps-shelf"
+        data-active={active ? "true" : undefined}
+        data-hot={rack.hot ? "true" : undefined}
+        data-off={rack.power_state === "off" || !rack.enabled ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className="maxlps-rack-tri"
+          aria-expanded={open}
+          aria-label={open ? `Collapse ${rack.label} power shelves` : `Expand ${rack.label} power shelves`}
+          disabled={!shelves.length}
+          onClick={onToggle}
+        >
+          <i aria-hidden />
+        </button>
+        <button type="button" className="maxlps-shelf-main" onClick={onSelect}>
+          <span className="maxlps-shelf-id">{rack.label}</span>
+          <span className="maxlps-shelf-bar" aria-hidden>
+            <i data-k="ps" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="maxlps-shelf-kw" title="Sum of power shelves">
+            {formatKw(rack.shelf_kw)}
+          </span>
+        </button>
+      </div>
+      {open && shelves.length ? (
+        <ul className="maxlps-ps-list">
+          {shelves.map((s) => (
+            <li key={s.id} className="maxlps-ps">
+              <span />
+              <span className="maxlps-shelf-id">PS{s.index}</span>
+              <span className="maxlps-shelf-bar" aria-hidden>
+                <i data-k="ps" style={{ width: `${Math.min(100, (s.kw / shelfCap) * 100)}%` }} />
+              </span>
+              <span className="maxlps-shelf-kw">{formatShelfKw(s.kw)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -1020,15 +1120,19 @@ function LoopFields({
         void commit();
       }}
     >
-      <label>
-        Frequency
+      <PolicyField
+        label="Frequency"
+        tip="How often posted GPU caps are recalculated. Draw still updates every second; each interval uses average watts from that window."
+      >
         <span className="lps-policy-pct">
           <input type="number" min={1} max={300} step={1} value={freq} aria-label="Control loop interval in seconds" {...bind(setFreq)} />
           s
         </span>
-      </label>
-      <label>
-        GPU power
+      </PolicyField>
+      <PolicyField
+        label="GPU power"
+        tip="Share of available power (total × threshold) reserved for GPUs. Caps refit to this on the next frequency tick."
+      >
         <span className="lps-policy-pct">
           <input
             type="number"
@@ -1041,9 +1145,11 @@ function LoopFields({
           />
           %
         </span>
-      </label>
-      <label>
-        Desired cap
+      </PolicyField>
+      <PolicyField
+        label="Desired cap"
+        tip="Target load versus the posted cap. The cap stays above average draw and never reaches the GPU max you set."
+      >
         <span className="lps-policy-pct">
           <input
             type="number"
@@ -1056,24 +1162,25 @@ function LoopFields({
           />
           %
         </span>
-      </label>
-      <label>
-        GPU min
+      </PolicyField>
+      <PolicyField
+        label="GPU min"
+        tip="Floor watts for every GPU. Idle draw and the lowest cap the loop will post."
+      >
         <span className="lps-policy-pct">
           <input type="number" min={50} max={1400} step={10} value={minW} aria-label="GPU minimum watts" {...bind(setMinW)} />
           W
         </span>
-      </label>
-      <label>
-        GPU max
+      </PolicyField>
+      <PolicyField
+        label="GPU max"
+        tip="Ceiling watts. The loop will not post a GPU cap above this value."
+      >
         <span className="lps-policy-pct">
           <input type="number" min={50} max={1400} step={10} value={maxW} aria-label="GPU maximum watts" {...bind(setMaxW)} />
           W
         </span>
-      </label>
-      <p>
-        Min–max is the range you set. Cap = usage / desired% (fits GPU power % of the envelope).
-      </p>
+      </PolicyField>
     </form>
   );
 }
@@ -1219,12 +1326,20 @@ function GpuInspector({
     min: number;
     max: number;
     curve: MaxLpsGpu["curve"];
+    process?: string;
+    workload?: string;
+    workloadKind?: string;
+    pid?: number;
   }>(() => ({
     watts: gpu.watts,
     cap: gpu.setpoint_w,
     min: gpu.min_w,
     max: gpu.max_w ?? gpu.setpoint_w,
     curve: curve ?? gpu.curve,
+    process: gpu.process,
+    workload: gpu.workload,
+    workloadKind: gpu.workload_kind,
+    pid: gpu.pid,
   }));
   const editing = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -1236,6 +1351,10 @@ function GpuInspector({
       min: gpu.min_w,
       max: gpu.max_w ?? gpu.setpoint_w,
       curve: curve ?? gpu.curve,
+      process: gpu.process,
+      workload: gpu.workload,
+      workloadKind: gpu.workload_kind,
+      pid: gpu.pid,
     });
   }, [gpu.id]);
 
@@ -1251,6 +1370,10 @@ function GpuInspector({
           min: data.min_w,
           max: data.max_w,
           curve: data.curve,
+          process: data.process,
+          workload: data.workload,
+          workloadKind: data.workload_kind,
+          pid: data.pid,
         });
       } catch {
         /* keep last window */
@@ -1308,17 +1431,19 @@ function GpuInspector({
       <dl className="maxlps-detail">
         <div>
           <dt>Process</dt>
-          <dd>{gpu.process ?? "—"}</dd>
+          <dd>{live.process ?? gpu.process ?? "—"}</dd>
         </div>
         <div>
           <dt>PID</dt>
-          <dd>{gpu.pid ? gpu.pid : "—"}</dd>
+          <dd>{live.pid || gpu.pid ? live.pid || gpu.pid : "—"}</dd>
         </div>
         <div className="maxlps-inspect-span">
           <dt>Workload</dt>
           <dd>
-            {gpu.workload ?? "—"}
-            {gpu.workload_kind && gpu.workload_kind !== "idle" ? ` · ${gpu.workload_kind}` : ""}
+            {live.workload ?? gpu.workload ?? "—"}
+            {(live.workloadKind ?? gpu.workload_kind) && (live.workloadKind ?? gpu.workload_kind) !== "idle"
+              ? ` · ${live.workloadKind ?? gpu.workload_kind}`
+              : ""}
           </dd>
         </div>
       </dl>

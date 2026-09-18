@@ -145,6 +145,10 @@ export const api = {
       setpoint_w: number;
       min_w: number;
       max_w: number;
+      process?: string;
+      workload?: string;
+      workload_kind?: string;
+      pid?: number;
       curve: { t: number; w: number; cap: number; min?: number; max?: number }[];
     }>(`/api/cluster/maxlps/gpus/${encodeURIComponent(gpuId)}/curve`),
   patchMaxlpsGpu: (gpuId: string, payload: { min_w?: number; max_w?: number }) =>

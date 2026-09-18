@@ -18,7 +18,8 @@ MAX_TOTAL_KW = 10_000_000.0  # 10 GW planning cap for typed total power
 DEFAULT_MAX_RACK_KW = 135.0
 DEFAULT_MIN_RACK_KW = 40.0
 DEFAULT_STAY_UNDER_PCT = 80.0
-DEFAULT_TOTAL_KW = 10_000.0  # 10 MW
+DEFAULT_TOTAL_KW = 1_000.0  # 1 MW
+DEFAULT_RACK_COUNT = 5
 REDUCE_GAP = 0.20
 INCREASE_GAP = 0.05
 TARGET_HEADROOM = 0.12
@@ -71,38 +72,33 @@ def envelope_kw(n_on: int = 0) -> float:
     return DEFAULT_TOTAL_KW * pct
 
 
-def _fit_n(budget: float, kw: float, live: int) -> int:
-    if kw <= 0 or budget <= 0:
-        return 0
-    fit = int(budget // kw)
-    if live > 0:
-        return max(0, min(fit, live))
-    return max(0, fit)
-
-
 def n_static_cap(n_on: int = 0) -> int:
-    """Racks static allocation can feed if every rack sits at max kW."""
-    live = n_on or STATE.live_on
-    env = envelope_kw(live)
-    hi, lo = rack_hard_kw(), rack_min_kw()
-    n = _fit_n(env, hi, live)
-    if n == 0 and live > 0 and env >= lo:
-        return 1
-    return n
+    """Fewest racks this budget can support: (total × threshold) / max kW per rack."""
+    env = envelope_kw(n_on)
+    hi = rack_hard_kw()
+    if hi <= 0 or env <= 0:
+        return 0
+    return int(env // hi)
 
 
 def n_lps_cap(n_on: int = 0) -> int:
-    """Racks MaxLPS can feed if idle racks sit at min kW."""
-    live = n_on or STATE.live_on
-    return _fit_n(envelope_kw(live), rack_min_kw(), live)
+    """Most racks this budget can support: (total × threshold) / min kW per rack."""
+    env = envelope_kw(n_on)
+    lo = rack_min_kw()
+    if lo <= 0 or env <= 0:
+        return 0
+    return int(env // lo)
 
 
 def n_wanted(n_on: int = 0) -> int:
-    """Racks to feed: user count clamped to [envelope/max, envelope/min] and live floor."""
+    """Racks to feed: user count, hard-capped at envelope/min kW (and live pool).
+
+    Lower bound is only a suggestion (envelope/max kW). Operators may feed fewer
+    racks; they may not exceed what the budget can support at min kW/rack.
+    """
     live = n_on or STATE.live_on
-    lo, hi = n_static_cap(n_on), n_lps_cap(n_on)
-    if hi < lo:
-        hi = lo
+    hi = n_lps_cap(n_on)
+    lo = n_static_cap(n_on)
     if STATE.rack_count is None:
         return hi if STATE.mode == "dynamic" else lo
     n = int(STATE.rack_count)
@@ -110,7 +106,7 @@ def n_wanted(n_on: int = 0) -> int:
         n = min(n, live)
     if hi <= 0:
         return 0
-    return max(lo, min(hi, n))
+    return max(1, min(hi, n))
 
 
 def n_feed(n_on: int = 0) -> int:
@@ -279,7 +275,7 @@ class LimiterState:
     min_rack_kw: float = DEFAULT_MIN_RACK_KW
     stay_under_pct: float = DEFAULT_STAY_UNDER_PCT
     total_budget_kw: float | None = DEFAULT_TOTAL_KW
-    rack_count: int | None = None
+    rack_count: int | None = DEFAULT_RACK_COUNT
     live_on: int = 0
     power_source: str = "manual"
     pool_ids: tuple[str, ...] = ()
