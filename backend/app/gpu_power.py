@@ -478,6 +478,16 @@ def _rack_label(name: str, fallback: str = "") -> str:
     return short or raw
 
 
+def _rack_power_cap(alloc_kw: float, lo_kw: float, hi_kw: float) -> float:
+    """Posted rack cap: never above max, never below idle min when the rack is fed."""
+    cap = hi_kw
+    if alloc_kw > 0:
+        cap = min(hi_kw, alloc_kw)
+    if cap <= 0:
+        return hi_kw
+    return max(lo_kw, cap)
+
+
 def _rack_shelves(rid: str, shelf_w: list[float], oh_w: float, shelf_kw: float) -> list[dict[str, Any]]:
     n = SHELVES_PER_RACK
     raw: list[float] = []
@@ -715,12 +725,44 @@ def snapshot(
         if sp >= tdp_w - 8:
             acc["gpus_at_cap"] += 1
 
+    scale_by_rack: dict[str, float] = {}
+    for acc in rack_acc.values():
+        enabled = bool(acc["enabled"]) and acc["power_state"] != "off"
+        raw_kw = (acc["gpu_w"] + acc["overhead_w"]) / 1000.0
+        if not enabled:
+            acc["fit_kw"] = 0.0
+            continue
+        cap_kw = _rack_power_cap(float(acc["alloc_kw"] or 0.0), lo_kw, hi_kw)
+        fit_kw = min(cap_kw, max(lo_kw, raw_kw))
+        acc["fit_kw"] = fit_kw
+        if raw_kw > cap_kw + 0.001 and raw_kw > 0:
+            s = cap_kw / raw_kw
+            rid = str(acc["id"])
+            scale_by_rack[rid] = s
+            acc["gpu_w"] *= s
+            acc["overhead_w"] *= s
+            acc["shelf_w"] = [w * s for w in acc["shelf_w"]]
+    if scale_by_rack:
+        gpu_pool = [
+            (
+                w * scale_by_rack[rec["rack_id"]] if rec["rack_id"] in scale_by_rack else w,
+                gid,
+                rec,
+                sp,
+                lo,
+                hi,
+            )
+            for (w, gid, rec, sp, lo, hi) in gpu_pool
+        ]
+
     rack_out = []
     shelf_total = 0.0
     for acc in rack_acc.values():
         gpu_kw = acc["gpu_w"] / 1000.0
         oh_kw = acc["overhead_w"] / 1000.0
-        shelf_kw = round(gpu_kw + oh_kw, 2)
+        shelf_kw = round(float(acc.get("fit_kw", gpu_kw + oh_kw)), 2)
+        if shelf_kw > gpu_kw + oh_kw + 0.001:
+            oh_kw = max(0.0, shelf_kw - gpu_kw)
         shelf_total += shelf_kw
         n_on = acc["n"] if acc["power_state"] != "off" else 0
         shelves = _rack_shelves(str(acc["id"]), list(acc.get("shelf_w") or []), acc["overhead_w"], shelf_kw)

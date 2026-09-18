@@ -295,6 +295,21 @@ def _consumed(demand: float, allocated: float) -> float:
     return min(demand, allocated)
 
 
+def _clamp_fed_alloc(kw: float) -> float:
+    """Fed racks stay in [min, max] kW. Min is idle."""
+    if kw <= 0:
+        return 0.0
+    return min(rack_hard_kw(), max(min_alloc_kw(), kw))
+
+
+def _used_kw(demand: float, allocated: float) -> float:
+    """Actual draw for a fed rack: idle floor up to the posted cap."""
+    a = _clamp_fed_alloc(allocated)
+    if a <= 0:
+        return 0.0
+    return min(a, max(rack_min_kw(), min(demand, a)))
+
+
 def rack_usage_pct(consumed: float) -> float:
     """Actual usage as a percent of the control-loop max kW (min is the floor, not 0%)."""
     hi = rack_hard_kw()
@@ -306,7 +321,7 @@ def rack_usage_pct(consumed: float) -> float:
 def _demand_kw(sample: Sample) -> float:
     if sample.saturating:
         return rack_hard_kw() * 1.05
-    return sample.demand_kw
+    return max(rack_min_kw(), sample.demand_kw)
 
 
 def static_plan(samples: list[Sample]) -> list[RackAlloc]:
@@ -342,7 +357,8 @@ def static_plan(samples: list[Sample]) -> list[RackAlloc]:
             )
             continue
         demand = _demand_kw(s)
-        used = _consumed(demand, share)
+        share = _clamp_fed_alloc(share)
+        used = _used_kw(demand, share)
         gap = (share - used) / share * 100 if share else None
         out.append(
             RackAlloc(
@@ -445,8 +461,10 @@ def _rows_from_alloc(
         a = alloc.get(s.id, 0.0)
         if not _on(s) or (STATE.pool_ids and s.id not in STATE.pool_ids):
             a = 0.0
+        elif a > 0:
+            a = _clamp_fed_alloc(a)
         demand = _demand_kw(s)
-        used = _consumed(demand, a)
+        used = _used_kw(demand, a)
         enabled = a > 0
         denied = _on(s) and not enabled
         gap = (a - used) / a * 100 if a else None
@@ -525,7 +543,7 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
             if rid not in STATE.alloc:
                 STATE.alloc[rid] = policy
             else:
-                STATE.alloc[rid] = min(max(STATE.alloc[rid], floor), hard)
+                STATE.alloc[rid] = _clamp_fed_alloc(max(STATE.alloc[rid], floor))
 
         reduce_ids: list[str] = []
         increase_ids: list[str] = []
@@ -553,7 +571,7 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
             else:
                 target = floor
             delta = min(max(abs(alloc - target) * 0.55, 12.0), alloc * 0.35, max(0.0, alloc - floor))
-            STATE.alloc[rid] = max(target, alloc - max(delta, 0.0))
+            STATE.alloc[rid] = _clamp_fed_alloc(max(target, alloc - max(delta, 0.0)))
             STATE.action[rid] = "reduce"
 
         leftover = envelope_kw(STATE.live_on) - sum(
@@ -573,7 +591,7 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
                     STATE.action[rid] = "hold"
                     held_hot += 1
                     continue
-                STATE.alloc[rid] = alloc + take
+                STATE.alloc[rid] = _clamp_fed_alloc(alloc + take)
                 pool -= take
                 STATE.action[rid] = "increase"
                 boosted += 1
@@ -593,7 +611,9 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
     if total > env + 0.05 and total > 0:
         scale = env / total
         for i in fed:
-            STATE.alloc[i] *= scale
+            STATE.alloc[i] = _clamp_fed_alloc(STATE.alloc[i] * scale)
+    for i in fed:
+        STATE.alloc[i] = _clamp_fed_alloc(STATE.alloc[i])
     if added:
         STATE.last_event = (
             f"Enabled {added} extra racks from leftover envelope · "
@@ -637,7 +657,7 @@ def _enable_extras(samples: list[Sample]) -> int:
         take = min(hard, leftover, floor)
         if take < floor:
             break
-        STATE.alloc[s.id] = take
+        STATE.alloc[s.id] = _clamp_fed_alloc(take)
         STATE.action[s.id] = "enable"
         pool.append(s.id)
         leftover -= take
