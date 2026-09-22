@@ -28,8 +28,8 @@ export default function ProvisionPage() {
   const [openRacks, setOpenRacks] = useState<Record<string, boolean>>({});
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [kvm, setKvm] = useState<{ url: string; name: string; user: string; kind: "kvm" | "sol" | "bmc" } | null>(null);
-  const [pane, setPane] = useState<"sol" | "kvm" | "bmc">("sol");
-  const [portalScale, setPortalScale] = useState(125);
+  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [portalScale, setPortalScale] = useState(150);
   const [expanded, setExpanded] = useState(false);
   const [clipOpen, setClipOpen] = useState(false);
   const [clipText, setClipText] = useState("");
@@ -62,6 +62,9 @@ export default function ProvisionPage() {
 
   useEffect(() => {
     sendPortalScale();
+    if (!kvm?.url) return;
+    const id = window.setInterval(() => sendPortalScale(), 400);
+    return () => window.clearInterval(id);
   }, [portalScale, kvm?.url]);
 
   useEffect(() => {
@@ -153,12 +156,12 @@ export default function ProvisionPage() {
       return;
     }
     setBusy(true);
-    setPane(kind);
     try {
       const launched = await api.provisionKvm(focused.id);
       setKvm({ url: kvmUrl(launched, kind), name: focused.name, user: launched.user || "ADMIN", kind });
       setClipOpen(false);
       setClipNote("");
+      setDetailsOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : kind === "kvm" ? "KVM failed" : "SOL failed";
       if (msg.toLowerCase().includes("jump") || msg.includes("401")) setHopOpen(true);
@@ -290,7 +293,7 @@ export default function ProvisionPage() {
                       onOpen={(id) => {
                         setFocus(id);
                         setKvm(null);
-                        setPane("sol");
+                        setDetailsOpen(true);
                       }}
                     />
                   );
@@ -300,17 +303,6 @@ export default function ProvisionPage() {
           </div>
         </div>
         <aside className="provision-pane" data-expanded={expanded ? "true" : undefined}>
-          <div className="provision-tabs">
-            <button type="button" data-active={pane === "sol" ? "true" : undefined} onClick={() => setPane("sol")}>
-              SOL
-            </button>
-            <button type="button" data-active={pane === "kvm" ? "true" : undefined} onClick={() => setPane("kvm")}>
-              KVM
-            </button>
-            <button type="button" data-active={pane === "bmc" ? "true" : undefined} onClick={() => setPane("bmc")}>
-              BMC
-            </button>
-          </div>
           {!focused ? (
             <div className="provision-empty">
               <p>Select a node</p>
@@ -331,7 +323,7 @@ export default function ProvisionPage() {
                   <button type="button" className="btn" disabled={portalScale <= 100} onClick={() => bumpPortalScale(-1)}>
                     A−
                   </button>
-                  <span title="Console / SOL font size">{portalScale}%</span>
+                  <span title="100% fits the full KVM screen. A+ zooms the console text; scroll if it overflows.">{portalScale}%</span>
                   <button type="button" className="btn" disabled={portalScale >= 200} onClick={() => bumpPortalScale(1)}>
                     A+
                   </button>
@@ -355,42 +347,42 @@ export default function ProvisionPage() {
                   </button>
                 </div>
               </header>
-              <dl className="prov-dl">
-                {!kvm && (
-                  <>
-                    <div>
-                      <dt>Serial</dt>
-                      <dd>{focused.serial}</dd>
-                    </div>
-                    <div>
-                      <dt>Rack</dt>
-                      <dd>{focused.hall_name ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>BMC MAC</dt>
-                      <dd>{focused.bmc_mac ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Status</dt>
-                      <dd>{focused.provision_status}</dd>
-                    </div>
-                  </>
-                )}
-                <div>
-                  <dt>BMC</dt>
-                  <dd className="prov-secret">
-                    {focused.bmc_user || "—"} / {focused.bmc_password || "—"}
-                    <small>{focused.bmc_ip || "no IP"}</small>
-                  </dd>
-                </div>
-                <div>
-                  <dt>OS</dt>
-                  <dd className="prov-secret">
-                    {focused.os_username || "—"} / {focused.os_password || "—"}
-                    <small>{focused.os_ip || "no IP"}</small>
-                  </dd>
-                </div>
-              </dl>
+              <button
+                type="button"
+                className="provision-creds"
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsOpen((v) => !v)}
+              >
+                <i data-open={detailsOpen ? "true" : undefined} aria-hidden />
+                <span>
+                  <b>BMC</b> {focused.bmc_user || "—"} / {focused.bmc_password || "—"}
+                  <small>{focused.bmc_ip || "no IP"}</small>
+                </span>
+                <span>
+                  <b>OS</b> {focused.os_username || "—"} / {focused.os_password || "—"}
+                  <small>{focused.os_ip || "no IP"}</small>
+                </span>
+              </button>
+              {detailsOpen ? (
+                <dl className="prov-dl">
+                  <div>
+                    <dt>Serial</dt>
+                    <dd>{focused.serial}</dd>
+                  </div>
+                  <div>
+                    <dt>Rack</dt>
+                    <dd>{focused.hall_name ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>BMC MAC</dt>
+                    <dd>{focused.bmc_mac ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{focused.provision_status}</dd>
+                  </div>
+                </dl>
+              ) : null}
               {mayEdit && (
                 <div className="provision-sol-bar">
                   <button
@@ -435,7 +427,6 @@ export default function ProvisionPage() {
                             setHopOpen(true);
                             return;
                           }
-                          setPane("sol");
                           void api.provisionConsole(focused.id).then((c) => setLog(c.log));
                         }}
                       >
@@ -444,6 +435,7 @@ export default function ProvisionPage() {
                       <button
                         type="button"
                         className="btn"
+                        data-active={kvm?.kind === "sol" ? "true" : undefined}
                         disabled={busy || !focused.bmc_ip}
                         onClick={() => void openSession("sol")}
                       >
@@ -452,6 +444,7 @@ export default function ProvisionPage() {
                       <button
                         type="button"
                         className="btn btn-primary"
+                        data-active={kvm?.kind === "kvm" ? "true" : undefined}
                         disabled={busy || !focused.bmc_ip}
                         onClick={() => void openSession("kvm")}
                       >
@@ -462,6 +455,7 @@ export default function ProvisionPage() {
                   <button
                     type="button"
                     className="btn"
+                    data-active={kvm?.kind === "bmc" ? "true" : undefined}
                     disabled={busy || !focused.bmc_ip}
                     onClick={() => void openSession("bmc")}
                   >
@@ -469,8 +463,7 @@ export default function ProvisionPage() {
                   </button>
                 </div>
               )}
-              {pane === "kvm" || pane === "bmc" || (pane === "sol" && kvm?.kind === "sol") ? (
-                kvm && kvm.kind === pane ? (
+              {kvm ? (
                   <div className="provision-kvm-frame">
                     {clipOpen ? (
                       <div className="provision-clip">
@@ -527,18 +520,6 @@ export default function ProvisionPage() {
                       onLoad={() => sendPortalScale()}
                     />
                   </div>
-                ) : (
-                  <div className="provision-empty">
-                    <p>{pane === "kvm" ? "KVM idle" : pane === "bmc" ? "BMC idle" : "Live SOL idle"}</p>
-                    <span>
-                      {data?.hop?.connected
-                        ? pane === "bmc"
-                          ? "Open Access BMC — the node dashboard is proxied through this API via the PXE hop."
-                          : "Open a session — HTML5 is proxied through this API via the PXE hop."
-                        : "Connect PXE hop first. BMC 10.10.x is only reachable from the PXE server."}
-                    </span>
-                  </div>
-                )
               ) : (
                 <pre className="console">{log || focused.sol_log || "SOL idle."}</pre>
               )}
