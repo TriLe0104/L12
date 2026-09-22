@@ -273,15 +273,17 @@ export default function MaxLpsPage() {
     [view?.racks],
   );
   const gpuUsedKw = useMemo(() => {
+    const live = view?.totals?.gpu_kw ?? 0;
+    if (live > 0) return live;
     const listed = (view?.gpus ?? []).reduce((s, g) => s + (g.watts || 0), 0) / 1000;
     if (listed > 0) return listed;
     return (view?.racks ?? []).reduce((s, r) => s + (r.gpu_kw || 0), 0);
-  }, [view?.gpus, view?.racks]);
-  const gpuCapKw = useMemo(() => {
-    const listed = (view?.gpus ?? []).reduce((s, g) => s + (g.setpoint_w || 0), 0) / 1000;
-    if (listed > 0) return listed;
-    return view?.totals?.cap_kw ?? gpuUsedKw;
-  }, [view?.gpus, view?.totals?.cap_kw, gpuUsedKw]);
+  }, [view?.gpus, view?.racks, view?.totals?.gpu_kw]);
+  const gpuSetpointKw = useMemo(() => {
+    const live = view?.totals?.cap_kw ?? 0;
+    if (live > 0) return live;
+    return (view?.gpus ?? []).reduce((s, g) => s + (g.setpoint_w || 0), 0) / 1000;
+  }, [view?.gpus, view?.totals?.cap_kw]);
   const minRackKw = power?.min_rack_kw ?? view?.min_rack_kw ?? 40;
   const maxRackKw = power?.max_rack_kw ?? view?.max_rack_kw ?? 135;
   const thresholdPct = power?.threshold_pct ?? power?.stay_under_pct ?? view?.threshold_pct ?? 80;
@@ -289,7 +291,12 @@ export default function MaxLpsPage() {
   const availableKw = budgetKw > 0 ? (budgetKw * thresholdPct) / 100 : (view?.totals?.available_kw ?? 0);
   const totalKw = budgetKw > 0 ? budgetKw : Math.max(availableKw, rackUsedKw, gpuUsedKw);
   const rackAvailKw = availableKw > 0 ? availableKw : totalKw;
-  const gpuAvailKw = gpuCapKw;
+  const gpuFrac = (view?.algo?.gpu_power_percent ?? 75) / 100;
+  const gpuAvailKw =
+    view?.totals?.allowable_kw && view.totals.allowable_kw > 0
+      ? view.totals.allowable_kw
+      : availableKw * gpuFrac;
+  const gpuLeftKw = gpuAvailKw - gpuUsedKw;
   const overheadKw = useMemo(
     () => (view?.racks ?? []).reduce((s, r) => s + (r.overhead_kw || 0), 0),
     [view?.racks],
@@ -478,10 +485,10 @@ export default function MaxLpsPage() {
             {view?.totals?.shelf_source === "argus" ? "Argus TotalPowerOut" : "No PSU readings"}
           </small>
         </article>
-        <article data-free={gpuAvailKw - gpuUsedKw < 0 ? "over" : "ok"}>
+        <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
           <span>GPU cap left</span>
-          <b>{formatKw(Math.max(0, gpuAvailKw - gpuUsedKw))}</b>
-          <small>vs live SetPoint</small>
+          <b>{formatRackKw(Math.max(0, gpuLeftKw))}</b>
+          <small>GPU share of envelope − live watts</small>
         </article>
         <article>
           <span>Rack sum</span>
@@ -501,11 +508,11 @@ export default function MaxLpsPage() {
         <article>
           <span>GPU sum</span>
           <b>
-            {formatKw(gpuUsedKw)}
+            {formatRackKw(gpuUsedKw)}
             {Math.abs(gpuDelta) >= 0.5 ? (
               <em key={`gd-${gpuFlash.play}`} data-off={gpuDelta >= 0 ? "up" : "down"}>
                 {gpuDelta > 0 ? "+" : ""}
-                {formatKw(gpuDelta)}
+                {formatRackKw(gpuDelta)}
               </em>
             ) : null}
           </b>
@@ -523,6 +530,7 @@ export default function MaxLpsPage() {
         totalKw={totalKw}
         rackAvailKw={rackAvailKw}
         gpuAvailKw={gpuAvailKw}
+        gpuSetpointKw={gpuSetpointKw}
         rackUsedKw={rackUsedKw}
         gpuUsedKw={gpuUsedKw}
         rackDelta={rackDelta}
@@ -826,7 +834,7 @@ function MixBar({
   minKw?: number;
   maxKw?: number;
 }) {
-  const fmt = tone === "racks" ? formatRackKw : formatKw;
+  const fmt = formatRackKw;
   const scale = Math.max(totalKw, usedKw, capKw, 1);
   const usedPct = Math.min(100, (usedKw / scale) * 100);
   const capPct = Math.min(100, (capKw / scale) * 100);
@@ -905,6 +913,7 @@ const MixChart = memo(function MixChart({
   totalKw,
   rackAvailKw,
   gpuAvailKw,
+  gpuSetpointKw,
   rackUsedKw,
   gpuUsedKw,
   rackDelta,
@@ -921,6 +930,7 @@ const MixChart = memo(function MixChart({
   totalKw: number;
   rackAvailKw: number;
   gpuAvailKw: number;
+  gpuSetpointKw: number;
   rackUsedKw: number;
   gpuUsedKw: number;
   rackDelta: number;
@@ -992,19 +1002,19 @@ const MixChart = memo(function MixChart({
           title="GPUs"
           countLabel={`${nGpus.toLocaleString()} · GB300`}
           usedKw={gpuUsedKw}
-          capKw={gpuAvailKw}
-          totalKw={gpuAvailKw}
+          capKw={gpuSetpointKw}
+          totalKw={Math.max(gpuAvailKw, gpuUsedKw, gpuSetpointKw, 1)}
           usedDelta={gpuDelta}
           tick={gpuPlay}
           tone="gpus"
-          capName="Cap"
-          endName="SetPoint"
+          capName="SetPoint"
+          endName="Cap"
         />
         <ul>
           <li data-k="used">Rack sum {formatRackKw(rackUsedKw)}</li>
-          <li data-k="gpu">GPU sum {formatKw(gpuUsedKw)}</li>
+          <li data-k="gpu">GPU sum {formatRackKw(gpuUsedKw)}</li>
           <li data-k="oh">Overhead {formatRackKw(overheadKw)}</li>
-          <li data-k="avail">GPU cap {formatKw(gpuAvailKw)}</li>
+          <li data-k="avail">GPU cap {formatRackKw(gpuAvailKw)}</li>
           <li data-k="total">Total {formatKw(totalKw)}</li>
         </ul>
       </div>

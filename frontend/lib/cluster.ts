@@ -135,10 +135,11 @@ export function formatKw(kw: number): string {
   return `${kw.toFixed(0)} kW`;
 }
 
-/** Rack / PSU kW with one decimal (26.5 kW). MW stays two decimals. */
+/** Rack / PSU / GPU power. Under 1 kW shows watts; MW stays two decimals. */
 export function formatRackKw(kw: number): string {
   const n = Number.isFinite(kw) ? kw : 0;
   if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(2)} MW`;
+  if (Math.abs(n) < 1) return `${Math.round(n * 1000)} W`;
   return `${n.toFixed(1)} kW`;
 }
 
