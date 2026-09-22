@@ -8,7 +8,7 @@
 #
 # UI  http://172.25.231.244:3333
 # API http://172.25.231.244:8001/docs
-name: l12
+name: l12-tri
 
 services:
   db:
