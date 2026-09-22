@@ -44,8 +44,8 @@ On the PXE host (`karam-e-nil`). Ports are chosen to miss Argus and Libra:
 
 ```bash
 cp .env.example .env          # then set JWT_SECRET
-docker compose up -d --build  # start
-docker compose down           # stop (add -v to drop the database)
+sudo docker compose up -d --build  # start (tril is not in the docker group)
+sudo docker compose down           # stop (add -v to drop the database)
 # UI   http://172.25.231.244:3333   (login: test@test / test)
 # API  http://172.25.231.244:8001/docs
 # The browser talks only to :3333; Next proxies /api to the API on :8001.

@@ -3,8 +3,8 @@
 #   L12    :3333 UI  :8001 API  :5433 Postgres
 #
 #   cp .env.example .env
-#   docker compose up -d --build
-#   docker compose down
+#   sudo docker compose up -d --build
+#   sudo docker compose down
 #
 # UI  http://172.25.231.244:3333
 # API http://172.25.231.244:8001/docs
@@ -60,7 +60,7 @@ services:
     environment:
       API_PROXY: http://127.0.0.1:8001
       PORT: "3333"
-      HOSTNAME: "0.0.0.0"
+    command: ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
     depends_on:
       - api
 

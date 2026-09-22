@@ -26,6 +26,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 EXPOSE 3000
-ENV PORT=3000 HOSTNAME=0.0.0.0
+ENV PORT=3000
 ENV API_PROXY=http://127.0.0.1:8001
-CMD ["node", "server.js"]
+# Docker overwrites HOSTNAME with the machine name; Next would then bind
+# that name only and 127.0.0.1:3333 would refuse connections.
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
