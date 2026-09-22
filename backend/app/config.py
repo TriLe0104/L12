@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     bootstrap_admin_name: str = "Demo Admin"
     bootstrap_admin_email: str = "tri@supermicro.com"
     bootstrap_admin_password: str = "demo1234"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3333,http://127.0.0.1:3333"
 
     # Cluster Backend Controller — source of truth for MaxLPS rack / shelf identity.
     cluster_controller_url: str = "http://172.25.231.244:8000"

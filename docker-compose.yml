@@ -1,10 +1,12 @@
-# Default stack for the PXE host. Argus already uses :3000 and :8000.
+# Default stack for the PXE host. Do not take Argus/Libra ports.
+#   Argus  :3000 UI  :8000 API
+#   L12    :3333 UI  :8001 API  :5433 Postgres
 #
 #   cp .env.example .env
 #   docker compose up -d --build
 #   docker compose down
 #
-# UI  http://172.25.231.244:3001
+# UI  http://172.25.231.244:3333
 # API http://172.25.231.244:8001/docs
 name: l12
 
@@ -33,7 +35,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       AUTH_PROVIDER: local
       SEED_ON_START: "true"
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://172.25.231.244:3001,http://127.0.0.1:3001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://172.25.231.244:3333,http://127.0.0.1:3333}
       CLUSTER_CONTROLLER_URL: ${CLUSTER_CONTROLLER_URL:-http://127.0.0.1:8000}
       CLUSTER_CONTROLLER_USER: ${CLUSTER_CONTROLLER_USER:-admin}
       CLUSTER_CONTROLLER_PASSWORD: ${CLUSTER_CONTROLLER_PASSWORD:-admin}
@@ -52,7 +54,7 @@ services:
       args:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://172.25.231.244:8001}
     ports:
-      - "3001:3000"
+      - "3333:3000"
     depends_on:
       - api
 

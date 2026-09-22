@@ -26,7 +26,7 @@ import type {
 import type { BoardSettings } from "./boardTypes";
 
 function defaultApiBase() {
-  if (typeof window !== "undefined" && window.location.port === "3001") {
+  if (typeof window !== "undefined" && (window.location.port === "3001" || window.location.port === "3333")) {
     return "http://127.0.0.1:8001";
   }
   return "http://127.0.0.1:8000";

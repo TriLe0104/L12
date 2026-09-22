@@ -35,13 +35,18 @@ Public self-registration is not exposed.
 
 ## Run with Docker (Postgres)
 
-On the PXE host (`karam-e-nil`). Argus already uses `:3000` / `:8000`, so this stack uses **3001** / **8001**.
+On the PXE host (`karam-e-nil`). Ports are chosen to miss Argus and Libra:
+
+| App | UI | API | DB |
+|---|---|---|---|
+| Argus | 3000 | 8000 | — |
+| L12 | **3333** | **8001** | **5433** |
 
 ```bash
 cp .env.example .env          # then set JWT_SECRET
 docker compose up -d --build  # start
 docker compose down           # stop (add -v to drop the database)
-# web  http://172.25.231.244:3001
+# web  http://172.25.231.244:3333
 # api  http://172.25.231.244:8001/docs
 ```
 
