@@ -71,28 +71,61 @@
   border-right: 0;
 }
 
-.provision-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.provision-tabs button {
-  height: 2.3rem;
-  padding: 0 0.8rem;
-  border: 0;
-  background: transparent;
-  color: #9a9a9a;
+.provision-creds {
+  display: grid;
+  grid-template-columns: 1.05rem 1fr 1fr;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #111;
+  color: #eee;
   font: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
+  text-align: left;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
 }
 
-.provision-tabs button[data-active="true"] {
-  color: #fff;
-  border-bottom-color: #e10600;
+.provision-creds:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.provision-creds i {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0.28rem 0 0.28rem 0.4rem;
+  border-color: transparent transparent transparent #9a9a9a;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+
+.provision-creds i[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.provision-creds span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 0;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.provision-creds b {
+  font-family: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+  font-weight: 650;
+}
+
+.provision-creds small {
+  color: #8a8a8a;
+  font-size: 0.68rem;
 }
 
 .provision-sol {
@@ -200,9 +233,8 @@
   gap: 0.3rem;
 }
 
-.provision-sol[data-session="true"] .prov-dl,
 .provision-sol[data-session="true"] .provision-sol-bar {
-  display: none;
+  padding-top: 0.15rem;
 }
 
 .provision-pane[data-expanded="true"] .provision-pane-head h2 {
@@ -347,8 +379,9 @@
   font-family: inherit;
 }
 
-.provision-pane[data-expanded="true"] .provision-tabs {
-  flex-shrink: 0;
+.provision-sol-bar .btn[data-active="true"] {
+  border-color: #e10600;
+  color: #fff;
 }
 
 .provision-drawer {
