@@ -430,7 +430,9 @@ export default function MaxLpsPage() {
     <div className="maxlps-page">
       <header className="maxlps-head">
         <div>
-          <p className="maxlps-kicker">Closed-loop GPU power</p>
+          <p className="maxlps-kicker">
+            {power?.mode === "static" ? "Monitoring · GPUs at max cap" : "Closed-loop GPU power"}
+          </p>
           <h1>MaxLPS</h1>
           <p>
             {topo
@@ -684,7 +686,10 @@ export default function MaxLpsPage() {
             />
           ) : (
             <>
-              <h2>Control loop</h2>
+              <h2>{power?.mode === "static" ? "Monitor" : "Control loop"}</h2>
+              {power?.mode === "static" ? (
+                <p className="lps-event">MaxLPS off — caps restored to BMC AllowableMax. Redfish watts still update.</p>
+              ) : null}
               {power ? (
                 <PowerPolicyFields
                   data={power}

@@ -536,6 +536,8 @@ def patch_power_limiter(
         rack_count=payload.rack_count,
         min_rack_kw=payload.min_rack_kw,
     )
+    if payload.mode is not None:
+        gpu_power.set_control(payload.mode == "dynamic")
     gpu_power.apply_loop(
         interval_s=payload.interval_s,
         gpu_power_percent=payload.gpu_power_percent,

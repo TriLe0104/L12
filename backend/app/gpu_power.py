@@ -73,6 +73,7 @@ class LoopState:
         self.cache_t = 0.0
         self.hist_t = 0.0
         self.last_posted: dict[str, float] = {}
+        self.control = True
 
 
 LOOP = LoopState()
@@ -137,6 +138,31 @@ def apply_loop(
         LOOP.usage_win.clear()
         LOOP.sample_t.clear()
     return changed
+
+
+def set_control(on: bool) -> None:
+    """MaxLPS on writes closed-loop caps. Off restores hardware max and only monitors."""
+    if on:
+        if LOOP.control:
+            return
+        LOOP.control = True
+        LOOP.force = True
+        LOOP.last_caps = None
+        LOOP.last_posted.clear()
+        LOOP.last_cap_by_id.clear()
+        LOOP.cached_out = None
+        return
+    if not LOOP.control:
+        return
+    LOOP.control = False
+    LOOP.force = False
+    LOOP.cached_out = None
+
+
+def _release_cap_w(live: dict[str, Any]) -> float:
+    if live.get("max_w") is not None:
+        return max(50.0, float(live["max_w"]))
+    return GPU_TDP_W
 
 
 def set_bounds(gpu_id: str, min_w: float | None = None, max_w: float | None = None) -> dict[str, float]:
@@ -955,6 +981,8 @@ def snapshot(
         round(LOOP.gpu_max_w, 1),
         round(_LIVE_GPU_T, 0),
         len(_LIVE_GPU),
+        power_snap.get("mode"),
+        LOOP.control,
     )
     if (
         not gpu_id
@@ -1030,14 +1058,18 @@ def snapshot(
         rec["bmc_lo"] = lo
         rec["bmc_hi"] = hi
         rec["bmc_sp"] = float(live["setpoint_w"]) if live.get("setpoint_w") is not None else None
+        rec["hw_max"] = _release_cap_w(live)
         rec["path"] = live.get("path") or ""
         rec["bmc_ip"] = live.get("bmc_ip") or ""
         rec["processor"] = live.get("processor") or ""
         live_rows.append(rec)
         _note_usage(rec["id"], watts, now)
 
+    controlling = (power_snap.get("mode") or "static") == "dynamic"
+    if controlling != LOOP.control:
+        set_control(controlling)
     due = LOOP.force or (now - LOOP.last_step >= LOOP.interval_s)
-    should_post = bool(live_rows) and (due or (not LOOP.last_posted and not _CAP_BUSY))
+    should_post = bool(controlling and live_rows) and (due or (not LOOP.last_posted and not _CAP_BUSY))
     if due:
         LOOP.last_step = now
         LOOP.force = False
@@ -1067,6 +1099,33 @@ def snapshot(
             if prev is not None and abs(prev - cap_w) < 2:
                 continue
             if bmc_sp is not None and prev is None and abs(float(bmc_sp) - cap_w) < 2:
+                LOOP.last_posted[rec["id"]] = cap_w
+                continue
+            user, pw = creds.get(str(rec["bmc_ip"]), ("ADMIN", ""))
+            patches.append(
+                {
+                    "gid": rec["id"],
+                    "bmc_ip": rec["bmc_ip"],
+                    "user": user,
+                    "password": pw,
+                    "path": rec["path"],
+                    "setpoint": int(cap_w),
+                }
+            )
+        _kick_cap_patch(patches)
+    elif not controlling and live_rows and not _CAP_BUSY:
+        creds = {ip: (user, pw) for _rid, _idx, ip, user, pw in _gpu_live_targets()}
+        patches = []
+        for rec in live_rows:
+            cap_w = float(round(float(rec.get("hw_max") or GPU_TDP_W)))
+            LOOP.last_cap_by_id[rec["id"]] = cap_w
+            prev = LOOP.last_posted.get(rec["id"])
+            bmc_sp = rec.get("bmc_sp")
+            if not rec.get("path") or not rec.get("bmc_ip"):
+                continue
+            if prev is not None and abs(prev - cap_w) < 2:
+                continue
+            if bmc_sp is not None and abs(float(bmc_sp) - cap_w) < 2:
                 LOOP.last_posted[rec["id"]] = cap_w
                 continue
             user, pw = creds.get(str(rec["bmc_ip"]), ("ADMIN", ""))
@@ -1332,6 +1391,7 @@ def snapshot(
             "gpu_source": "redfish" if live_n else "none",
             "gpu_error": _LIVE_GPU_ERR or None,
             "gpu_live": live_n,
+            "gpu_control": "maxlps" if LOOP.control else "monitor",
             "gpu_poll_age_s": round(max(0.0, now - _LIVE_GPU_T), 1) if _LIVE_GPU_T else None,
             "gpu_busy": _LIVE_GPU_BUSY,
             "gpu_kw": round(gpu_total_w / 1000.0, 2),
@@ -1351,6 +1411,7 @@ def snapshot(
             "best_cap_percent": round(best_p * 100.0, 2),
         },
         "algo": {
+            "control": LOOP.control,
             "interval_s": round(LOOP.interval_s, 1),
             "power_budget_w": round(power_budget_w, 0),
             "budget_grace": round(grace * 100.0, 1),

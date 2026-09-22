@@ -247,6 +247,7 @@ export interface MaxLpsView {
     gpu_live?: number;
     gpu_poll_age_s?: number | null;
     gpu_busy?: boolean;
+    gpu_control?: "maxlps" | "monitor" | string;
     gpu_kw: number;
     overhead_kw?: number;
     hottest_w: number;
@@ -259,6 +260,7 @@ export interface MaxLpsView {
     best_cap_percent?: number;
   };
   algo?: {
+    control?: boolean;
     interval_s?: number;
     power_budget_w: number;
     budget_grace: number;
