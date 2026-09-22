@@ -49,7 +49,8 @@ export default function LoginPage() {
           Email
           <input
             className="field"
-            type="email"
+            type="text"
+            inputMode="email"
             autoComplete="username"
             value={email}
             onChange={(e) => setEmail(e.target.value)}

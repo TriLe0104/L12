@@ -30,7 +30,7 @@ npm run dev      # http://localhost:3000
 ```
 
 On a fresh database the seed creates the administrator
-`tri@supermicro.com` / `demo1234`. Sign in with it, then create other accounts from **Users**.
+`test@test` / `test`. Sign in with it, then create other accounts from **Users**.
 Public self-registration is not exposed.
 
 ## Run with Docker (Postgres)

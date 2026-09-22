@@ -19,18 +19,25 @@ def seed(db: Session) -> None:
 
 
 def _seed_users(db: Session) -> None:
-    if db.scalar(select(User).limit(1)) is not None:
-        return
-    user = User(
-        name=settings.bootstrap_admin_name,
-        email=settings.bootstrap_admin_email.lower().strip(),
-        org="Firmus",
-        role=Role.ADMIN,
-        password_hash=hash_password(settings.bootstrap_admin_password),
-        is_pending=False,
-        last_login_at=datetime.now(timezone.utc),
-    )
-    db.add(user)
+    email = settings.bootstrap_admin_email.lower().strip()
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        user = User(
+            name=settings.bootstrap_admin_name,
+            email=email,
+            org="Firmus",
+            role=Role.ADMIN,
+            password_hash=hash_password(settings.bootstrap_admin_password),
+            is_pending=False,
+            last_login_at=datetime.now(timezone.utc),
+        )
+        db.add(user)
+    else:
+        user.name = settings.bootstrap_admin_name
+        user.role = Role.ADMIN
+        user.is_pending = False
+        user.is_active = True
+        user.password_hash = hash_password(settings.bootstrap_admin_password)
     db.commit()
 
 

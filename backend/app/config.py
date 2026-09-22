@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     oidc_audience: str | None = None
 
     seed_on_start: bool = True
-    bootstrap_admin_name: str = "Demo Admin"
-    bootstrap_admin_email: str = "tri@supermicro.com"
-    bootstrap_admin_password: str = "demo1234"
+    bootstrap_admin_name: str = "Test"
+    bootstrap_admin_email: str = "test@test"
+    bootstrap_admin_password: str = "test"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3333,http://127.0.0.1:3333"
 
     # Cluster Backend Controller — source of truth for MaxLPS rack / shelf identity.
