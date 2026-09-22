@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -263,6 +263,16 @@ class Activity(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
 
 
+class ClusterSettings(Base):
+    """Singleton campus identity (display name on Cluster / floor HUD)."""
+
+    __tablename__ = "cluster_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), default="Firmus")
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+
 class DataHall(Base):
     """A floor plate you drop racks onto. One cluster can have many halls."""
 
@@ -345,9 +355,13 @@ class InventoryNode(Base):
     os_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
     pxe_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
     switch_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    bmc_user: Mapped[str | None] = mapped_column(String(80), nullable=True)
     bmc_password: Mapped[str | None] = mapped_column(String(80), nullable=True)
     bmc_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    source: Mapped[str] = mapped_column(String(24), default="demo")
     os_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    os_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    os_password: Mapped[str | None] = mapped_column(String(160), nullable=True)
     provision_status: Mapped[str] = mapped_column(String(24), default="registered")
     sol_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     provision_started_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -372,6 +386,134 @@ class Device(Base):
     check_value: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     rack: Mapped[Rack] = relationship(back_populates="devices")
+
+
+class MaxLpsRack(Base):
+    """Hardware identity for a MaxLPS GB300 rack (serials, BMC, power shelves)."""
+
+    __tablename__ = "maxlps_racks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    label: Mapped[str] = mapped_column(String(80), index=True)
+    serial: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True, index=True)
+    hall: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    model: Mapped[str] = mapped_column(String(80), default="GB300-NVL72")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    power_state: Mapped[str] = mapped_column(String(16), default="on")
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    nodes: Mapped[list["MaxLpsNode"]] = relationship(
+        back_populates="rack", cascade="all, delete-orphan", order_by="MaxLpsNode.index"
+    )
+    shelves: Mapped[list["MaxLpsShelf"]] = relationship(
+        back_populates="rack", cascade="all, delete-orphan", order_by="MaxLpsShelf.index"
+    )
+    gpus: Mapped[list["MaxLpsGpu"]] = relationship(
+        back_populates="rack", cascade="all, delete-orphan"
+    )
+
+
+class MaxLpsNode(Base):
+    """Compute node in a MaxLPS rack — BMC / Redfish endpoint."""
+
+    __tablename__ = "maxlps_nodes"
+    __table_args__ = (UniqueConstraint("rack_id", "index", name="uq_maxlps_node_slot"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    rack_id: Mapped[str] = mapped_column(ForeignKey("maxlps_racks.id", ondelete="CASCADE"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    serial: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    hostname: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    bmc_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    bmc_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    bmc_user: Mapped[str | None] = mapped_column(String(80), nullable=True, default="ADMIN")
+    bmc_password: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    os_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    os_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    rack: Mapped[MaxLpsRack] = relationship(back_populates="nodes")
+    gpus: Mapped[list["MaxLpsGpu"]] = relationship(back_populates="node")
+
+
+class MaxLpsGpu(Base):
+    """GPU slot identity (NVML / PCI) under a node."""
+
+    __tablename__ = "maxlps_gpus"
+    __table_args__ = (UniqueConstraint("rack_id", "node_index", "gpu_index", name="uq_maxlps_gpu_slot"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    rack_id: Mapped[str] = mapped_column(ForeignKey("maxlps_racks.id", ondelete="CASCADE"), index=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("maxlps_nodes.id", ondelete="CASCADE"), index=True)
+    node_index: Mapped[int] = mapped_column(Integer)
+    gpu_index: Mapped[int] = mapped_column(Integer)
+    serial: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    uuid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    pci_addr: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model: Mapped[str] = mapped_column(String(80), default="GB300")
+    tdp_w: Mapped[float] = mapped_column(Float, default=1400.0)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    rack: Mapped[MaxLpsRack] = relationship(back_populates="gpus")
+    node: Mapped[MaxLpsNode] = relationship(back_populates="gpus")
+
+
+class MaxLpsShelf(Base):
+    """Power shelf / PDU feeding the rack busbar."""
+
+    __tablename__ = "maxlps_shelves"
+    __table_args__ = (UniqueConstraint("rack_id", "index", name="uq_maxlps_shelf_slot"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    rack_id: Mapped[str] = mapped_column(ForeignKey("maxlps_racks.id", ondelete="CASCADE"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    serial: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    user: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    rack: Mapped[MaxLpsRack] = relationship(back_populates="shelves")
+
+
+class MaxLpsClusterWatt(Base):
+    """Cluster-level wattage sample (about 1 Hz)."""
+
+    __tablename__ = "maxlps_cluster_watts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ts: Mapped[datetime] = mapped_column(index=True, default=_now)
+    used_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    gpu_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    overhead_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    available_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    total_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    rack_count: Mapped[int] = mapped_column(Integer, default=0)
+    gpu_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MaxLpsRackWatt(Base):
+    """Per-rack wattage sample. GPU/shelf arrays are JSON to keep SQLite write volume down."""
+
+    __tablename__ = "maxlps_rack_watts"
+    __table_args__ = (Index("ix_maxlps_rack_watts_rack_ts", "rack_id", "ts"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ts: Mapped[datetime] = mapped_column(default=_now)
+    rack_id: Mapped[str] = mapped_column(ForeignKey("maxlps_racks.id", ondelete="CASCADE"), index=True)
+    shelf_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    gpu_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    overhead_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    allocated_kw: Mapped[float] = mapped_column(Float, default=0.0)
+    gpu_watts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    shelf_watts: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class StaffTask(Base):

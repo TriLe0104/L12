@@ -76,7 +76,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="rail">
         <div className="brand">
           <BrandMark size={32} />
-          <div className="brand-sub">Firmus · GB300</div>
         </div>
 
         {navFor(user).map((item) => (

@@ -14,6 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import DataHall, InventoryNode, Rack
+from . import provision_argus
+from . import pxe_hop
 
 STATUSES = ("registered", "dhcp", "pxe", "imaging", "sol", "ready", "failed")
 
@@ -270,6 +272,31 @@ _SW_LINES = [
 
 
 def refresh_sol(node: InventoryNode) -> InventoryNode:
+    if getattr(node, "source", None) == "argus":
+        hop = pxe_hop.status()
+        header = _sol_header(node)
+        if not hop.get("connected"):
+            node.sol_log = (
+                header
+                + f"BMC {node.bmc_ip or 'unknown'} is on the PXE network.\n"
+                + f"Connect SSH to {hop.get('host')} as {hop.get('user')} to pull live SOL / open KVM.\n"
+            )
+            return node
+        if not node.bmc_ip:
+            node.sol_log = header + "No BMC IP on this node yet.\n"
+            return node
+        try:
+            burst = pxe_hop.sol_capture(
+                node.bmc_ip,
+                getattr(node, "bmc_user", None) or "ADMIN",
+                node.bmc_password or "",
+            )
+            node.sol_log = header + burst
+        except pxe_hop.NeedsHop:
+            node.sol_log = header + "PXE hop dropped. Re-enter jump-host credentials.\n"
+        except Exception as exc:
+            node.sol_log = header + f"SOL capture failed: {exc}\n"
+        return node
     if node.provision_status in ("registered", "dhcp", "ready", "failed"):
         if node.provision_status == "ready" and not node.sol_log:
             node.sol_log = _sol_header(node) + "login: ubuntu  (provision complete)\n"
@@ -368,6 +395,12 @@ def arp_table(nodes: list[InventoryNode]) -> list[dict]:
 
 
 def serialize(node: InventoryNode) -> dict:
+    hop = pxe_hop.status()
+    tun = hop.get("tunnels") or {}
+    kvm = tun.get(node.id)
+    kvm_url = None
+    if kvm:
+        kvm_url = f"https://127.0.0.1:{kvm['port']}/#/console"
     return {
         "id": node.id,
         "kind": node.kind,
@@ -379,11 +412,32 @@ def serialize(node: InventoryNode) -> dict:
         "os_mac": node.os_mac,
         "pxe_mac": node.pxe_mac,
         "switch_mac": node.switch_mac,
+        "bmc_user": getattr(node, "bmc_user", None),
         "bmc_password": node.bmc_password,
         "bmc_ip": node.bmc_ip,
         "os_ip": node.os_ip,
+        "os_username": getattr(node, "os_username", None),
+        "os_password": getattr(node, "os_password", None),
+        "source": getattr(node, "source", None) or "demo",
         "provision_status": node.provision_status,
         "sol_log": node.sol_log,
+        "kvm_url": kvm_url,
+        "gpus": provision_argus.node_gpus(node.bmc_mac),
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
         "provision_started_at": node.provision_started_at.isoformat() if node.provision_started_at else None,
     }
+
+
+def load_nodes(db: Session) -> list[InventoryNode]:
+    try:
+        argus = provision_argus.sync_from_argus(db)
+        if argus:
+            return argus
+    except Exception:
+        db.rollback()
+        existing = list(
+            db.scalars(select(InventoryNode).where(InventoryNode.source == "argus").order_by(InventoryNode.name)).all()
+        )
+        if existing:
+            return existing
+    return ensure_inventory(db)

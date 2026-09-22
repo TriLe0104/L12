@@ -31,6 +31,26 @@
   letter-spacing: -0.02em;
 }
 
+.cluster-kicker-input {
+  width: 9.5rem;
+  height: 1.7rem;
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.cluster-kicker-input:hover,
+.cluster-kicker-input:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: #141414;
+  outline: none;
+}
+
 .cluster-tabs button,
 .rack-panel-tabs button {
   height: 2.7rem;

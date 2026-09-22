@@ -1,3 +1,13 @@
+# Default stack for the PXE host. Argus already uses :3000 and :8000.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+#   docker compose down
+#
+# UI  http://172.25.231.244:3001
+# API http://172.25.231.244:8001/docs
+name: l12
+
 services:
   db:
     image: postgres:16-alpine
@@ -6,9 +16,9 @@ services:
       POSTGRES_PASSWORD: po
       POSTGRES_DB: po_calendar
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - l12_pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U po -d po_calendar"]
       interval: 5s
@@ -17,30 +27,35 @@ services:
 
   api:
     build: ./backend
+    network_mode: host
     environment:
-      DATABASE_URL: postgresql+psycopg://po:po@db:5432/po_calendar
+      DATABASE_URL: postgresql+psycopg://po:po@127.0.0.1:5433/po_calendar
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
-      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      AUTH_PROVIDER: local
       SEED_ON_START: "true"
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://172.25.231.244:3001,http://127.0.0.1:3001}
+      CLUSTER_CONTROLLER_URL: ${CLUSTER_CONTROLLER_URL:-http://127.0.0.1:8000}
+      CLUSTER_CONTROLLER_USER: ${CLUSTER_CONTROLLER_USER:-admin}
+      CLUSTER_CONTROLLER_PASSWORD: ${CLUSTER_CONTROLLER_PASSWORD:-admin}
+      CLUSTER_PXE_HOST: ${CLUSTER_PXE_HOST:-127.0.0.1}
+      CLUSTER_PXE_USER: ${CLUSTER_PXE_USER:-tril}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    volumes:
+      - l12_uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - uploads:/app/uploads
-    ports:
-      - "8000:8000"
 
   web:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://172.25.231.244:8001}
+    ports:
+      - "3001:3000"
     depends_on:
       - api
-    ports:
-      - "3000:3000"
 
 volumes:
-  pgdata:
-  uploads:
+  l12_pgdata:
+  l12_uploads:

@@ -135,6 +135,13 @@ export function formatKw(kw: number): string {
   return `${kw.toFixed(0)} kW`;
 }
 
+/** Rack / PSU kW with one decimal (26.5 kW). MW stays two decimals. */
+export function formatRackKw(kw: number): string {
+  const n = Number.isFinite(kw) ? kw : 0;
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(2)} MW`;
+  return `${n.toFixed(1)} kW`;
+}
+
 export function formatW(w: number): string {
   if (w >= 1000) return `${(w / 1000).toFixed(2)} kW`;
   return `${Math.round(w)} W`;
@@ -161,11 +168,15 @@ export interface MaxLpsGpu {
   hall_id: string;
   node: number;
   gpu: number;
+  slot?: number;
+  serial?: string;
+  hostname?: string;
   watts: number;
   setpoint_w: number;
   tdp_w: number;
   min_w: number;
   max_w?: number;
+  source?: "redfish" | "sim" | string;
   spark?: number[];
   curve?: { t: number; w: number; cap: number; min?: number; max?: number }[] | number[];
   pct_limit: number;
@@ -198,7 +209,13 @@ export interface MaxLpsShelf {
   setpoint_w: number;
   gpus_at_cap: number;
   shelf_count?: number;
-  shelves?: { id: string; index: number; kw: number }[];
+  shelves?: {
+    id: string;
+    index: number;
+    kw: number;
+    source?: string;
+    psus?: { id: string; index: number; kw: number }[];
+  }[];
 }
 
 export interface MaxLpsView {
@@ -223,6 +240,10 @@ export interface MaxLpsView {
     free_kw?: number;
     used_delta_kw?: number;
     shelf_kw: number;
+    shelf_source?: string;
+    gpu_source?: string;
+    gpu_error?: string | null;
+    gpu_live?: number;
     gpu_kw: number;
     overhead_kw?: number;
     hottest_w: number;
@@ -259,6 +280,80 @@ export interface MaxLpsView {
   }[];
   racks: MaxLpsShelf[];
   gpus: MaxLpsGpu[];
+}
+
+export interface MaxLpsInvNode {
+  id: string;
+  rack_id: string;
+  index: number;
+  serial: string | null;
+  hostname: string | null;
+  bmc_mac: string | null;
+  bmc_ip: string | null;
+  bmc_user: string | null;
+  bmc_password?: string | null;
+  bmc_password_set?: boolean;
+  os_mac: string | null;
+  os_ip: string | null;
+  gpu_count: number;
+}
+
+export interface MaxLpsInvShelf {
+  id: string;
+  rack_id: string;
+  index: number;
+  serial: string | null;
+  ip: string | null;
+  mac: string | null;
+  user: string | null;
+  password?: string | null;
+  password_set?: boolean;
+  model: string | null;
+}
+
+export interface MaxLpsInvGpu {
+  id: string;
+  rack_id: string;
+  node_id: string;
+  node_index: number;
+  gpu_index: number;
+  serial: string | null;
+  uuid: string | null;
+  pci_addr: string | null;
+  model: string;
+  tdp_w: number;
+}
+
+export interface MaxLpsInvRack {
+  id: string;
+  label: string;
+  serial: string | null;
+  hall: string | null;
+  model: string;
+  notes: string | null;
+  enabled: boolean;
+  power_state: string;
+  created_at: string | null;
+  updated_at: string | null;
+  node_count: number;
+  shelf_count: number;
+  gpu_count: number;
+  nodes: MaxLpsInvNode[];
+  shelves: MaxLpsInvShelf[];
+  gpus: MaxLpsInvGpu[];
+}
+
+export interface MaxLpsInventory {
+  source: "inventory" | "floor";
+  count: number;
+  racks: MaxLpsInvRack[];
+  layout: {
+    nodes_per_rack: number;
+    gpus_per_node: number;
+    shelves_per_rack: number;
+    gpus_per_rack: number;
+    model: string;
+  };
 }
 
 export interface ClusterWorkload {
@@ -416,16 +511,41 @@ export interface InventoryNode {
   os_mac: string | null;
   pxe_mac: string | null;
   switch_mac: string | null;
+  bmc_user?: string | null;
   bmc_password: string | null;
   bmc_ip: string | null;
   os_ip: string | null;
+  os_username?: string | null;
+  os_password?: string | null;
+  source?: string;
   provision_status: string;
   sol_log: string | null;
+  kvm_url?: string | null;
+  gpus?: { id: string; name: string; serial?: string | null; uuid?: string | null; model?: string | null; pn?: string | null }[];
   last_seen_at: string | null;
   provision_started_at: string | null;
 }
 
+export interface ProvisionRack {
+  id: string;
+  serial: string;
+  name: string;
+  type: string;
+  status: string;
+  counts: { nodes: number; switches: number; shelves: number };
+}
+
+export interface ProvisionHop {
+  connected: boolean;
+  host: string;
+  user: string;
+  tunnels?: Record<string, { port: number; bmc_ip: string }>;
+}
+
 export interface ProvisionSnapshot {
+  source?: string;
+  hop?: ProvisionHop;
+  racks?: ProvisionRack[];
   nodes: InventoryNode[];
   dhcp: { ip: string; mac: string; hostname: string; lease: string; mapped: string; kind: string; iface: string }[];
   arp: { ip: string; mac: string; vendor: string; mapped: string; kind: string; state: string }[];
@@ -433,6 +553,7 @@ export interface ProvisionSnapshot {
     nodes: number;
     compute: number;
     switches: number;
+    shelves?: number;
     mapped_macs: number;
     leases: number;
     status: Record<string, number>;

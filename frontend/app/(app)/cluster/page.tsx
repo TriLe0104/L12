@@ -53,6 +53,7 @@ export default function ClusterPage() {
   const [matrixCount, setMatrixCount] = useState(64);
   const [rackPrefix, setRackPrefix] = useState("");
   const [restarting, setRestarting] = useState(false);
+  const [clusterName, setClusterName] = useState("Firmus");
 
   const { data: power, setData: setPower, byId: powerByRack } = usePowerLimiter(tab === "floor");
 
@@ -65,12 +66,15 @@ export default function ClusterPage() {
     zoom.level === "cluster" ? campus?.telemetry : hudHall?.telemetry;
 
   const loadOverview = useCallback(async () => {
-    setOverview(await api.clusterOverview());
+    const next = await api.clusterOverview();
+    setOverview(next);
+    if (next.name) setClusterName(next.name);
   }, []);
 
   const loadHalls = useCallback(async () => {
     const campusData = await api.campus();
     setCampus(campusData);
+    if (campusData.name) setClusterName(campusData.name);
     setHalls(campusData.halls);
     setHallId((current) => current ?? campusData.halls[0]?.id ?? null);
     return campusData.halls;
@@ -335,7 +339,33 @@ export default function ClusterPage() {
     <div className="cluster-app">
       <div className="cluster-toolbar">
         <div className="cluster-tabs">
-          <span className="cluster-kicker">{campus?.name ?? overview?.name ?? "Firmus"}</span>
+          {mayEdit ? (
+            <input
+              className="cluster-kicker cluster-kicker-input"
+              value={clusterName}
+              aria-label="Cluster name"
+              title="Cluster name"
+              onChange={(e) => setClusterName(e.target.value)}
+              onBlur={async () => {
+                const next = clusterName.trim();
+                if (!next || next === (campus?.name ?? overview?.name)) return;
+                try {
+                  const saved = await api.patchClusterName(next);
+                  setClusterName(saved.name);
+                  setCampus((cur) => (cur ? { ...cur, name: saved.name } : cur));
+                  setOverview((cur) => (cur ? { ...cur, name: saved.name } : cur));
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not rename cluster");
+                  setClusterName(campus?.name ?? overview?.name ?? "Firmus");
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+          ) : (
+            <span className="cluster-kicker">{clusterName || campus?.name || overview?.name || "Firmus"}</span>
+          )}
           <button type="button" data-active={tab === "overview"} onClick={() => setTab("overview")}>
             Overview
           </button>
@@ -418,6 +448,7 @@ export default function ClusterPage() {
           {halls.length > 0 ? (
             <ClusterCanvas
               halls={halls}
+              clusterName={clusterName}
               selectedIds={selectedIds}
               focusHallId={flyHallId}
               placeMode={placeMode}
@@ -509,7 +540,7 @@ export default function ClusterPage() {
             <aside className="zoom-hud" data-level={zoom.level}>
               <div className="zoom-hud-kicker">
                 {zoom.level === "cluster"
-                  ? campus?.name ?? "Firmus"
+                  ? clusterName || campus?.name || "Firmus"
                   : zoom.level === "hall"
                     ? hudHall?.name ?? "Data hall"
                     : hall?.name ?? "Rack"}

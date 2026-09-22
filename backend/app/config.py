@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "demo1234"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
+    # Cluster Backend Controller — source of truth for MaxLPS rack / shelf identity.
+    cluster_controller_url: str = "http://172.25.231.244:8000"
+    cluster_controller_user: str = "admin"
+    cluster_controller_password: str = "admin"
+    cluster_controller_sync_s: float = 60.0
+    cluster_pxe_host: str = "172.25.231.244"
+    cluster_pxe_user: str = "root"
+
     # S3-compatible object storage (Cloudflare R2, AWS S3, MinIO, …). When all
     # of endpoint / bucket / keys are set, uploads survive container restarts.
     # Leave unset for local disk under backend/uploads/.

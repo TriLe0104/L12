@@ -1,0 +1,48 @@
+# Local Docker (no Argus on the same host). Ports 3000 / 8000.
+#   docker compose -f docker-compose.dev.yml up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: po
+      POSTGRES_PASSWORD: po
+      POSTGRES_DB: po_calendar
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U po -d po_calendar"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://po:po@db:5432/po_calendar
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      SEED_ON_START: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
+  uploads:

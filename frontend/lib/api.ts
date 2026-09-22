@@ -5,6 +5,11 @@ import type {
   ClusterWorkload,
   DataHall,
   HallDetail,
+  MaxLpsInvGpu,
+  MaxLpsInvNode,
+  MaxLpsInvRack,
+  MaxLpsInventory,
+  MaxLpsInvShelf,
 } from "./cluster";
 import type {
   ActivityItem,
@@ -20,8 +25,15 @@ import type {
 } from "./types";
 import type { BoardSettings } from "./boardTypes";
 
+function defaultApiBase() {
+  if (typeof window !== "undefined" && window.location.port === "3001") {
+    return "http://127.0.0.1:8001";
+  }
+  return "http://127.0.0.1:8000";
+}
+
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ?? defaultApiBase();
 
 const TOKEN_KEY = "po_calendar_token";
 
@@ -87,6 +99,11 @@ export const api = {
   me: () => request<User>("/api/auth/me"),
 
   clusterOverview: () => request<ClusterOverview>("/api/cluster/overview"),
+  patchClusterName: (name: string) =>
+    request<{ name: string }>("/api/cluster/name", {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
   clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.range) qs.set("range", params.range);
@@ -114,7 +131,29 @@ export const api = {
       body: JSON.stringify({ ids }),
     }),
   provisionConsole: (id: string) =>
-    request<{ id: string; name: string; status: string; log: string }>(`/api/provision/nodes/${id}/console`),
+    request<{ id: string; name: string; status: string; log: string; needs_hop?: boolean; hop?: import("./cluster").ProvisionHop; bmc_ip?: string | null }>(
+      `/api/provision/nodes/${id}/console`,
+    ),
+  provisionHop: () => request<import("./cluster").ProvisionHop>("/api/provision/hop"),
+  provisionHopConnect: (payload: { host?: string; username?: string; password?: string }) =>
+    request<import("./cluster").ProvisionHop>("/api/provision/hop", { method: "POST", body: JSON.stringify(payload) }),
+  provisionFindIp: (id: string) =>
+    request<{ id: string; bmc_mac: string; bmc_ip: string | null; ip: string | null; matches: { ip: string; source: string }[] }>(
+      `/api/provision/nodes/${encodeURIComponent(id)}/find-ip`,
+      { method: "POST" },
+    ),
+  provisionKvm: (id: string) =>
+    request<{
+      id: string;
+      name: string;
+      bmc_ip: string;
+      path: string;
+      url: string;
+      sol_url: string;
+      via: string;
+      user?: string;
+    }>(`/api/provision/nodes/${encodeURIComponent(id)}/kvm`, { method: "POST" }),
+  provisionSync: () => request<import("./cluster").ProvisionSnapshot>("/api/provision/sync", { method: "POST" }),
   fabric: () => request<import("./cluster").FabricTopology>("/api/fabric"),
   fabricPorts: (params: Record<string, string | undefined> = {}) => {
     const qs = new URLSearchParams(
@@ -156,6 +195,42 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  maxlpsInventory: (sync = false) =>
+    request<MaxLpsInventory>(`/api/maxlps/inventory${sync ? "?sync=true" : ""}`),
+  syncMaxlpsInventory: () =>
+    request<MaxLpsInventory & { ok: boolean; created?: number; updated?: number; serials?: string[] }>("/api/maxlps/sync", {
+      method: "POST",
+    }),
+  maxlpsSchema: () => request<Record<string, unknown>>("/api/maxlps/schema"),
+  createMaxlpsRack: (payload: { label: string; serial?: string; hall?: string; notes?: string; model?: string }) =>
+    request<MaxLpsInvRack>("/api/maxlps/racks", { method: "POST", body: JSON.stringify(payload) }),
+  patchMaxlpsRack: (
+    id: string,
+    payload: Partial<{ label: string; serial: string | null; hall: string | null; notes: string | null; model: string; enabled: boolean; power_state: string }>,
+  ) => request<MaxLpsInvRack>(`/api/maxlps/racks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteMaxlpsRack: (id: string) => request<{ ok: boolean; id: string }>(`/api/maxlps/racks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  patchMaxlpsNode: (id: string, payload: Partial<MaxLpsInvNode>) =>
+    request<MaxLpsInvNode>(`/api/maxlps/nodes/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  patchMaxlpsShelf: (id: string, payload: Partial<MaxLpsInvShelf>) =>
+    request<MaxLpsInvShelf>(`/api/maxlps/shelves/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  patchMaxlpsInvGpu: (id: string, payload: Partial<MaxLpsInvGpu>) =>
+    request<MaxLpsInvGpu>(`/api/maxlps/gpus/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  maxlpsWatts: (params?: { since?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.since) qs.set("since", params.since);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<{ samples: Record<string, unknown>[] }>(`/api/maxlps/watts${q ? `?${q}` : ""}`);
+  },
+  maxlpsRackWatts: (rackId: string, params?: { since?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.since) qs.set("since", params.since);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<{ rack_id: string; samples: Record<string, unknown>[] }>(
+      `/api/maxlps/watts/racks/${encodeURIComponent(rackId)}${q ? `?${q}` : ""}`,
+    );
+  },
   patchClusterPower: (payload: {
     mode?: string;
     budget_kw?: number;

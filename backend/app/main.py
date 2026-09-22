@@ -3,12 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, cluster, fabric, meta, provision, purchase_orders, staff_tasks, uploads, users, workloads
+from .routers import auth, cluster, fabric, maxlps, meta, provision, purchase_orders, staff_tasks, uploads, users, workloads
 from .routers import settings as settings_router
 from .seed import seed
 from .storage import UPLOAD_DIR, object_storage_configured, serve_upload
@@ -39,7 +39,7 @@ app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|172\.\d+\.\d+\.\d+|karam-e-nil)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +55,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(cluster.router)
+app.include_router(maxlps.router)
 app.include_router(fabric.router)
 app.include_router(provision.router)
 app.include_router(workloads.router)
@@ -73,6 +74,16 @@ def get_upload(name: str) -> Response:
     # Local disk first, then the configured object store — so a free Render
     # instance that just woke still has every file that survived in the bucket.
     return serve_upload(name)
+
+
+@app.get("/login")
+def kvm_login_bounce() -> HTMLResponse:
+    """NVIDIA webui does window.location='/login' on 401; send the iframe back to the KVM proxy."""
+    return HTMLResponse(
+        "<!doctype html><script>var p=sessionStorage.getItem('l12-kvm-prefix');"
+        "if(p) location.replace(p+'/#/login');"
+        "else document.body.textContent='Open KVM from Provision again.';</script>"
+    )
 
 
 @app.get("/api/health")

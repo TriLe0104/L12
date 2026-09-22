@@ -24,6 +24,7 @@ export type CampusHall = {
 
 type Props = {
   halls: CampusHall[];
+  clusterName?: string;
   selectedIds: string[];
   focusHallId: string | null;
   placeMode: boolean;
@@ -122,6 +123,7 @@ function bodyColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
 
 export function ClusterCanvas({
   halls,
+  clusterName = "Firmus",
   selectedIds,
   focusHallId,
   placeMode,
@@ -135,6 +137,9 @@ export function ClusterCanvas({
   onSelectNet,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const clusterSpriteRef = useRef<THREE.Sprite | null>(null);
+  const clusterNameRef = useRef(clusterName);
+  clusterNameRef.current = clusterName;
   const hallsRef = useRef(halls);
   const selectedRef = useRef(selectedIds);
   const placeRef = useRef(placeMode);
@@ -165,6 +170,16 @@ export function ClusterCanvas({
   const flyToHallRef = useRef<((id: string) => void) | null>(null);
   const flyToClusterRef = useRef<(() => void) | null>(null);
   const skipFly = useRef(true);
+
+  useEffect(() => {
+    const sprite = clusterSpriteRef.current;
+    if (!sprite) return;
+    const map = labelTexture((clusterName || "Cluster").toUpperCase(), 72);
+    const old = sprite.material.map;
+    sprite.material.map = map;
+    sprite.material.needsUpdate = true;
+    old?.dispose();
+  }, [clusterName]);
 
   useEffect(() => {
     rebuildRef.current?.();
@@ -262,9 +277,16 @@ export function ClusterCanvas({
     ring.visible = false;
     scene.add(ring);
 
-    const clusterSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture("FIRMUS", 72), transparent: true, depthTest: false }));
+    const clusterSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: labelTexture((clusterNameRef.current || "Cluster").toUpperCase(), 72),
+        transparent: true,
+        depthTest: false,
+      }),
+    );
     clusterSprite.scale.set(22, 5.5, 1);
     clusterSprite.position.set(0, 18.5, 0);
+    clusterSpriteRef.current = clusterSprite;
     scene.add(clusterSprite);
 
     const controls = new OrbitControls(camera, renderer.domElement);

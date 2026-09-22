@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 
 from ..db import get_db
 from ..fabric import live_traffic, build_fabric
-from ..models import DataHall, Device, Rack, Role, User, Workload, has_rank
-from .. import gpu_power, power_limit
+from ..models import ClusterSettings, DataHall, Device, Rack, Role, User, Workload, has_rank
+from .. import gpu_power, maxlps_inventory, power_limit
 from ..schemas import (
     CampusOut,
     ClusterOverview,
@@ -77,7 +77,34 @@ def _occupied(db: Session, hall_id: str, x: int, y: int, ignore_id: str | None =
 RACK_TDP_KW = 120.0  # GB300 liquid-cooled rack, demo nameplate
 GPUS_PER_RACK = gpu_power.GPUS_PER_RACK
 NODES_PER_RACK = gpu_power.NODES_PER_RACK
-CLUSTER_NAME = "Firmus"
+DEFAULT_CLUSTER_NAME = "Firmus"
+
+
+def cluster_name(db: Session) -> str:
+    row = db.get(ClusterSettings, 1)
+    name = (row.name if row else "") or ""
+    return name.strip() or DEFAULT_CLUSTER_NAME
+
+
+def set_cluster_name(db: Session, name: str) -> str:
+    cleaned = " ".join((name or "").split()).strip()
+    if not cleaned:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cluster name is required")
+    if len(cleaned) > 80:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cluster name is too long")
+    row = db.get(ClusterSettings, 1)
+    if row is None:
+        row = ClusterSettings(id=1, name=cleaned)
+        db.add(row)
+    else:
+        row.name = cleaned
+    db.commit()
+    db.refresh(row)
+    return row.name
+
+
+class ClusterNamePatch(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
 
 
 def _usage(rack: Rack) -> tuple[float, float, float, float]:
@@ -197,7 +224,7 @@ def overview(_user: User = Depends(get_current_user), db: Session = Depends(get_
     pct = round((occupied_u / total_u) * 100, 1) if total_u else 0.0
     tel = telemetry_for(rack_rows)
     return ClusterOverview(
-        name=CLUSTER_NAME,
+        name=cluster_name(db),
         halls=halls,
         racks=racks,
         devices=len(devices),
@@ -296,7 +323,7 @@ def metrics(
     spines = sum(1 for n in fabric["nodes"] if n["role"] == "spine")
     fab_sum = fabric.get("summary") or {}
     return {
-        "name": CLUSTER_NAME,
+        "name": cluster_name(db),
         "now": {
             "cpu_pct": last["cpu"],
             "gpu_pct": last["gpu"],
@@ -420,9 +447,14 @@ def _maxlps_inputs(db: Session) -> tuple[dict, list]:
     now = time.time()
     if _POWER_CACHE and now - _POWER_CACHE[0] < 1.0:
         return _POWER_CACHE[1], _POWER_CACHE[2]
-    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
     works = _running_workloads(db)
-    snap = power_limit.snapshot(_power_samples(rack_rows, works))
+    maxlps_inventory.maybe_sync(db)
+    if maxlps_inventory.inventory_count(db):
+        samples = maxlps_inventory.power_samples(db, demand_kw=power_limit.rack_policy_kw() * 0.65)
+    else:
+        rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
+        samples = _power_samples(rack_rows, works)
+    snap = power_limit.snapshot(samples)
     jobs = [
         {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
         for w in works
@@ -450,7 +482,12 @@ def maxlps_view(
     db: Session = Depends(get_db),
 ) -> Response:
     snap, jobs = _maxlps_inputs(db)
-    return _json(gpu_power.snapshot(snap, top=top, rack_id=rack_id, gpu_id=gpu_id, workloads=jobs))
+    view = gpu_power.snapshot(snap, top=top, rack_id=rack_id, gpu_id=gpu_id, workloads=jobs)
+    try:
+        maxlps_inventory.record_from_view(db, view)
+    except Exception:
+        db.rollback()
+    return _json(view)
 
 
 class GpuBoundPatch(BaseModel):
@@ -539,7 +576,16 @@ def campus(_user: User = Depends(get_current_user), db: Session = Depends(get_db
                 racks=[serialize_rack(r, include_devices=False) for r in hall.racks],
             )
         )
-    return CampusOut(name=CLUSTER_NAME, telemetry=telemetry_for(all_racks), halls=hall_payload)
+    return CampusOut(name=cluster_name(db), telemetry=telemetry_for(all_racks), halls=hall_payload)
+
+
+@router.patch("/name")
+def patch_cluster_name(
+    payload: ClusterNamePatch,
+    _user: User = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {"name": set_cluster_name(db, payload.name)}
 
 
 @router.get("/halls", response_model=list[HallOut])

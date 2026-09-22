@@ -3,9 +3,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { PolicyField, PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
+import { ThemeDialog } from "@/components/ThemeDialog";
 import { api } from "@/lib/api";
-import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView } from "@/lib/cluster";
-import { formatKw, formatW } from "@/lib/cluster";
+import { canEdit, useAuth } from "@/lib/auth";
+import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView, ProvisionHop } from "@/lib/cluster";
+import { formatKw, formatRackKw, formatW } from "@/lib/cluster";
 import { captureFlipTops, playEntrySwap } from "@/lib/flip";
 import "../cluster/cluster.css";
 import "./maxlps.css";
@@ -13,6 +15,55 @@ import "./maxlps.css";
 const DEFAULT_INTERVAL_MS = 10_000;
 const ROW_H = 34;
 const SWAP_MS = 880;
+const DELTA_PLAY_MS = 1250;
+
+function useOnceDelta(value: number, enabled: boolean, floor: number) {
+  const baseline = useRef<number | null>(null);
+  const playing = useRef(false);
+  const tid = useRef<number | null>(null);
+  const [delta, setDelta] = useState(0);
+  const [play, setPlay] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (tid.current) window.clearTimeout(tid.current);
+      tid.current = null;
+      playing.current = false;
+      baseline.current = value;
+      setDelta(0);
+      return;
+    }
+    if (baseline.current == null || baseline.current < 0.05) {
+      baseline.current = value;
+      return;
+    }
+    if (playing.current) return;
+    const d = value - baseline.current;
+    if (Math.abs(d) < floor) {
+      baseline.current = value;
+      return;
+    }
+    playing.current = true;
+    baseline.current = value;
+    setDelta(d);
+    setPlay((n) => n + 1);
+    if (tid.current) window.clearTimeout(tid.current);
+    tid.current = window.setTimeout(() => {
+      playing.current = false;
+      tid.current = null;
+      setDelta(0);
+    }, DELTA_PLAY_MS);
+  }, [value, enabled, floor]);
+
+  useEffect(
+    () => () => {
+      if (tid.current) window.clearTimeout(tid.current);
+    },
+    [],
+  );
+
+  return { delta, play };
+}
 
 function mergeRankBoard(prevIds: string[] | null, incoming: MaxLpsGpu[]): MaxLpsGpu[] {
   if (!incoming.length) return incoming;
@@ -59,9 +110,18 @@ function barTone(gpu: MaxLpsGpu) {
 }
 
 export default function MaxLpsPage() {
+  const { user } = useAuth();
+  const mayEdit = canEdit(user);
   const { data: power, setData: setPower } = usePowerLimiter(true, 0);
   const [view, setView] = useState<MaxLpsView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hop, setHop] = useState<ProvisionHop | null>(null);
+  const [hopOpen, setHopOpen] = useState(false);
+  const [hopHost, setHopHost] = useState("172.25.231.244");
+  const [hopUser, setHopUser] = useState("tril");
+  const [hopPass, setHopPass] = useState("");
+  const [hopBusy, setHopBusy] = useState(false);
+  const hopAsked = useRef(false);
   const [rackId, setRackId] = useState<string | null>(null);
   const [openRacks, setOpenRacks] = useState<Record<string, boolean>>({});
   const [gpuId, setGpuId] = useState<string | null>(null);
@@ -141,6 +201,49 @@ export default function MaxLpsPage() {
     return () => window.clearInterval(id);
   }, [load, pollMs]);
 
+  const refreshHop = useCallback(async () => {
+    try {
+      const next = await api.provisionHop();
+      setHop(next);
+      if (next.host) setHopHost(next.host);
+      if (next.user) setHopUser(next.user);
+      if (!next.connected && mayEdit && !hopAsked.current) {
+        hopAsked.current = true;
+        setHopOpen(true);
+      }
+    } catch {
+      /* hop status is optional */
+    }
+  }, [mayEdit]);
+
+  useEffect(() => {
+    void refreshHop();
+    const id = window.setInterval(() => void refreshHop(), 4000);
+    return () => window.clearInterval(id);
+  }, [refreshHop]);
+
+  async function connectHop() {
+    setHopBusy(true);
+    try {
+      const next = await api.provisionHopConnect({
+        host: hopHost,
+        username: hopUser,
+        password: hopPass || undefined,
+      });
+      setHop(next);
+      setHopPass("");
+      setHopOpen(false);
+      setError(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "PXE hop failed");
+    } finally {
+      setHopBusy(false);
+    }
+  }
+
+
+
   useEffect(() => {
     const el = listOuter.current;
     if (!el) return;
@@ -165,41 +268,40 @@ export default function MaxLpsPage() {
   const totals = view?.totals;
   const selected = view?.racks.find((r) => r.id === rackId) ?? null;
   const locked = pending;
-  const totalKw = totals?.total_kw ?? view?.total_budget_kw ?? 0;
-  const gracePct = view?.threshold_pct ?? view?.algo?.budget_grace ?? 80;
-  const gpuPct = view?.algo?.gpu_power_percent ?? 75;
-  const rackAvailKw = totalKw * (gracePct / 100);
-  const gpuAvailKw = rackAvailKw * (gpuPct / 100);
   const rackUsedKw = useMemo(
     () => (view?.racks ?? []).reduce((s, r) => s + (r.shelf_kw || 0), 0),
     [view?.racks],
   );
-  const gpuUsedKw = useMemo(
-    () => (view?.racks ?? []).reduce((s, r) => s + (r.gpu_kw || 0), 0),
-    [view?.racks],
-  );
+  const gpuUsedKw = useMemo(() => {
+    const listed = (view?.gpus ?? []).reduce((s, g) => s + (g.watts || 0), 0) / 1000;
+    if (listed > 0) return listed;
+    return (view?.racks ?? []).reduce((s, r) => s + (r.gpu_kw || 0), 0);
+  }, [view?.gpus, view?.racks]);
+  const gpuCapKw = useMemo(() => {
+    const listed = (view?.gpus ?? []).reduce((s, g) => s + (g.setpoint_w || 0), 0) / 1000;
+    if (listed > 0) return listed;
+    return view?.totals?.cap_kw ?? gpuUsedKw;
+  }, [view?.gpus, view?.totals?.cap_kw, gpuUsedKw]);
+  const minRackKw = power?.min_rack_kw ?? view?.min_rack_kw ?? 40;
+  const maxRackKw = power?.max_rack_kw ?? view?.max_rack_kw ?? 135;
+  const thresholdPct = power?.threshold_pct ?? power?.stay_under_pct ?? view?.threshold_pct ?? 80;
+  const budgetKw = power?.total_budget_kw ?? view?.totals?.total_kw ?? view?.total_budget_kw ?? 0;
+  const availableKw = budgetKw > 0 ? (budgetKw * thresholdPct) / 100 : (view?.totals?.available_kw ?? 0);
+  const totalKw = budgetKw > 0 ? budgetKw : Math.max(availableKw, rackUsedKw, gpuUsedKw);
+  const rackAvailKw = availableKw > 0 ? availableKw : totalKw;
+  const gpuAvailKw = gpuCapKw;
   const overheadKw = useMemo(
     () => (view?.racks ?? []).reduce((s, r) => s + (r.overhead_kw || 0), 0),
     [view?.racks],
   );
   const nRacks = view?.racks?.length ?? 0;
-  const nGpus = nRacks * (topo?.gpus_per_rack ?? 72);
-  const prevRackUsed = useRef<number | null>(null);
-  const prevGpuUsed = useRef<number | null>(null);
-  const [rackDelta, setRackDelta] = useState(0);
-  const [gpuDelta, setGpuDelta] = useState(0);
-  useEffect(() => {
-    const prev = prevRackUsed.current;
-    if (prev == null || prev < 1) setRackDelta(0);
-    else setRackDelta(rackUsedKw - prev);
-    prevRackUsed.current = rackUsedKw;
-  }, [rackUsedKw]);
-  useEffect(() => {
-    const prev = prevGpuUsed.current;
-    if (prev == null || prev < 1) setGpuDelta(0);
-    else setGpuDelta(gpuUsedKw - prev);
-    prevGpuUsed.current = gpuUsedKw;
-  }, [gpuUsedKw]);
+  const nGpus = totals?.gpu_live || totals?.gpus_listed || (view?.gpus ?? []).length;
+  const gpuLive = view?.totals?.gpu_source === "redfish" && gpuUsedKw >= 0.05;
+  const rackLive = view?.totals?.shelf_source === "argus" && rackUsedKw >= 0.05;
+  const rackFlash = useOnceDelta(rackUsedKw, rackLive, 0.5);
+  const gpuFlash = useOnceDelta(gpuUsedKw, gpuLive, 0.5);
+  const rackDelta = rackFlash.delta;
+  const gpuDelta = gpuFlash.delta;
 
   const sortedGpus = useMemo(() => {
     const src = view?.gpus ?? [];
@@ -219,10 +321,14 @@ export default function MaxLpsPage() {
             c = dlt(a.id) - dlt(b.id);
             break;
           case "gpu":
-            c = a.node - b.node || a.gpu - b.gpu || a.rack_label.localeCompare(b.rack_label);
+            c = (a.serial || "").localeCompare(b.serial || "", undefined, { numeric: true })
+              || (a.slot ?? a.node) - (b.slot ?? b.node)
+              || a.gpu - b.gpu;
             break;
           case "rack":
-            c = a.rack_label.localeCompare(b.rack_label) || a.rank - b.rank;
+            c = (a.slot ?? a.node) - (b.slot ?? b.node)
+              || (a.hostname || "").localeCompare(b.hostname || "", undefined, { numeric: true })
+              || a.gpu - b.gpu;
             break;
           case "watts":
             c = a.watts - b.watts;
@@ -326,6 +432,15 @@ export default function MaxLpsPage() {
           </p>
         </div>
         <div className="lps-modes">
+          <button
+            type="button"
+            data-active={hop?.connected ? "true" : undefined}
+            disabled={!mayEdit || hopBusy}
+            onClick={() => setHopOpen(true)}
+            title={hop?.connected ? `PXE hop ${hop.host}` : "Connect PXE hop for GPU Redfish"}
+          >
+            {hop?.connected ? `Hop · ${hop.host}` : "Connect PXE hop"}
+          </button>
           <button type="button" data-active={power?.mode === "static"} disabled={locked} onClick={() => setMode("static")}>
             Static
           </button>
@@ -339,28 +454,43 @@ export default function MaxLpsPage() {
       </header>
 
       {error ? <p className="cluster-error">{error}</p> : null}
+      {!hop?.connected ? (
+        <p className="cluster-error maxlps-hop-ask">
+          GPU watts need BMC Redfish through the PXE hop.
+          {mayEdit ? (
+            <>
+              {" "}
+              <button type="button" className="maxlps-hop-link" onClick={() => setHopOpen(true)}>
+                Connect now
+              </button>
+            </>
+          ) : (
+            " Ask an editor to connect it."
+          )}
+        </p>
+      ) : null}
 
       <section className="maxlps-stats">
         <article data-lead="true">
-          <span>Total power</span>
-          <b>{formatKw(rackAvailKw)}</b>
+          <span>Total rack</span>
+          <b>{formatRackKw(rackUsedKw)}</b>
           <small>
-            {formatKw(totalKw)} × {Math.round(gracePct)}%
+            {view?.totals?.shelf_source === "argus" ? "Argus TotalPowerOut" : "No PSU readings"}
           </small>
         </article>
-        <article data-free={rackAvailKw - rackUsedKw < 0 ? "over" : "ok"}>
-          <span>Free</span>
-          <b>{formatKw(Math.max(0, rackAvailKw - rackUsedKw))}</b>
-          <small>Not in use</small>
+        <article data-free={gpuAvailKw - gpuUsedKw < 0 ? "over" : "ok"}>
+          <span>GPU cap left</span>
+          <b>{formatKw(Math.max(0, gpuAvailKw - gpuUsedKw))}</b>
+          <small>vs live SetPoint</small>
         </article>
         <article>
           <span>Rack sum</span>
           <b>
-            {formatKw(rackUsedKw)}
+            {formatRackKw(rackUsedKw)}
             {Math.abs(rackDelta) >= 0.5 ? (
-              <em data-off={rackDelta >= 0 ? "up" : "down"}>
+              <em key={`rd-${rackFlash.play}`} data-off={rackDelta >= 0 ? "up" : "down"}>
                 {rackDelta > 0 ? "+" : ""}
-                {formatKw(rackDelta)}
+                {formatRackKw(rackDelta)}
               </em>
             ) : null}
           </b>
@@ -373,14 +503,18 @@ export default function MaxLpsPage() {
           <b>
             {formatKw(gpuUsedKw)}
             {Math.abs(gpuDelta) >= 0.5 ? (
-              <em data-off={gpuDelta >= 0 ? "up" : "down"}>
+              <em key={`gd-${gpuFlash.play}`} data-off={gpuDelta >= 0 ? "up" : "down"}>
                 {gpuDelta > 0 ? "+" : ""}
                 {formatKw(gpuDelta)}
               </em>
             ) : null}
           </b>
           <small>
-            Σ {nGpus.toLocaleString()} GPU
+            {view?.totals?.gpu_source === "redfish"
+              ? `Σ ${(view.totals.gpu_live ?? 0).toLocaleString()} GPU · BMC EnvironmentMetrics`
+              : view?.totals?.gpu_error === "pxe-hop-down"
+                ? "Connect the PXE hop for Redfish"
+                : "No BMC Redfish readings yet"}
           </small>
         </article>
       </section>
@@ -393,11 +527,14 @@ export default function MaxLpsPage() {
         gpuUsedKw={gpuUsedKw}
         rackDelta={rackDelta}
         gpuDelta={gpuDelta}
-        tick={wattTick}
+        rackPlay={rackFlash.play}
+        gpuPlay={gpuFlash.play}
         overheadKw={overheadKw}
         history={view?.history}
         nRacks={nRacks}
         nGpus={nGpus}
+        minRackKw={minRackKw}
+        maxRackKw={maxRackKw}
       />
 
       <div className="maxlps-grid">
@@ -405,8 +542,10 @@ export default function MaxLpsPage() {
           <header>
             <h2>Racks</h2>
             <p>
-              Sum of power shelves per rack
-              {view?.racks?.length ? ` · ${formatKw(rackUsedKw)} cluster` : ""}
+              {view?.totals?.shelf_source === "argus"
+                ? "Argus TotalPowerOut per shelf"
+                : "Empty until Argus TotalPowerOut"}
+              {view?.totals?.shelf_source === "argus" && view?.racks?.length ? ` · ${formatRackKw(rackUsedKw)} total` : ""}
             </p>
             {rackId ? (
               <button type="button" className="maxlps-clear" onClick={() => setRackId(null)}>
@@ -423,6 +562,8 @@ export default function MaxLpsPage() {
                   rack={r}
                   active={r.id === rackId}
                   open={Boolean(openRacks[r.id])}
+                  minKw={minRackKw}
+                  maxKw={maxRackKw}
                   onSelect={() => setRackId(r.id === rackId ? null : r.id)}
                   onToggle={() => setOpenRacks((cur) => ({ ...cur, [r.id]: !cur[r.id] }))}
                 />
@@ -435,12 +576,14 @@ export default function MaxLpsPage() {
             <h2>
               {rackId && selected
                 ? `${selected.label} · ${topo?.gpus_per_rack ?? 72} GB300`
-                : `Power ranking · ${(totals?.gpus_listed ?? 0).toLocaleString()} / ${(totals?.gpus_total ?? 0).toLocaleString()} GPU`}
+                : `Power ranking · ${(totals?.gpus_listed ?? 0).toLocaleString()} / ${(totals?.gpus_total || totals?.gpus_listed || 0).toLocaleString()} GPU`}
             </h2>
             <p>
-              {shuffle
-                ? `# sort shuffles every ${view?.algo?.interval_s ?? 10}s`
-                : "Order held · bars and watts update in place"}
+              {view?.totals?.gpu_source === "redfish"
+                ? `Redfish PowerWatts.Reading · ${view.totals.gpu_live ?? 0} GPU`
+                : hop?.connected
+                  ? "Empty until BMC EnvironmentMetrics arrive"
+                  : "Connect the PXE hop for GPU Redfish"}
               {" · next in "}
               <EtaClock seconds={loopSec} resetKey={loopReset} />
               {" · green gain / red loss"}
@@ -451,8 +594,8 @@ export default function MaxLpsPage() {
               [
                 ["rank", "#"],
                 ["delta", "Δ"],
-                ["gpu", "GPU"],
-                ["rack", "Rack"],
+                ["gpu", "GPU SN"],
+                ["rack", "Host"],
                 ["watts", "W"],
                 ["cap", "Cap"],
                 ["minmax", "Min–max"],
@@ -476,18 +619,34 @@ export default function MaxLpsPage() {
             ref={listOuter}
             onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
           >
-            <VirtualGpus
-              gpus={sortedGpus}
-              scroll={scroll}
-              viewH={viewH}
-              deltas={deltas}
-              wattDelta={wattDelta}
-              selectedId={gpuId}
-              shuffle={shuffle}
-              tick={loopReset}
-              wattTick={wattTick}
-              onSelect={onSelectGpu}
-            />
+            {sortedGpus.length ? (
+              <VirtualGpus
+                gpus={sortedGpus}
+                scroll={scroll}
+                viewH={viewH}
+                deltas={deltas}
+                wattDelta={wattDelta}
+                selectedId={gpuId}
+                shuffle={shuffle}
+                tick={loopReset}
+                wattTick={wattTick}
+                onSelect={onSelectGpu}
+              />
+            ) : (
+              <div className="maxlps-gpu-empty">
+                <p>{hop?.connected ? "No GPU power readings yet" : "PXE hop is not connected"}</p>
+                <span>
+                  {hop?.connected
+                    ? "MaxLPS only shows BMC EnvironmentMetrics. Wait for the next poll, or reopen hop if the jump dropped."
+                    : "GPU bars stay empty until this API can SSH to the PXE host and read Redfish on 10.10.x."}
+                </span>
+                {!hop?.connected && mayEdit ? (
+                  <button type="button" className="btn btn-primary" onClick={() => setHopOpen(true)}>
+                    Connect PXE hop
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
 
@@ -538,7 +697,7 @@ export default function MaxLpsPage() {
                   <dl className="maxlps-detail">
                     <div>
                       <dt>Rack input</dt>
-                      <dd>{formatKw(selected.shelf_kw)}</dd>
+                      <dd>{formatRackKw(selected.shelf_kw)}</dd>
                     </div>
                     <div>
                       <dt>GPUs</dt>
@@ -565,6 +724,42 @@ export default function MaxLpsPage() {
           )}
         </aside>
       </div>
+      {hopOpen ? (
+        <ThemeDialog
+          title="PXE jump host"
+          confirmLabel="Connect"
+          busy={hopBusy}
+          onClose={() => setHopOpen(false)}
+          onConfirm={() => void connectHop()}
+        >
+          <p className="widget-meta" style={{ margin: "0 0 0.6rem" }}>
+            MaxLPS reads GPU watts from BMC Redfish on 10.10.x. SSH to the PXE host first. Password stays in this API process only.
+          </p>
+          <label>
+            PXE IP
+            <input
+              className="field"
+              value={hopHost}
+              onChange={(e) => setHopHost(e.target.value)}
+              placeholder="172.25.231.244"
+            />
+          </label>
+          <label>
+            Username
+            <input className="field" value={hopUser} onChange={(e) => setHopUser(e.target.value)} autoComplete="username" />
+          </label>
+          <label>
+            Password
+            <input
+              className="field"
+              type="password"
+              value={hopPass}
+              onChange={(e) => setHopPass(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+        </ThemeDialog>
+      ) : null}
     </div>
   );
 }
@@ -615,6 +810,8 @@ function MixBar({
   tone,
   capName,
   endName = "Total",
+  minKw,
+  maxKw,
 }: {
   title: string;
   countLabel: string;
@@ -626,20 +823,29 @@ function MixBar({
   tone: "racks" | "gpus";
   capName: string;
   endName?: string;
+  minKw?: number;
+  maxKw?: number;
 }) {
+  const fmt = tone === "racks" ? formatRackKw : formatKw;
   const scale = Math.max(totalKw, usedKw, capKw, 1);
   const usedPct = Math.min(100, (usedKw / scale) * 100);
   const capPct = Math.min(100, (capKw / scale) * 100);
+  const minPct = minKw && minKw > 0 ? Math.min(100, (minKw / scale) * 100) : null;
+  const maxPct = maxKw && maxKw > 0 ? Math.min(100, (maxKw / scale) * 100) : null;
   const freeKw = capKw - usedKw;
   const freePct = Math.max(0, (Math.max(0, freeKw) / scale) * 100);
   const overPct = usedKw > capKw ? Math.min(100, ((usedKw - capKw) / scale) * 100) : 0;
-  const dPct = scale > 0 ? (usedDelta / scale) * 100 : 0;
+  const deltaFloor = 0.5;
+  const showDelta = usedKw >= 0.05 && Math.abs(usedDelta) >= deltaFloor;
+  const dPct = showDelta && scale > 0 ? (usedDelta / scale) * 100 : 0;
   const prevPct = Math.max(0, Math.min(100, usedPct - dPct));
   const gainLeft = Math.min(prevPct, usedPct);
   const gainWidth = Math.abs(usedPct - prevPct);
-  const offLabel =
-    Math.abs(usedDelta) >= 0.5 ? `${usedDelta > 0 ? "+" : ""}${formatKw(usedDelta)}` : "";
+  const offLabel = showDelta ? `${usedDelta > 0 ? "+" : ""}${fmt(usedDelta)}` : "";
   const sumEdge = usedPct < 10 ? "start" : usedPct > 92 ? "end" : "mid";
+  const band = minKw && usedKw > 0 && usedKw < minKw ? "under" : maxKw && usedKw > maxKw ? "over" : "ok";
+  const showMin = minPct != null && minPct > 1.5 && minPct < 98.5 && (maxPct == null || Math.abs(minPct - maxPct) > 2);
+  const showMax = maxPct != null && maxPct > 1.5 && maxPct < 98.5 && Math.abs(maxPct - capPct) > 1.5;
   return (
     <div className="maxlps-mix-row">
       <div className="maxlps-mix-head">
@@ -657,21 +863,27 @@ function MixBar({
       <div
         className="maxlps-mix-bar"
         data-readjust={offLabel ? "true" : undefined}
-        title={`${title} sum ${formatKw(usedKw)} · ${capName} ${formatKw(capKw)} · ${endName} ${formatKw(totalKw)}`}
+        title={`${title} sum ${fmt(usedKw)} · ${capName} ${formatKw(capKw)} · ${endName} ${formatKw(totalKw)}${minKw ? ` · min ${formatKw(minKw)}` : ""}${maxKw ? ` · max ${formatKw(maxKw)}` : ""}`}
       >
-        {usedDelta < -0.5 ? (
+        {showDelta && usedDelta < -deltaFloor ? (
           <i
             key={`ghost-${tick}`}
             data-k="ghost"
             style={{ width: `${prevPct}%`, ["--hp-to" as string]: `${usedPct}%` }}
           />
         ) : null}
-        <i data-k="used" data-scope={tone} style={{ width: `${usedPct}%` }} />
-        {usedDelta > 0.5 && gainWidth > 0.3 ? (
+        <i data-k="used" data-scope={tone} data-band={band} style={{ width: `${usedPct}%` }} />
+        {showDelta && usedDelta > deltaFloor && gainWidth > 0.3 ? (
           <i key={`heal-${tick}`} data-k="heal" style={{ left: `${gainLeft}%`, width: `${gainWidth}%` }} />
         ) : null}
         {overPct > 0 ? <i data-k="over" style={{ left: `${usedPct - overPct}%`, width: `${overPct}%` }} /> : null}
         <i data-k="free" style={{ left: `${usedPct}%`, width: `${freePct}%` }} />
+        {showMin ? (
+          <b data-k="min" style={{ left: `${minPct}%` }} title={`Min ${formatKw(minKw ?? 0)}`} />
+        ) : null}
+        {showMax ? (
+          <b data-k="max" style={{ left: `${maxPct}%` }} title={`Max ${formatKw(maxKw ?? 0)}`} />
+        ) : null}
         <b data-k="cap" style={{ left: `${capPct}%` }} title={`${capName} ${formatKw(capKw)}`} />
         <b data-k="total" title={`${endName} ${formatKw(totalKw)}`} />
         {offLabel ? (
@@ -682,7 +894,7 @@ function MixBar({
       </div>
       <div className="maxlps-mix-marks">
         <span data-k="sum" data-edge={sumEdge} style={{ left: `${Math.min(usedPct, 100)}%` }}>
-          Σ {formatKw(usedKw)}
+          Σ {fmt(usedKw)}
         </span>
       </div>
     </div>
@@ -697,11 +909,14 @@ const MixChart = memo(function MixChart({
   gpuUsedKw,
   rackDelta,
   gpuDelta,
-  tick,
+  rackPlay,
+  gpuPlay,
   overheadKw,
   history,
   nRacks,
   nGpus,
+  minRackKw,
+  maxRackKw,
 }: {
   totalKw: number;
   rackAvailKw: number;
@@ -710,11 +925,14 @@ const MixChart = memo(function MixChart({
   gpuUsedKw: number;
   rackDelta: number;
   gpuDelta: number;
-  tick: number;
+  rackPlay: number;
+  gpuPlay: number;
   overheadKw: number;
   history: MaxLpsView["history"];
   nRacks: number;
   nGpus: number;
+  minRackKw: number;
+  maxRackKw: number;
 }) {
   const w = 420;
   const h = 72;
@@ -764,27 +982,29 @@ const MixChart = memo(function MixChart({
           capKw={rackAvailKw}
           totalKw={totalKw}
           usedDelta={rackDelta}
-          tick={tick}
+          tick={rackPlay}
           tone="racks"
-          capName="Available"
+          capName="Threshold"
+          minKw={nRacks * minRackKw}
+          maxKw={nRacks * maxRackKw}
         />
         <MixBar
           title="GPUs"
           countLabel={`${nGpus.toLocaleString()} · GB300`}
           usedKw={gpuUsedKw}
           capKw={gpuAvailKw}
-          totalKw={rackAvailKw}
+          totalKw={gpuAvailKw}
           usedDelta={gpuDelta}
-          tick={tick}
+          tick={gpuPlay}
           tone="gpus"
-          capName="GPU share"
-          endName="Available"
+          capName="Cap"
+          endName="SetPoint"
         />
         <ul>
-          <li data-k="used">Rack sum {formatKw(rackUsedKw)}</li>
+          <li data-k="used">Rack sum {formatRackKw(rackUsedKw)}</li>
           <li data-k="gpu">GPU sum {formatKw(gpuUsedKw)}</li>
-          <li data-k="oh">Overhead {formatKw(overheadKw)}</li>
-          <li data-k="avail">Available {formatKw(rackAvailKw)}</li>
+          <li data-k="oh">Overhead {formatRackKw(overheadKw)}</li>
+          <li data-k="avail">GPU cap {formatKw(gpuAvailKw)}</li>
           <li data-k="total">Total {formatKw(totalKw)}</li>
         </ul>
       </div>
@@ -955,26 +1175,32 @@ function VirtualGpus({
 }
 
 function formatShelfKw(kw: number) {
-  if (kw >= 100) return formatKw(kw);
-  return `${kw.toFixed(1)} kW`;
+  return formatRackKw(kw);
 }
 
 function ShelfRow({
   rack,
   active,
   open,
+  minKw,
+  maxKw,
   onSelect,
   onToggle,
 }: {
   rack: MaxLpsShelf;
   active: boolean;
   open: boolean;
+  minKw: number;
+  maxKw: number;
   onSelect: () => void;
   onToggle: () => void;
 }) {
   const shelves = rack.shelves ?? [];
-  const cap = Math.max(rack.allocated_kw, rack.shelf_kw, 1);
-  const pct = Math.min(100, (rack.shelf_kw / cap) * 100);
+  const scale = Math.max(maxKw, 1);
+  const pct = Math.min(100, (rack.shelf_kw / scale) * 100);
+  const minPct = Math.min(100, (Math.max(0, minKw) / scale) * 100);
+  const band =
+    rack.shelf_kw > 0 && rack.shelf_kw < minKw - 0.05 ? "under" : rack.shelf_kw > maxKw + 0.05 ? "over" : "ok";
   const shelfCap = Math.max(...shelves.map((s) => s.kw), 0.1);
   return (
     <div className="maxlps-rack-block" data-open={open ? "true" : undefined}>
@@ -982,6 +1208,7 @@ function ShelfRow({
         className="maxlps-shelf"
         data-active={active ? "true" : undefined}
         data-hot={rack.hot ? "true" : undefined}
+        data-band={band}
         data-off={rack.power_state === "off" || !rack.enabled ? "true" : undefined}
       >
         <button
@@ -996,26 +1223,46 @@ function ShelfRow({
         </button>
         <button type="button" className="maxlps-shelf-main" onClick={onSelect}>
           <span className="maxlps-shelf-id">{rack.label}</span>
-          <span className="maxlps-shelf-bar" aria-hidden>
-            <i data-k="ps" style={{ width: `${pct}%` }} />
+          <span
+            className="maxlps-shelf-bar"
+            aria-hidden
+            title={`${formatRackKw(rack.shelf_kw)} · min ${formatKw(minKw)} · max ${formatKw(maxKw)}`}
+          >
+            <i data-k="ps" data-band={band} style={{ width: `${pct}%` }} />
+            {minPct > 2 && minPct < 98 ? <b data-k="min" style={{ left: `${minPct}%` }} /> : null}
           </span>
           <span className="maxlps-shelf-kw" title="Sum of power shelves">
-            {formatKw(rack.shelf_kw)}
+            {formatRackKw(rack.shelf_kw)}
           </span>
         </button>
       </div>
       {open && shelves.length ? (
         <ul className="maxlps-ps-list">
-          {shelves.map((s) => (
-            <li key={s.id} className="maxlps-ps">
-              <span />
-              <span className="maxlps-shelf-id">PS{s.index}</span>
-              <span className="maxlps-shelf-bar" aria-hidden>
-                <i data-k="ps" style={{ width: `${Math.min(100, (s.kw / shelfCap) * 100)}%` }} />
-              </span>
-              <span className="maxlps-shelf-kw">{formatShelfKw(s.kw)}</span>
-            </li>
-          ))}
+          {shelves.map((s) => {
+            const mods = s.psus ?? [];
+            return (
+              <li key={s.id}>
+                <div className="maxlps-ps">
+                  <span />
+                  <span className="maxlps-shelf-id">PS{s.index}</span>
+                  <span className="maxlps-shelf-bar" aria-hidden>
+                    <i data-k="ps" style={{ width: `${Math.min(100, (s.kw / shelfCap) * 100)}%` }} />
+                  </span>
+                  <span className="maxlps-shelf-kw">{formatShelfKw(s.kw)}</span>
+                </div>
+                {mods.map((p) => (
+                  <div key={p.id} className="maxlps-ps maxlps-ps-mod">
+                    <span />
+                    <span className="maxlps-shelf-id">PSU{p.index}</span>
+                    <span className="maxlps-shelf-bar" aria-hidden>
+                      <i data-k="ps" style={{ width: `${Math.min(100, (p.kw / Math.max(s.kw, 0.1)) * 100)}%` }} />
+                    </span>
+                    <span className="maxlps-shelf-kw">{formatShelfKw(p.kw)}</span>
+                  </div>
+                ))}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
@@ -1230,18 +1477,20 @@ const GpuRow = memo(function GpuRow({
       className="maxlps-gpu"
       data-tone={tone}
       data-active={active ? "true" : undefined}
-      aria-label={`${rankLabel(gpu.rank)} ${gpu.rack_label} n${String(gpu.node).padStart(2, "0")} g${gpu.gpu}`}
+      aria-label={`${rankLabel(gpu.rank)} ${gpu.serial || "gpu"} ${gpu.hostname || gpu.rack_label}`}
       onClick={() => onSelect(gpu)}
     >
       <span className="maxlps-rank" aria-hidden />
       <span className="maxlps-delta" data-dir={deltaDir}>
         {deltaLabel}
       </span>
-      <span className="maxlps-gid">
-        n{String(gpu.node).padStart(2, "0")}·g{gpu.gpu}
+      <span className="maxlps-gid" title={gpu.serial || `GPU ${gpu.gpu}`}>
+        {gpu.serial || `g${gpu.gpu}`}
       </span>
-      <span className="maxlps-rack">{gpu.rack_label}</span>
-      <span className="maxlps-w" data-flash={flash}>
+      <span className="maxlps-rack" title={gpu.hostname || gpu.rack_label}>
+        {gpu.hostname || `slot${gpu.slot ?? gpu.node - 1}`}
+      </span>
+      <span className="maxlps-w" data-flash={flash} title={gpu.source === "redfish" ? "BMC EnvironmentMetrics" : "simulated"}>
         {formatW(gpu.watts)}
       </span>
       <span className="maxlps-lim">{formatW(gpu.setpoint_w)}</span>
@@ -1417,7 +1666,8 @@ function GpuInspector({
         <div>
           <p className="maxlps-kicker">GPU</p>
           <h2>
-            {gpu.rack_label} · n{String(gpu.node).padStart(2, "0")}·g{gpu.gpu}
+            {gpu.serial || `GPU ${gpu.gpu}`}
+            {gpu.hostname ? ` · ${gpu.hostname}` : ""}
           </h2>
         </div>
         <button type="button" className="maxlps-clear" onClick={onClose}>

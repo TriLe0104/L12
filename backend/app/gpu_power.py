@@ -1,13 +1,15 @@
 """GB300 GPU / node / power-shelf telemetry for the MaxLPS tab.
 
 Topology is fixed for this campus: 18 compute nodes per rack, 4 GB300 GPUs
-per node (NVL72). Rack input comes from a simulated power shelf; per-GPU
-watts are the DCGM-style readings the limiter would cap via Redfish SetPoint.
+per node (NVL72). Per-GPU watts come from BMC Redfish EnvironmentMetrics
+(PowerWatts.Reading) through the PXE hop when a jump session is up.
 """
 
 from __future__ import annotations
 
 import math
+import re
+import threading
 import time
 from collections import deque
 from typing import Any
@@ -70,6 +72,7 @@ class LoopState:
         self.cached_key: tuple[Any, ...] | None = None
         self.cache_t = 0.0
         self.hist_t = 0.0
+        self.last_posted: dict[str, float] = {}
 
 
 LOOP = LoopState()
@@ -128,6 +131,7 @@ def apply_loop(
         LOOP.force = True
         LOOP.last_caps = None
         LOOP.last_cap_by_id.clear()
+        LOOP.last_posted.clear()
         LOOP.prev_usage.clear()
         LOOP.prev_usage_t.clear()
         LOOP.usage_win.clear()
@@ -342,11 +346,7 @@ def _ensure_hist(
     run: str,
     off: bool,
 ) -> list[dict[str, float]]:
-    q = LOOP.gpu_hist.get(gid)
-    if q is None or len(q) < 8:
-        _backfill_hist(gid, now, watts, cap, lo, hi, hot=hot, run=run, off=off)
-    else:
-        _record_hist(gid, now, watts, cap, lo, hi)
+    _record_hist(gid, now, watts, cap, lo, hi)
     return list(LOOP.gpu_hist.get(gid) or [])
 
 
@@ -360,40 +360,46 @@ def watch_curve(gpu_id: str) -> dict[str, Any]:
             if g.get("id") == gpu_id:
                 cached = g
                 break
-    off = bool(cached is not None and not cached.get("enabled", True))
-    hot = False
-    run = "running"
-    if LOOP.cached_out and cached:
-        rid = cached.get("rack_id")
-        for r in LOOP.cached_out.get("racks") or []:
-            if r.get("id") == rid:
-                hot = bool(r.get("hot"))
-                break
-    act = 0.0 if off else _activity(gpu_id, now, hot, run)
-    demand = 0.0 if off else _usage_w(act)
-    ceil = _cap_ceiling(lo, hi)
-    if gpu_id in LOOP.last_cap_by_id:
-        sp = min(ceil, max(lo, LOOP.last_cap_by_id[gpu_id]))
-    elif cached and cached.get("setpoint_w") is not None:
-        sp = min(ceil, max(lo, float(cached["setpoint_w"])))
-    else:
-        sp = min(ceil, max(lo, demand / max(LOOP.desired_cap_percent, 0.1)))
-    target = min(demand, sp)
-    u = 0.0 if off else _smooth_usage(gpu_id, target, now)
-    watts = 0.0 if off else min(u, sp)
-    curve = _ensure_hist(gpu_id, now, watts, sp, lo, hi, hot=hot, run=run, off=off)
-    job = _process(gpu_id, act, hot, run, [])
+    live_map, _src = _live_gpu_readings()
+    live = live_map.get(gpu_id)
+    if live and live.get("watts") is not None:
+        watts = float(live["watts"])
+        if live.get("setpoint_w") is not None:
+            sp = float(live["setpoint_w"])
+        elif cached and cached.get("setpoint_w") is not None:
+            sp = float(cached["setpoint_w"])
+        else:
+            sp = LOOP.last_cap_by_id.get(gpu_id) or 0.0
+        if live.get("min_w") is not None:
+            lo = float(live["min_w"])
+        if live.get("max_w") is not None:
+            hi = float(live["max_w"])
+        curve = _ensure_hist(gpu_id, now, watts, sp, lo, hi, hot=False, run="ready", off=False)
+        return {
+            "id": gpu_id,
+            "watts": round(watts, 1),
+            "setpoint_w": round(sp, 1),
+            "min_w": round(lo, 1),
+            "max_w": round(hi, 1),
+            "process": "—",
+            "workload": "—",
+            "workload_kind": "idle",
+            "pid": 0,
+            "curve": curve,
+        }
+    watts = float(cached.get("watts") or 0.0) if cached and cached.get("source") == "redfish" else 0.0
+    sp = float(cached.get("setpoint_w") or 0.0) if cached and cached.get("source") == "redfish" else 0.0
     return {
         "id": gpu_id,
         "watts": round(watts, 1),
         "setpoint_w": round(sp, 1),
         "min_w": round(lo, 1),
         "max_w": round(hi, 1),
-        "process": job["process"],
-        "workload": job["workload"],
-        "workload_kind": job["workload_kind"],
-        "pid": job["pid"],
-        "curve": curve,
+        "process": "—",
+        "workload": "—",
+        "workload_kind": "idle",
+        "pid": 0,
+        "curve": list(LOOP.gpu_hist.get(gpu_id) or []),
     }
 
 
@@ -514,6 +520,400 @@ def _rack_shelves(rid: str, shelf_w: list[float], oh_w: float, shelf_kw: float) 
     return out
 
 
+_ARGUS_SHELF_T = 0.0
+_ARGUS_SHELF: dict[str, list[dict[str, Any]]] = {}
+
+
+def _argus_shelf_rows() -> dict[str, list[dict[str, Any]]]:
+    """rack_id -> PS1..PS8 rows from Argus TotalPowerOut (kW)."""
+    global _ARGUS_SHELF_T, _ARGUS_SHELF
+    now = time.time()
+    if _ARGUS_SHELF and now - _ARGUS_SHELF_T < 5.0:
+        return _ARGUS_SHELF
+    try:
+        from sqlalchemy import select
+
+        from . import cluster_controller
+        from .db import SessionLocal
+        from .models import MaxLpsShelf
+
+        with SessionLocal() as db:
+            rows = list(db.scalars(select(MaxLpsShelf)).all())
+        macs = [s.mac for s in rows if s.mac]
+        watts = cluster_controller.latest_sensor("TotalPowerOut", macs) if macs else {}
+        raw_idx = [int(s.index) for s in rows] if rows else []
+        shift = 1 if raw_idx and min(raw_idx) == 0 else 0
+        by_rack: dict[str, list[dict[str, Any]]] = {}
+        for s in rows:
+            w = watts.get((s.mac or "").lower())
+            kw = round(float(w) / 1000.0, 3) if w is not None else None
+            by_rack.setdefault(s.rack_id, []).append(
+                {"id": s.id, "index": int(s.index) + shift, "kw": kw, "mac": s.mac}
+            )
+        for rid, items in by_rack.items():
+            items.sort(key=lambda x: int(x["index"]))
+        _ARGUS_SHELF = by_rack
+        _ARGUS_SHELF_T = now
+        return by_rack
+    except Exception:
+        return _ARGUS_SHELF
+
+
+def _merge_argus_shelves(rid: str) -> tuple[list[dict[str, Any]], float, bool]:
+    """Argus TotalPowerOut per power shelf. Shelves with no reading are omitted."""
+    live = _argus_shelf_rows().get(rid) or []
+    out: list[dict[str, Any]] = []
+    total = 0.0
+    for src in live:
+        if src.get("kw") is None:
+            continue
+        kw = round(float(src["kw"]), 3)
+        total += kw
+        out.append(
+            {
+                "id": src.get("id") or f"{rid}-ps{int(src.get('index') or 0)}",
+                "index": int(src.get("index") or 0),
+                "kw": kw,
+                "source": "argus",
+            }
+        )
+    out.sort(key=lambda x: int(x["index"]))
+    return out, round(total, 3), bool(out)
+
+
+_LIVE_SHELF: dict[str, list[dict[str, Any]]] = {}
+_LIVE_SHELF_T = 0.0
+_LIVE_SHELF_BUSY = False
+_LIVE_SHELF_TTL = 8.0
+
+
+def _shelf_targets() -> list[dict[str, Any]]:
+    try:
+        from sqlalchemy import select
+
+        from .db import SessionLocal
+        from .models import MaxLpsShelf
+
+        with SessionLocal() as db:
+            rows = list(db.scalars(select(MaxLpsShelf)).all())
+        out: list[dict[str, Any]] = []
+        for s in rows:
+            ip = (s.ip or "").strip()
+            if not ip:
+                continue
+            out.append(
+                {
+                    "id": s.id,
+                    "rack_id": s.rack_id,
+                    "index": int(s.index),
+                    "bmc_ip": ip,
+                    "user": s.user or "root",
+                    "password": s.password or "",
+                }
+            )
+        return out
+    except Exception:
+        return []
+
+
+def _poll_live_shelves() -> None:
+    global _LIVE_SHELF, _LIVE_SHELF_T, _LIVE_SHELF_BUSY
+    try:
+        from . import pxe_hop
+
+        if not pxe_hop.status().get("connected"):
+            with _LIVE_GPU_LOCK:
+                _LIVE_SHELF = {}
+                _LIVE_SHELF_T = time.time()
+            return
+        nodes = _shelf_targets()
+        if not nodes:
+            with _LIVE_GPU_LOCK:
+                _LIVE_SHELF_T = time.time()
+            return
+        targets = [{"bmc_ip": n["bmc_ip"], "user": n["user"], "password": n["password"]} for n in nodes]
+        by_ip = pxe_hop.fetch_psu_power(targets)
+        raw_idx = [int(n["index"]) for n in nodes]
+        shift = 1 if raw_idx and min(raw_idx) == 0 else 0
+        by_rack: dict[str, list[dict[str, Any]]] = {}
+        for n in nodes:
+            rec = by_ip.get(n["bmc_ip"]) or {}
+            total_w = rec.get("total_w")
+            psus = rec.get("psus") or []
+            if total_w is None and psus:
+                total_w = sum(float(p.get("watts") or 0) for p in psus)
+            if total_w is None:
+                continue
+            kw = round(float(total_w) / 1000.0, 3)
+            modules = []
+            for i, p in enumerate(psus):
+                w = p.get("watts")
+                if w is None:
+                    continue
+                modules.append(
+                    {
+                        "id": str(p.get("id") or i),
+                        "index": int(p.get("index") or i + 1),
+                        "kw": round(float(w) / 1000.0, 3),
+                    }
+                )
+            by_rack.setdefault(n["rack_id"], []).append(
+                {
+                    "id": n["id"],
+                    "index": int(n["index"]) + shift,
+                    "kw": kw,
+                    "psus": modules,
+                    "source": "redfish",
+                }
+            )
+        for items in by_rack.values():
+            items.sort(key=lambda x: int(x["index"]))
+        with _LIVE_GPU_LOCK:
+            if by_rack:
+                _LIVE_SHELF = by_rack
+            _LIVE_SHELF_T = time.time()
+    except Exception:
+        pass
+    finally:
+        _LIVE_SHELF_BUSY = False
+
+
+def _kick_live_shelf_poll() -> None:
+    global _LIVE_SHELF_BUSY
+    now = time.time()
+    with _LIVE_GPU_LOCK:
+        if _LIVE_SHELF_BUSY or (now - _LIVE_SHELF_T) < _LIVE_SHELF_TTL:
+            return
+        _LIVE_SHELF_BUSY = True
+    threading.Thread(target=_poll_live_shelves, daemon=True, name="maxlps-psu-redfish").start()
+
+
+def _live_shelf_rows() -> dict[str, list[dict[str, Any]]]:
+    _kick_live_shelf_poll()
+    with _LIVE_GPU_LOCK:
+        return {k: list(v) for k, v in _LIVE_SHELF.items()}
+
+
+_LIVE_GPU: dict[str, dict[str, Any]] = {}
+_LIVE_GPU_SRC = "none"
+_LIVE_GPU_T = 0.0
+_LIVE_GPU_LOCK = threading.Lock()
+_LIVE_GPU_BUSY = False
+_LIVE_GPU_TTL = 8.0
+_LIVE_GPU_ERR = ""
+
+
+_IDENT_T = 0.0
+_IDENT: dict[str, dict[str, Any]] = {}
+
+
+def _gpu_identity() -> dict[str, dict[str, Any]]:
+    """gid -> hostname, serial, slot (0-17), node_index."""
+    global _IDENT_T, _IDENT
+    now = time.time()
+    if _IDENT and now - _IDENT_T < 5.0:
+        return _IDENT
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from .db import SessionLocal
+        from .models import MaxLpsNode
+
+        with SessionLocal() as db:
+            rows = list(db.scalars(select(MaxLpsNode).options(selectinload(MaxLpsNode.gpus))).all())
+        out: dict[str, dict[str, Any]] = {}
+        for n in rows:
+            slot = int(n.index) - 1 if int(n.index) >= 1 else int(n.index)
+            host = (n.hostname or "").strip()
+            m = re.search(r"slot\s*(\d+)", host, re.I) if host else None
+            if m:
+                slot = int(m.group(1))
+            by_g = {int(g.gpu_index): g for g in (n.gpus or [])}
+            for gi in range(1, GPUS_PER_NODE + 1):
+                gid = f"{n.rack_id}-n{int(n.index):02d}-g{gi}"
+                g = by_g.get(gi)
+                out[gid] = {
+                    "hostname": host,
+                    "serial": (g.serial if g else None) or "",
+                    "slot": slot,
+                    "node_index": int(n.index),
+                    "has_bmc": bool((n.bmc_ip or "").strip()),
+                }
+        _IDENT = out
+        _IDENT_T = now
+        return out
+    except Exception:
+        return _IDENT
+
+
+def _gpu_live_targets() -> list[tuple[str, str, str, str, str]]:
+    """(rack_id, node_index, bmc_ip, user, password) per compute BMC."""
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from .db import SessionLocal
+        from .models import MaxLpsNode
+
+        with SessionLocal() as db:
+            rows = list(
+                db.scalars(
+                    select(MaxLpsNode).options(selectinload(MaxLpsNode.rack)).order_by(MaxLpsNode.rack_id, MaxLpsNode.index)
+                ).all()
+            )
+        by_rack_n: dict[str, int] = {}
+        for n in rows:
+            if (n.bmc_ip or "").strip():
+                by_rack_n[n.rack_id] = by_rack_n.get(n.rack_id, 0) + 1
+        rows.sort(key=lambda n: (-by_rack_n.get(n.rack_id, 0), n.rack_id, int(n.index)))
+        out: list[tuple[str, str, str, str, str]] = []
+        seen: set[str] = set()
+        for n in rows:
+            ip = (n.bmc_ip or "").strip()
+            if not ip or ip in seen:
+                continue
+            rack = n.rack
+            if rack is not None and ((rack.power_state or "on") == "off" or not rack.enabled):
+                continue
+            seen.add(ip)
+            out.append((n.rack_id, str(int(n.index)), ip, n.bmc_user or "ADMIN", n.bmc_password or ""))
+        return out
+    except Exception:
+        return []
+
+
+def _poll_live_gpus() -> None:
+    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_BUSY, _LIVE_GPU_ERR
+    try:
+        from . import pxe_hop
+
+        if not pxe_hop.status().get("connected"):
+            with _LIVE_GPU_LOCK:
+                _LIVE_GPU = {}
+                _LIVE_GPU_SRC = "none"
+                _LIVE_GPU_ERR = "pxe-hop-down"
+                _LIVE_GPU_T = time.time()
+            return
+        nodes = _gpu_live_targets()
+        if not nodes:
+            with _LIVE_GPU_LOCK:
+                _LIVE_GPU_ERR = "no-bmc-targets"
+                _LIVE_GPU_T = time.time()
+            return
+        targets = [{"bmc_ip": ip, "user": user, "password": pw} for _rid, _idx, ip, user, pw in nodes]
+        by_ip = pxe_hop.fetch_gpu_environment_metrics(targets)
+        mapped: dict[str, dict[str, Any]] = {}
+        for rid, idx, ip, _user, _pw in nodes:
+            for g in by_ip.get(ip) or []:
+                gi = int(g.get("index") or 0)
+                if gi < 1 or gi > GPUS_PER_NODE:
+                    continue
+                if g.get("watts") is None:
+                    continue
+                gid = f"{rid}-n{int(idx):02d}-g{gi}"
+                rec: dict[str, Any] = {"watts": float(g["watts"])}
+                if g.get("min_w") is not None:
+                    rec["min_w"] = float(g["min_w"])
+                if g.get("max_w") is not None:
+                    rec["max_w"] = float(g["max_w"])
+                if g.get("setpoint_w") is not None:
+                    rec["setpoint_w"] = float(g["setpoint_w"])
+                if g.get("serial"):
+                    rec["serial"] = str(g["serial"])
+                rec["processor"] = str(g.get("processor") or g.get("id") or "")
+                rec["path"] = str(g.get("path") or "")
+                rec["bmc_ip"] = ip
+                mapped[gid] = rec
+        with _LIVE_GPU_LOCK:
+            if mapped:
+                _LIVE_GPU = mapped
+                _LIVE_GPU_SRC = "redfish"
+                _LIVE_GPU_ERR = ""
+            else:
+                _LIVE_GPU_ERR = f"empty-metrics:{len(targets)}bmc"
+            _LIVE_GPU_T = time.time()
+    except Exception as exc:
+        with _LIVE_GPU_LOCK:
+            _LIVE_GPU_ERR = str(exc)[:180]
+    finally:
+        _LIVE_GPU_BUSY = False
+
+
+def _kick_live_gpu_poll(*, force: bool = False) -> None:
+    global _LIVE_GPU_BUSY
+    now = time.time()
+    with _LIVE_GPU_LOCK:
+        if _LIVE_GPU_BUSY or (not force and (now - _LIVE_GPU_T) < _LIVE_GPU_TTL):
+            return
+        _LIVE_GPU_BUSY = True
+    threading.Thread(target=_poll_live_gpus, daemon=True, name="maxlps-gpu-redfish").start()
+
+
+def force_live_gpu_poll() -> None:
+    _kick_live_gpu_poll(force=True)
+
+
+def _live_gpu_readings() -> tuple[dict[str, dict[str, Any]], str]:
+    _kick_live_gpu_poll()
+    with _LIVE_GPU_LOCK:
+        return dict(_LIVE_GPU), _LIVE_GPU_SRC
+
+
+def _live_bounds(gid: str, live: dict[str, Any]) -> tuple[float, float]:
+    lo, hi = _bounds_of(gid)
+    if live.get("min_w") is not None:
+        lo = max(lo, float(live["min_w"]))
+    if live.get("max_w") is not None:
+        hi = min(hi, float(live["max_w"]))
+    if lo > hi:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+_CAP_BUSY = False
+
+
+def _apply_gpu_caps(patches: list[dict[str, Any]]) -> None:
+    global _CAP_BUSY
+    try:
+        from . import pxe_hop
+
+        if not patches or not pxe_hop.status().get("connected"):
+            return
+        results = pxe_hop.apply_gpu_setpoints(patches)
+        ok = {
+            (r.get("bmc_ip"), r.get("path"))
+            for r in results
+            if 200 <= int(r.get("status") or 0) < 400
+        }
+        with _LIVE_GPU_LOCK:
+            for p in patches:
+                if (p.get("bmc_ip"), p.get("path")) not in ok:
+                    continue
+                sp = float(p.get("setpoint") or 0)
+                gid = p.get("gid")
+                if gid:
+                    LOOP.last_posted[str(gid)] = sp
+                for rec in _LIVE_GPU.values():
+                    if rec.get("bmc_ip") == p.get("bmc_ip") and rec.get("path") == p.get("path"):
+                        rec["setpoint_w"] = sp
+    except Exception:
+        pass
+    finally:
+        _CAP_BUSY = False
+
+
+def _kick_cap_patch(patches: list[dict[str, Any]]) -> None:
+    global _CAP_BUSY
+    if not patches:
+        return
+    if _CAP_BUSY:
+        return
+    _CAP_BUSY = True
+    threading.Thread(target=_apply_gpu_caps, args=(patches,), daemon=True, name="maxlps-gpu-cap").start()
+
+
 def topology(n_racks: int) -> dict[str, Any]:
     return {
         "model": GPU_MODEL,
@@ -548,6 +948,8 @@ def snapshot(
         round(LOOP.desired_cap_percent, 4),
         round(LOOP.gpu_min_w, 1),
         round(LOOP.gpu_max_w, 1),
+        round(_LIVE_GPU_T, 0),
+        len(_LIVE_GPU),
     )
     if (
         not gpu_id
@@ -569,9 +971,7 @@ def snapshot(
     max_allowable_w = power_budget_w * grace * gpu_frac
 
     records: list[dict[str, Any]] = []
-    usages: list[float] = []
     overhead_total_w = 0.0
-    shelf_pre = 0.0
 
     for r in rows:
         rid = r["id"]
@@ -586,15 +986,10 @@ def snapshot(
         run_status = r.get("run_status") or "ready"
         label = _rack_label(r.get("name") or "", r.get("label") or "")
         hall_id = r.get("hall_id") or ""
-        load = 0.0 if off else min(1.0, used_kw / max(alloc_kw, hi_kw, 1.0))
-        overhead_w = 0.0 if off else NODES_PER_RACK * NODE_OH_W * (0.35 + 0.65 * load) + SHELF_OH_W
-        overhead_total_w += overhead_w
-        rack_usage = 0.0
+        overhead_w = 0.0
         for n in range(1, NODES_PER_RACK + 1):
             for g in range(1, GPUS_PER_NODE + 1):
                 gid = f"{rid}-n{n:02d}-g{g}"
-                act = 0.0 if off else _activity(gid, now, hot, run_status)
-                demand = 0.0 if off else _usage_w(act)
                 records.append(
                     {
                         "id": gid,
@@ -603,8 +998,8 @@ def snapshot(
                         "hall_id": hall_id,
                         "node": n,
                         "gpu": g,
-                        "demand": demand,
-                        "act": act,
+                        "demand": 0.0,
+                        "act": 0.0,
                         "off": off,
                         "enabled": enabled and not off,
                         "hot_rack": hot,
@@ -615,53 +1010,72 @@ def snapshot(
                         "alloc_kw": alloc_kw,
                     }
                 )
-        shelf_pre += overhead_w
+
+    live_map, _live_src = _live_gpu_readings()
+    ident = _gpu_identity()
+    live_rows: list[dict[str, Any]] = []
+    for rec in records:
+        live = live_map.get(rec["id"])
+        if not live or live.get("watts") is None or rec["off"]:
+            continue
+        watts = float(live["watts"])
+        lo, hi = _live_bounds(rec["id"], live)
+        rec["live"] = True
+        rec["watts"] = watts
+        rec["bmc_lo"] = lo
+        rec["bmc_hi"] = hi
+        rec["bmc_sp"] = float(live["setpoint_w"]) if live.get("setpoint_w") is not None else None
+        rec["path"] = live.get("path") or ""
+        rec["bmc_ip"] = live.get("bmc_ip") or ""
+        rec["processor"] = live.get("processor") or ""
+        live_rows.append(rec)
+        _note_usage(rec["id"], watts, now)
 
     due = LOOP.force or (now - LOOP.last_step >= LOOP.interval_s)
-    best_p = LOOP.last_best_p
-    caps: list[float] = []
-    bounds: list[tuple[float, float]] = []
-    for rec in records:
-        lo, hi = _bounds_of(rec["id"])
-        bounds.append((lo, hi))
-        stored = LOOP.last_cap_by_id.get(rec["id"])
-        if stored is None:
-            stored = rec["demand"] / max(desired_p, 0.1)
-        caps.append(min(_cap_ceiling(lo, hi), max(lo, stored)))
-
-    usages: list[float] = []
-    for rec, cap, (lo, hi) in zip(records, caps, bounds):
-        posted = min(_cap_ceiling(lo, hi), max(lo, cap))
-        demand = rec["demand"]
-        target = min(demand, posted)
-        u = 0.0 if rec["off"] else _smooth_usage(rec["id"], target, now)
-        rec["usage"] = u
-        usages.append(u)
-        if not rec["off"]:
-            _note_usage(rec["id"], u, now)
-
+    should_post = bool(live_rows) and (due or (not LOOP.last_posted and not _CAP_BUSY))
     if due:
         LOOP.last_step = now
         LOOP.force = False
         LOOP.step_n += 1
-        avgs = [_window_avg(rec["id"], u) for rec, u in zip(records, usages)]
+    best_p = LOOP.last_best_p
+    if should_post:
+        if not due:
+            LOOP.last_step = now
+            LOOP.force = False
+            LOOP.step_n += 1
+        avgs = [_window_avg(r["id"], float(r["watts"])) for r in live_rows]
+        bounds = [(float(r["bmc_lo"]), float(r["bmc_hi"])) for r in live_rows]
         new_caps, best_p = _post_caps(avgs, max_allowable_w, desired_p, bounds)
-        blended: list[float] = []
-        for old, new, (lo, hi) in zip(caps, new_caps, bounds):
-            nxt = old * 0.4 + new * 0.6
-            blended.append(min(_cap_ceiling(lo, hi), max(lo, nxt)))
-        caps = blended
         LOOP.last_best_p = best_p
+        LOOP.last_caps = new_caps
         LOOP.usage_win.clear()
         LOOP.sample_t.clear()
-
-    LOOP.last_caps = caps
-    for rec, c in zip(records, caps):
-        LOOP.last_cap_by_id[rec["id"]] = c
-    rack_usage_acc: dict[str, float] = {}
-    for rec, u in zip(records, usages):
-        rack_usage_acc[rec["rack_id"]] = rack_usage_acc.get(rec["rack_id"], 0.0) + u
-    shelf_pre += sum(rack_usage_acc.values())
+        creds = {ip: (user, pw) for _rid, _idx, ip, user, pw in _gpu_live_targets()}
+        patches: list[dict[str, Any]] = []
+        for rec, cap in zip(live_rows, new_caps):
+            cap_w = float(round(cap))
+            LOOP.last_cap_by_id[rec["id"]] = cap_w
+            prev = LOOP.last_posted.get(rec["id"])
+            bmc_sp = rec.get("bmc_sp")
+            if not rec.get("path") or not rec.get("bmc_ip"):
+                continue
+            if prev is not None and abs(prev - cap_w) < 2:
+                continue
+            if bmc_sp is not None and prev is None and abs(float(bmc_sp) - cap_w) < 2:
+                LOOP.last_posted[rec["id"]] = cap_w
+                continue
+            user, pw = creds.get(str(rec["bmc_ip"]), ("ADMIN", ""))
+            patches.append(
+                {
+                    "gid": rec["id"],
+                    "bmc_ip": rec["bmc_ip"],
+                    "user": user,
+                    "password": pw,
+                    "path": rec["path"],
+                    "setpoint": int(cap_w),
+                }
+            )
+        _kick_cap_patch(patches)
 
     gpu_pool: list[tuple] = []
     rack_acc: dict[str, dict[str, Any]] = {}
@@ -671,28 +1085,33 @@ def snapshot(
     hottest_w = 0.0
     sp_sum = 0.0
     sp_n = 0
+    live_n = 0
 
-    jobs = workloads or []
-    running_jobs = [w for w in jobs if (w.get("status") or "") == "running"] if gpu_id else []
-
-    for rec, u, cap in zip(records, usages, caps):
+    for rec in records:
         lo, hi = _bounds_of(rec["id"])
-        sp = round(min(_cap_ceiling(lo, hi), max(lo, cap)), 1)
-        watts = round(min(u, sp), 1)
-        if rec["off"]:
-            watts = 0.0
-            sp = 0.0
+        sp = 0.0
+        watts = 0.0
+        live = live_map.get(rec["id"])
+        if rec.get("live") and live and live.get("watts") is not None:
+            watts = round(float(live["watts"]), 1)
+            lo, hi = _live_bounds(rec["id"], live)
+            posted = LOOP.last_cap_by_id.get(rec["id"])
+            if posted is not None:
+                sp = round(float(posted), 1)
+            elif live.get("setpoint_w") is not None:
+                sp = round(float(live["setpoint_w"]), 1)
+            live_n += 1
         gpu_total_w += watts
         cap_total_w += sp
         if watts > hottest_w:
             hottest_w = watts
         if sp >= tdp_w - 8:
             at_cap += 1
-        if rec["enabled"]:
+        if rec.get("live"):
             sp_sum += sp
             sp_n += 1
         keep = (not rack_id) or rec["rack_id"] == rack_id
-        if keep:
+        if keep and rec.get("live"):
             gpu_pool.append((watts, rec["id"], rec, sp, lo, hi))
         acc = rack_acc.setdefault(
             rec["rack_id"],
@@ -712,9 +1131,14 @@ def snapshot(
                 "alloc_kw": rec["alloc_kw"],
                 "gpus_at_cap": 0,
                 "n": 0,
+                "n_live": 0,
                 "shelf_w": [0.0] * SHELVES_PER_RACK,
+                "live": False,
             },
         )
+        if rec.get("live"):
+            acc["live"] = True
+            acc["n_live"] += 1
         acc["gpu_w"] += watts
         acc["cap_w"] += sp
         acc["n"] += 1
@@ -725,47 +1149,27 @@ def snapshot(
         if sp >= tdp_w - 8:
             acc["gpus_at_cap"] += 1
 
-    scale_by_rack: dict[str, float] = {}
     for acc in rack_acc.values():
         enabled = bool(acc["enabled"]) and acc["power_state"] != "off"
         raw_kw = (acc["gpu_w"] + acc["overhead_w"]) / 1000.0
-        if not enabled:
-            acc["fit_kw"] = 0.0
-            continue
-        cap_kw = _rack_power_cap(float(acc["alloc_kw"] or 0.0), lo_kw, hi_kw)
-        fit_kw = min(cap_kw, max(lo_kw, raw_kw))
-        acc["fit_kw"] = fit_kw
-        if raw_kw > cap_kw + 0.001 and raw_kw > 0:
-            s = cap_kw / raw_kw
-            rid = str(acc["id"])
-            scale_by_rack[rid] = s
-            acc["gpu_w"] *= s
-            acc["overhead_w"] *= s
-            acc["shelf_w"] = [w * s for w in acc["shelf_w"]]
-    if scale_by_rack:
-        gpu_pool = [
-            (
-                w * scale_by_rack[rec["rack_id"]] if rec["rack_id"] in scale_by_rack else w,
-                gid,
-                rec,
-                sp,
-                lo,
-                hi,
-            )
-            for (w, gid, rec, sp, lo, hi) in gpu_pool
-        ]
+        acc["fit_kw"] = raw_kw if enabled else 0.0
 
     rack_out = []
     shelf_total = 0.0
+    argus_shelves = False
     for acc in rack_acc.values():
         gpu_kw = acc["gpu_w"] / 1000.0
-        oh_kw = acc["overhead_w"] / 1000.0
-        shelf_kw = round(float(acc.get("fit_kw", gpu_kw + oh_kw)), 2)
-        if shelf_kw > gpu_kw + oh_kw + 0.001:
-            oh_kw = max(0.0, shelf_kw - gpu_kw)
+        oh_kw = 0.0
+        n_on = acc["n_live"] if acc["power_state"] != "off" else 0
+        shelves, live_sum, live = _merge_argus_shelves(str(acc["id"]))
+        if live:
+            shelf_kw = live_sum
+            argus_shelves = True
+            if shelf_kw > gpu_kw + 0.001:
+                oh_kw = max(0.0, shelf_kw - gpu_kw)
+        else:
+            shelf_kw = 0.0
         shelf_total += shelf_kw
-        n_on = acc["n"] if acc["power_state"] != "off" else 0
-        shelves = _rack_shelves(str(acc["id"]), list(acc.get("shelf_w") or []), acc["overhead_w"], shelf_kw)
         rack_out.append(
             {
                 "id": acc["id"],
@@ -814,26 +1218,40 @@ def snapshot(
         cap_total_w += sp
         if i > limit and not (gpu_id and gid == gpu_id):
             continue
+        meta = ident.get(gid) or {}
+        live_row = live_map.get(gid) or {}
+        serial = str(live_row.get("serial") or "").strip()
+        if not serial or serial.count("-") == 4:
+            serial = str(meta.get("serial") or "").strip()
+        if not serial or serial.count("-") == 4:
+            serial = str(live_row.get("processor") or f"g{rec['gpu']}").strip()
+        hostname = str(meta.get("hostname") or "").strip()
+        slot = meta.get("slot")
+        if slot is None:
+            slot = int(rec["node"]) - 1
         item = {
             "id": gid,
             "rack_id": rec["rack_id"],
             "rack_label": rec["rack_label"],
             "node": rec["node"],
             "gpu": rec["gpu"],
+            "slot": int(slot),
+            "serial": serial,
+            "hostname": hostname,
             "watts": watts,
             "setpoint_w": sp,
             "min_w": round(lo, 1),
             "max_w": round(hi, 1),
             "enabled": rec["enabled"],
             "rank": i,
+            "source": "redfish",
         }
         if gpu_id and gid == gpu_id:
-            job = _process(gid, rec["act"], rec["hot_rack"], rec["run"], running_jobs)
-            item["process"] = job["process"]
-            item["workload"] = job["workload"]
-            item["pid"] = job["pid"]
+            item["process"] = "—"
+            item["workload"] = "—"
+            item["pid"] = 0
             item["tdp_w"] = tdp_w
-            item["workload_kind"] = job["workload_kind"]
+            item["workload_kind"] = "idle"
             item["curve"] = _ensure_hist(
                 gid, now, watts, sp, lo, hi, hot=rec["hot_rack"], run=rec["run"], off=rec["off"]
             )
@@ -841,6 +1259,14 @@ def snapshot(
         shown.append(item)
         if due and i <= 32:
             _record_hist(gid, now, watts, sp, lo, hi)
+    by_sn_host: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in shown:
+        key = (str(item.get("hostname") or ""), str(item.get("serial") or ""))
+        by_sn_host.setdefault(key, []).append(item)
+    for (_host, sn), group in by_sn_host.items():
+        if sn and len(group) > 1:
+            for item in group:
+                item["serial"] = f"{sn}-g{item.get('gpu')}"
     if due and gpu_id and picked:
         _record_hist(gpu_id, now, picked["watts"], picked["setpoint_w"], picked["min_w"], picked["max_w"])
         hist = LOOP.gpu_hist.get(gpu_id)
@@ -897,13 +1323,22 @@ def snapshot(
             "free_kw": round(free_kw, 1),
             "used_delta_kw": round(used_delta, 1),
             "shelf_kw": round(shelf_total, 1),
+            "shelf_source": "argus" if argus_shelves else "none",
+            "gpu_source": "redfish" if live_n else "none",
+            "gpu_error": _LIVE_GPU_ERR or None,
+            "gpu_live": live_n,
             "gpu_kw": round(gpu_total_w / 1000.0, 1),
             "overhead_kw": round(overhead_total_w / 1000.0, 1),
             "hottest_w": round(hottest_w, 1),
             "avg_setpoint_w": round(sp_sum / sp_n, 1) if sp_n else 0.0,
             "gpus_at_cap": at_cap,
             "gpus_listed": len(shown),
-            "gpus_total": n_racks * GPUS_PER_RACK if not rack_id else GPUS_PER_RACK,
+            "gpus_total": sum(
+                1
+                for gid, meta in ident.items()
+                if meta.get("has_bmc") and (not rack_id or gid.startswith(f"{rack_id}-"))
+            )
+            or live_n,
             "cap_kw": round(cap_total_w / 1000.0, 1),
             "allowable_kw": round(max_allowable_w / 1000.0, 1),
             "best_cap_percent": round(best_p * 100.0, 2),

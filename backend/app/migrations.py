@@ -48,6 +48,12 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "power_state": "VARCHAR(16) NOT NULL DEFAULT 'on'",
         "run_status": "VARCHAR(16) NOT NULL DEFAULT 'ready'",
     },
+    "inventory_nodes": {
+        "bmc_user": "VARCHAR(80)",
+        "source": "VARCHAR(24) NOT NULL DEFAULT 'demo'",
+        "os_username": "VARCHAR(80)",
+        "os_password": "VARCHAR(160)",
+    },
 }
 
 # Absolute object-storage URLs outgrow the original 500-char columns. Postgres
@@ -56,6 +62,7 @@ WIDENED_COLUMNS: list[tuple[str, str, str]] = [
     ("users", "avatar_url", "VARCHAR(1000)"),
     ("purchase_orders", "thumbnail_url", "VARCHAR(1000)"),
     ("purchase_orders", "model_url", "VARCHAR(1000)"),
+    ("inventory_nodes", "bmc_password", "VARCHAR(160)"),
 ]
 
 # Idempotent data repairs applied after the column work.
