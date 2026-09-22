@@ -810,83 +810,118 @@ def _gpu_live_targets() -> list[tuple[str, str, str, str, str]]:
         return []
 
 
-def _poll_live_gpus() -> None:
-    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_BUSY, _LIVE_GPU_ERR
-    try:
-        from . import pxe_hop
+def _gpu_rec(rid: str, idx: str, ip: str, g: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    gi = int(g.get("index") or 0)
+    if gi < 1 or gi > GPUS_PER_NODE or g.get("watts") is None:
+        return None
+    gid = f"{rid}-n{int(idx):02d}-g{gi}"
+    rec: dict[str, Any] = {"watts": float(g["watts"])}
+    if g.get("min_w") is not None:
+        rec["min_w"] = float(g["min_w"])
+    if g.get("max_w") is not None:
+        rec["max_w"] = float(g["max_w"])
+    if g.get("setpoint_w") is not None:
+        rec["setpoint_w"] = float(g["setpoint_w"])
+    if g.get("serial"):
+        rec["serial"] = str(g["serial"])
+    rec["processor"] = str(g.get("processor") or g.get("id") or "")
+    rec["path"] = str(g.get("path") or "")
+    rec["bmc_ip"] = ip
+    return gid, rec
 
-        if not pxe_hop.status().get("connected"):
+
+def _ingest_bmc(index: dict[str, tuple[str, str]], node: dict[str, Any]) -> None:
+    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_ERR
+    ip = str(node.get("bmc_ip") or "")
+    loc = index.get(ip)
+    if not loc:
+        return
+    rid, idx = loc
+    mapped: dict[str, dict[str, Any]] = {}
+    for g in node.get("gpus") or []:
+        if not isinstance(g, dict):
+            continue
+        item = _gpu_rec(rid, idx, ip, g)
+        if item:
+            mapped[item[0]] = item[1]
+    if not mapped:
+        return
+    with _LIVE_GPU_LOCK:
+        _LIVE_GPU.update(mapped)
+        _LIVE_GPU_SRC = "redfish"
+        _LIVE_GPU_ERR = ""
+        _LIVE_GPU_T = time.time()
+
+
+def _note_hop_down() -> None:
+    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_ERR
+    with _LIVE_GPU_LOCK:
+        _LIVE_GPU = {}
+        _LIVE_GPU_SRC = "none"
+        _LIVE_GPU_ERR = "pxe-hop-down"
+        _LIVE_GPU_T = time.time()
+
+
+def _gpu_watch_forever() -> None:
+    global _LIVE_GPU_ERR, _LIVE_GPU_T
+    while True:
+        try:
+            from . import pxe_hop
+
+            if not pxe_hop.status().get("connected"):
+                _note_hop_down()
+                time.sleep(0.5)
+                continue
+            nodes = _gpu_live_targets()
+            if not nodes:
+                with _LIVE_GPU_LOCK:
+                    _LIVE_GPU_ERR = "no-bmc-targets"
+                    _LIVE_GPU_T = time.time()
+                time.sleep(0.5)
+                continue
+            index = {ip: (rid, idx) for rid, idx, ip, _user, _pw in nodes}
+            targets = [{"bmc_ip": ip, "user": user, "password": pw} for _rid, _idx, ip, user, pw in nodes]
+
+            def on_event(payload: dict[str, Any], index: dict[str, tuple[str, str]] = index) -> None:
+                if payload.get("bmc_ip"):
+                    _ingest_bmc(index, payload)
+                    return
+                for node in payload.get("nodes") or []:
+                    if isinstance(node, dict):
+                        _ingest_bmc(index, node)
+
+            pxe_hop.stream_gpu_environment_metrics(targets, on_event, interval=1.0)
+        except Exception as exc:
             with _LIVE_GPU_LOCK:
-                _LIVE_GPU = {}
-                _LIVE_GPU_SRC = "none"
-                _LIVE_GPU_ERR = "pxe-hop-down"
-                _LIVE_GPU_T = time.time()
+                _LIVE_GPU_ERR = str(exc)[:180]
+            time.sleep(0.5)
+
+
+_WATCH_THREAD: threading.Thread | None = None
+_WATCH_LOCK = threading.Lock()
+
+
+def _ensure_gpu_watch() -> None:
+    global _WATCH_THREAD
+    with _WATCH_LOCK:
+        t = _WATCH_THREAD
+        if t is not None and t.is_alive():
             return
-        nodes = _gpu_live_targets()
-        if not nodes:
-            with _LIVE_GPU_LOCK:
-                _LIVE_GPU_ERR = "no-bmc-targets"
-                _LIVE_GPU_T = time.time()
-            return
-        targets = [{"bmc_ip": ip, "user": user, "password": pw} for _rid, _idx, ip, user, pw in nodes]
-        by_ip = pxe_hop.fetch_gpu_environment_metrics(targets)
-        mapped: dict[str, dict[str, Any]] = {}
-        for rid, idx, ip, _user, _pw in nodes:
-            for g in by_ip.get(ip) or []:
-                gi = int(g.get("index") or 0)
-                if gi < 1 or gi > GPUS_PER_NODE:
-                    continue
-                if g.get("watts") is None:
-                    continue
-                gid = f"{rid}-n{int(idx):02d}-g{gi}"
-                rec: dict[str, Any] = {"watts": float(g["watts"])}
-                if g.get("min_w") is not None:
-                    rec["min_w"] = float(g["min_w"])
-                if g.get("max_w") is not None:
-                    rec["max_w"] = float(g["max_w"])
-                if g.get("setpoint_w") is not None:
-                    rec["setpoint_w"] = float(g["setpoint_w"])
-                if g.get("serial"):
-                    rec["serial"] = str(g["serial"])
-                rec["processor"] = str(g.get("processor") or g.get("id") or "")
-                rec["path"] = str(g.get("path") or "")
-                rec["bmc_ip"] = ip
-                mapped[gid] = rec
-        with _LIVE_GPU_LOCK:
-            if mapped:
-                _LIVE_GPU = mapped
-                _LIVE_GPU_SRC = "redfish"
-                _LIVE_GPU_ERR = ""
-            else:
-                _LIVE_GPU_ERR = f"empty-metrics:{len(targets)}bmc"
-            _LIVE_GPU_T = time.time()
-    except Exception as exc:
-        with _LIVE_GPU_LOCK:
-            _LIVE_GPU_ERR = str(exc)[:180]
-    finally:
-        _LIVE_GPU_BUSY = False
+        t = threading.Thread(target=_gpu_watch_forever, daemon=True, name="maxlps-gpu-watch")
+        _WATCH_THREAD = t
+        t.start()
 
 
 def _kick_live_gpu_poll(*, force: bool = False) -> None:
-    global _LIVE_GPU_BUSY, _LIVE_GPU_BUSY_T
-    now = time.time()
-    with _LIVE_GPU_LOCK:
-        if _LIVE_GPU_BUSY:
-            if now - _LIVE_GPU_BUSY_T < 30.0 and not force:
-                return
-        elif not force and (now - _LIVE_GPU_T) < _LIVE_GPU_TTL:
-            return
-        _LIVE_GPU_BUSY = True
-        _LIVE_GPU_BUSY_T = now
-    threading.Thread(target=_poll_live_gpus, daemon=True, name="maxlps-gpu-redfish").start()
+    _ensure_gpu_watch()
 
 
 def force_live_gpu_poll() -> None:
-    _kick_live_gpu_poll(force=True)
+    _ensure_gpu_watch()
 
 
 def _live_gpu_readings() -> tuple[dict[str, dict[str, Any]], str]:
-    _kick_live_gpu_poll()
+    _ensure_gpu_watch()
     with _LIVE_GPU_LOCK:
         return dict(_LIVE_GPU), _LIVE_GPU_SRC
 
@@ -979,8 +1014,9 @@ def snapshot(
         round(LOOP.desired_cap_percent, 4),
         round(LOOP.gpu_min_w, 1),
         round(LOOP.gpu_max_w, 1),
-        round(_LIVE_GPU_T, 0),
+        round(_LIVE_GPU_T, 2),
         len(_LIVE_GPU),
+        round(sum(float(r.get("watts") or 0) for r in _LIVE_GPU.values()), 1),
         power_snap.get("mode"),
         LOOP.control,
     )
@@ -1393,7 +1429,7 @@ def snapshot(
             "gpu_live": live_n,
             "gpu_control": "maxlps" if LOOP.control else "monitor",
             "gpu_poll_age_s": round(max(0.0, now - _LIVE_GPU_T), 1) if _LIVE_GPU_T else None,
-            "gpu_busy": _LIVE_GPU_BUSY,
+            "gpu_busy": bool(_WATCH_THREAD is not None and _WATCH_THREAD.is_alive()),
             "gpu_kw": round(gpu_total_w / 1000.0, 2),
             "overhead_kw": round(overhead_total_w / 1000.0, 1),
             "hottest_w": round(hottest_w, 1),

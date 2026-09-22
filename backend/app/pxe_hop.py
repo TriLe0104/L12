@@ -47,6 +47,12 @@ def status() -> dict[str, Any]:
 def close() -> None:
     global _client, _user, _host, _scripts_ready
     _scripts_ready = False
+    try:
+        from . import gpu_power
+
+        gpu_power._note_hop_down()
+    except Exception:
+        pass
     with _lock:
         for item in list(_tunnels.values()):
             item["alive"] = False
@@ -222,10 +228,19 @@ except Exception as e:
 
 
 _HOP_GPU_POWER = r"""
-import base64, concurrent.futures, json, ssl, sys, urllib.error, urllib.request
+import base64, concurrent.futures, json, ssl, sys, threading, time, urllib.error, urllib.request
 spec = json.loads(sys.stdin.read() or "{}")
 ctx = ssl._create_unverified_context()
-timeout = float(spec.get("timeout") or 2)
+timeout = float(spec.get("timeout") or 1.2)
+interval = float(spec.get("interval") or 1)
+loop = bool(spec.get("loop"))
+_print_lock = threading.Lock()
+
+def emit(obj):
+    with _print_lock:
+        json.dump(obj, sys.stdout)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 def get(url, user, password):
     req = urllib.request.Request(url, method="GET")
@@ -281,24 +296,27 @@ def fetch_bmc(target):
     if not ip:
         out["error"] = "no-ip"
         return out
-    last_st = 0
+    last_st = [0]
+    def one(name):
+        path = "/redfish/v1/Systems/HGX_Baseboard_0/Processors/%s" % name
+        st_m, body = get("https://%s%s/EnvironmentMetrics" % (ip, path), user, password)
+        last_st[0] = st_m
+        if st_m != 200 or not isinstance(body, dict) or body.get("_error"):
+            return None
+        row = parse_metrics(body)
+        if row.get("watts") is None:
+            return None
+        row["id"] = name
+        row["processor"] = name
+        row["path"] = path + "/EnvironmentMetrics"
+        row["raw_index"] = gpu_num(name)
+        return row
     def pull(names):
-        nonlocal last_st
         rows = []
-        for name in names:
-            path = "/redfish/v1/Systems/HGX_Baseboard_0/Processors/%s" % name
-            st_m, body = get("https://%s%s/EnvironmentMetrics" % (ip, path), user, password)
-            last_st = st_m
-            if st_m != 200 or not isinstance(body, dict) or body.get("_error"):
-                continue
-            row = parse_metrics(body)
-            if row.get("watts") is None:
-                continue
-            row["id"] = name
-            row["processor"] = name
-            row["path"] = path + "/EnvironmentMetrics"
-            row["raw_index"] = gpu_num(name)
-            rows.append(row)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(names))) as ex:
+            for row in ex.map(one, names):
+                if row:
+                    rows.append(row)
         return rows
     raw = pull(["GPU_0", "GPU_1", "GPU_2", "GPU_3"])
     if not raw:
@@ -316,16 +334,36 @@ def fetch_bmc(target):
         g["index"] = idx
         out["gpus"].append(g)
     if not out["gpus"]:
-        out["error"] = "HTTP %s" % last_st if last_st else "no-gpu-metrics"
+        out["error"] = "HTTP %s" % last_st[0] if last_st[0] else "no-gpu-metrics"
     return out
+
+def fetch_and_emit(target):
+    row = fetch_bmc(target)
+    emit(row)
+    return row
 
 targets = spec.get("targets") or []
 n = max(1, min(18, len(targets) or 1))
-nodes = []
-with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
-    for row in ex.map(fetch_bmc, targets):
-        nodes.append(row)
-json.dump({"ok": True, "nodes": nodes}, sys.stdout)
+
+def once():
+    nodes = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+        for row in ex.map(fetch_and_emit if loop else fetch_bmc, targets):
+            nodes.append(row)
+    if not loop:
+        json.dump({"ok": True, "nodes": nodes}, sys.stdout)
+    else:
+        emit({"ok": True, "round": True})
+
+if not loop:
+    once()
+else:
+    while True:
+        t0 = time.time()
+        once()
+        dt = time.time() - t0
+        if dt < interval:
+            time.sleep(interval - dt)
 """
 
 
@@ -591,6 +629,54 @@ def _stdout_json(raw: str) -> dict[str, Any]:
             return {}
 
 
+def stream_gpu_environment_metrics(
+    targets: list[dict[str, str]],
+    on_event,
+    *,
+    interval: float = 1.0,
+) -> None:
+    """Run EnvironmentMetrics in a 1s loop on the hop; on_event(dict) per BMC line."""
+    if not targets:
+        return
+    try:
+        run("cat > /tmp/l12-gpu-power.py", timeout=8, stdin_data=_HOP_GPU_POWER)
+    except Exception:
+        try:
+            _ensure_hop_scripts()
+        except Exception:
+            pass
+    spec = json.dumps({"timeout": 1.2, "interval": interval, "loop": True, "targets": targets})
+    client = _ssh()
+    stdin, stdout, stderr = client.exec_command(
+        "PYTHONUNBUFFERED=1 python3 -u /tmp/l12-gpu-power.py",
+        timeout=None,
+    )
+    try:
+        stdin.write(spec)
+        stdin.channel.shutdown_write()
+    except Exception:
+        pass
+    stdout.channel.settimeout(3.0)
+    try:
+        while True:
+            try:
+                line = stdout.readline()
+            except Exception:
+                if not status().get("connected"):
+                    break
+                continue
+            if not line:
+                break
+            payload = _stdout_json(line)
+            if payload:
+                on_event(payload)
+    finally:
+        try:
+            stdout.channel.close()
+        except Exception:
+            pass
+
+
 def fetch_gpu_environment_metrics(targets: list[dict[str, str]], timeout: float = 20.0) -> dict[str, list[dict[str, Any]]]:
     """Per-GPU PowerWatts via BMC EnvironmentMetrics, run on the PXE hop."""
     if not targets:
@@ -599,8 +685,8 @@ def fetch_gpu_environment_metrics(targets: list[dict[str, str]], timeout: float 
         _ensure_hop_scripts()
     except Exception:
         pass
-    spec = json.dumps({"timeout": 2, "targets": targets})
-    _code, out, err = run("python3 /tmp/l12-gpu-power.py", timeout=timeout, stdin_data=spec)
+    spec = json.dumps({"timeout": 1.2, "targets": targets})
+    _code, out, err = run("PYTHONUNBUFFERED=1 python3 -u /tmp/l12-gpu-power.py", timeout=timeout, stdin_data=spec)
     payload = _stdout_json(out)
     if not payload:
         raise RuntimeError(err or f"GPU EnvironmentMetrics empty (exit {_code})")
