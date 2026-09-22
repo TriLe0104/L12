@@ -10,7 +10,7 @@ function apiOrigin() {
   );
 }
 
-async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }> | { path: string[] } }) {
+async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   const dest = `${apiOrigin()}/api/${path.join("/")}${req.nextUrl.search}`;
   const headers = new Headers();
