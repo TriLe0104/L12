@@ -699,7 +699,8 @@ _LIVE_GPU_SRC = "none"
 _LIVE_GPU_T = 0.0
 _LIVE_GPU_LOCK = threading.Lock()
 _LIVE_GPU_BUSY = False
-_LIVE_GPU_TTL = 8.0
+_LIVE_GPU_BUSY_T = 0.0
+_LIVE_GPU_TTL = 1.0
 _LIVE_GPU_ERR = ""
 
 
@@ -841,12 +842,16 @@ def _poll_live_gpus() -> None:
 
 
 def _kick_live_gpu_poll(*, force: bool = False) -> None:
-    global _LIVE_GPU_BUSY
+    global _LIVE_GPU_BUSY, _LIVE_GPU_BUSY_T
     now = time.time()
     with _LIVE_GPU_LOCK:
-        if _LIVE_GPU_BUSY or (not force and (now - _LIVE_GPU_T) < _LIVE_GPU_TTL):
+        if _LIVE_GPU_BUSY:
+            if now - _LIVE_GPU_BUSY_T < 30.0 and not force:
+                return
+        elif not force and (now - _LIVE_GPU_T) < _LIVE_GPU_TTL:
             return
         _LIVE_GPU_BUSY = True
+        _LIVE_GPU_BUSY_T = now
     threading.Thread(target=_poll_live_gpus, daemon=True, name="maxlps-gpu-redfish").start()
 
 
@@ -1327,7 +1332,9 @@ def snapshot(
             "gpu_source": "redfish" if live_n else "none",
             "gpu_error": _LIVE_GPU_ERR or None,
             "gpu_live": live_n,
-            "gpu_kw": round(gpu_total_w / 1000.0, 1),
+            "gpu_poll_age_s": round(max(0.0, now - _LIVE_GPU_T), 1) if _LIVE_GPU_T else None,
+            "gpu_busy": _LIVE_GPU_BUSY,
+            "gpu_kw": round(gpu_total_w / 1000.0, 2),
             "overhead_kw": round(overhead_total_w / 1000.0, 1),
             "hottest_w": round(hottest_w, 1),
             "avg_setpoint_w": round(sp_sum / sp_n, 1) if sp_n else 0.0,

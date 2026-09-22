@@ -518,7 +518,13 @@ export default function MaxLpsPage() {
           </b>
           <small>
             {view?.totals?.gpu_source === "redfish"
-              ? `Σ ${(view.totals.gpu_live ?? 0).toLocaleString()} GPU · BMC EnvironmentMetrics`
+              ? `Σ ${(view.totals.gpu_live ?? 0).toLocaleString()} GPU · ${
+                  view.totals.gpu_poll_age_s == null
+                    ? "polling"
+                    : view.totals.gpu_poll_age_s < 1.5
+                      ? "live"
+                      : `${Math.round(view.totals.gpu_poll_age_s)}s ago`
+                }`
               : view?.totals?.gpu_error === "pxe-hop-down"
                 ? "Connect the PXE hop for Redfish"
                 : "No BMC Redfish readings yet"}
@@ -588,12 +594,19 @@ export default function MaxLpsPage() {
             </h2>
             <p>
               {view?.totals?.gpu_source === "redfish"
-                ? `Redfish PowerWatts.Reading · ${view.totals.gpu_live ?? 0} GPU`
+                ? `Redfish PowerWatts · ${view.totals.gpu_live ?? 0} GPU · ${
+                    view.totals.gpu_busy && (view.totals.gpu_poll_age_s ?? 99) < 1
+                      ? "polling"
+                      : view.totals.gpu_poll_age_s == null
+                        ? "waiting"
+                        : view.totals.gpu_poll_age_s < 1.5
+                          ? "live"
+                          : `${Math.round(view.totals.gpu_poll_age_s)}s ago`
+                  }`
                 : hop?.connected
                   ? "Empty until BMC EnvironmentMetrics arrive"
                   : "Connect the PXE hop for GPU Redfish"}
-              {" · next in "}
-              <EtaClock seconds={loopSec} resetKey={loopReset} />
+              {view?.totals?.gpu_error ? ` · ${view.totals.gpu_error}` : ""}
               {" · green gain / red loss"}
             </p>
           </header>

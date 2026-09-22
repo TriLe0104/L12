@@ -26,6 +26,7 @@ _user: str | None = None
 _host: str | None = None
 _tunnels: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
+_scripts_ready = False
 
 
 class NeedsHop(RuntimeError):
@@ -44,7 +45,8 @@ def status() -> dict[str, Any]:
 
 
 def close() -> None:
-    global _client, _user, _host
+    global _client, _user, _host, _scripts_ready
+    _scripts_ready = False
     with _lock:
         for item in list(_tunnels.values()):
             item["alive"] = False
@@ -223,7 +225,7 @@ _HOP_GPU_POWER = r"""
 import base64, concurrent.futures, json, ssl, sys, urllib.error, urllib.request
 spec = json.loads(sys.stdin.read() or "{}")
 ctx = ssl._create_unverified_context()
-timeout = float(spec.get("timeout") or 4)
+timeout = float(spec.get("timeout") or 2)
 
 def get(url, user, password):
     req = urllib.request.Request(url, method="GET")
@@ -279,49 +281,28 @@ def fetch_bmc(target):
     if not ip:
         out["error"] = "no-ip"
         return out
-    st, col = get("https://%s/redfish/v1/Systems/HGX_Baseboard_0/Processors" % ip, user, password)
-    hrefs = []
-    if st == 200:
-        for m in col.get("Members") or []:
-            if not isinstance(m, dict):
+    last_st = 0
+    def pull(names):
+        nonlocal last_st
+        rows = []
+        for name in names:
+            path = "/redfish/v1/Systems/HGX_Baseboard_0/Processors/%s" % name
+            st_m, body = get("https://%s%s/EnvironmentMetrics" % (ip, path), user, password)
+            last_st = st_m
+            if st_m != 200 or not isinstance(body, dict) or body.get("_error"):
                 continue
-            href = m.get("@odata.id") or ""
-            if href and "GPU" in href.upper() and "CPU" not in href.upper():
-                hrefs.append(href)
-    if not hrefs:
-        for i in (0, 1, 2, 3):
-            hrefs.append("/redfish/v1/Systems/HGX_Baseboard_0/Processors/GPU_%s" % i)
-            hrefs.append("/redfish/v1/Systems/HGX_Baseboard_0/Processors/GPU_SXM_%s" % i)
-    seen = set()
-    raw = []
-    last_st = st
-    for href in hrefs:
-        if href in seen:
-            continue
-        seen.add(href)
-        path = href if href.startswith("/") else "/" + href
-        name = path.rstrip("/").split("/")[-1]
-        serial = None
-        st_p, proc = get("https://%s%s" % (ip, path), user, password)
-        last_st = st_p
-        if st_p == 200 and isinstance(proc, dict):
-            serial = proc.get("SerialNumber") or None
-            if serial and str(serial).count("-") == 4:
-                serial = None
-        st_m, body = get("https://%s%s/EnvironmentMetrics" % (ip, path), user, password)
-        last_st = st_m
-        if st_m != 200 or not isinstance(body, dict) or body.get("_error"):
-            continue
-        row = parse_metrics(body)
-        if row.get("watts") is None:
-            continue
-        row["id"] = name
-        row["processor"] = name
-        row["path"] = path.rstrip("/") + "/EnvironmentMetrics"
-        row["raw_index"] = gpu_num(name)
-        if serial:
-            row["serial"] = str(serial).strip()
-        raw.append(row)
+            row = parse_metrics(body)
+            if row.get("watts") is None:
+                continue
+            row["id"] = name
+            row["processor"] = name
+            row["path"] = path + "/EnvironmentMetrics"
+            row["raw_index"] = gpu_num(name)
+            rows.append(row)
+        return rows
+    raw = pull(["GPU_0", "GPU_1", "GPU_2", "GPU_3"])
+    if not raw:
+        raw = pull(["GPU_SXM_0", "GPU_SXM_1", "GPU_SXM_2", "GPU_SXM_3"])
     zero = any(g.get("raw_index") == 0 for g in raw)
     used = set()
     for g in raw:
@@ -334,20 +315,12 @@ def fetch_bmc(target):
         used.add(idx)
         g["index"] = idx
         out["gpus"].append(g)
-    buckets = {}
-    for g in out["gpus"]:
-        sn = (g.get("serial") or "").strip()
-        buckets.setdefault(sn, []).append(g)
-    for sn, group in buckets.items():
-        if sn and len(group) > 1:
-            for g in group:
-                g["serial"] = "%s-g%s" % (sn, g.get("index"))
     if not out["gpus"]:
         out["error"] = "HTTP %s" % last_st if last_st else "no-gpu-metrics"
     return out
 
 targets = spec.get("targets") or []
-n = max(1, min(6, len(targets) or 1))
+n = max(1, min(18, len(targets) or 1))
 nodes = []
 with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
     for row in ex.map(fetch_bmc, targets):
@@ -357,11 +330,15 @@ json.dump({"ok": True, "nodes": nodes}, sys.stdout)
 
 
 def _ensure_hop_scripts() -> None:
+    global _scripts_ready
+    if _scripts_ready:
+        return
     run("cat > /tmp/l12-bmc-pipe.py", timeout=8, stdin_data=_HOP_PIPE)
     run("cat > /tmp/l12-bmc-http.py", timeout=8, stdin_data=_HOP_HTTP)
     run("cat > /tmp/l12-gpu-power.py", timeout=8, stdin_data=_HOP_GPU_POWER)
     run("cat > /tmp/l12-gpu-cap.py", timeout=8, stdin_data=_HOP_GPU_CAP)
     run("cat > /tmp/l12-psu-power.py", timeout=8, stdin_data=_HOP_PSU_POWER)
+    _scripts_ready = True
 
 
 _HOP_GPU_CAP = r"""
@@ -614,7 +591,7 @@ def _stdout_json(raw: str) -> dict[str, Any]:
             return {}
 
 
-def fetch_gpu_environment_metrics(targets: list[dict[str, str]], timeout: float = 70.0) -> dict[str, list[dict[str, Any]]]:
+def fetch_gpu_environment_metrics(targets: list[dict[str, str]], timeout: float = 20.0) -> dict[str, list[dict[str, Any]]]:
     """Per-GPU PowerWatts via BMC EnvironmentMetrics, run on the PXE hop."""
     if not targets:
         return {}
@@ -622,7 +599,7 @@ def fetch_gpu_environment_metrics(targets: list[dict[str, str]], timeout: float 
         _ensure_hop_scripts()
     except Exception:
         pass
-    spec = json.dumps({"timeout": 4, "targets": targets})
+    spec = json.dumps({"timeout": 2, "targets": targets})
     _code, out, err = run("python3 /tmp/l12-gpu-power.py", timeout=timeout, stdin_data=spec)
     payload = _stdout_json(out)
     if not payload:

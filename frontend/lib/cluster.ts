@@ -245,6 +245,8 @@ export interface MaxLpsView {
     gpu_source?: string;
     gpu_error?: string | null;
     gpu_live?: number;
+    gpu_poll_age_s?: number | null;
+    gpu_busy?: boolean;
     gpu_kw: number;
     overhead_kw?: number;
     hottest_w: number;
