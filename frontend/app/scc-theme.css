@@ -404,6 +404,81 @@ html[data-theme="scc"] .lps-panel[data-active="true"] {
   border-color: var(--signal);
 }
 
+html[data-theme="scc"] .maxlps-mix-bar,
+html[data-theme="scc"] .maxlps-shelf-bar,
+html[data-theme="scc"] .maxlps-meter {
+  background: #e2e8f0 !important;
+}
+
+html[data-theme="scc"] .maxlps-mix-bar i[data-k="free"] {
+  background: #cbd5e1 !important;
+  box-shadow: none;
+}
+
+html[data-theme="scc"] .maxlps-place-slot {
+  background: #f8fafc !important;
+}
+
+html[data-theme="scc"] .maxlps-place-slot[data-place="1"] {
+  background: linear-gradient(90deg, rgba(232, 176, 72, 0.22), #f8fafc 42%) !important;
+}
+
+html[data-theme="scc"] .maxlps-place-slot[data-place="2"] {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.22), #f8fafc 38%) !important;
+}
+
+html[data-theme="scc"] .maxlps-place-slot[data-place="3"] {
+  background: linear-gradient(90deg, rgba(180, 83, 9, 0.18), #f8fafc 38%) !important;
+}
+
+html[data-theme="scc"] .maxlps-rack-block,
+html[data-theme="scc"] .maxlps-shelf,
+html[data-theme="scc"] .maxlps-ps {
+  background: #f8fafc !important;
+  color: var(--ink) !important;
+}
+
+html[data-theme="scc"] .maxlps-shelf:hover,
+html[data-theme="scc"] .maxlps-rack-block:hover > .maxlps-shelf {
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .maxlps-shelf[data-active="true"],
+html[data-theme="scc"] .maxlps-gpu[data-active="true"] {
+  background: #eff6ff !important;
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+
+html[data-theme="scc"] .maxlps-gpu {
+  color: var(--ink) !important;
+}
+
+html[data-theme="scc"] .maxlps-gpu:hover {
+  background: #f1f5f9;
+}
+
+html[data-theme="scc"] .maxlps-ps .maxlps-shelf-id,
+html[data-theme="scc"] .maxlps-shelf-kw,
+html[data-theme="scc"] .maxlps-rank-slot,
+html[data-theme="scc"] .maxlps-delta,
+html[data-theme="scc"] .maxlps-gpu-empty,
+html[data-theme="scc"] .maxlps-gpu-empty p,
+html[data-theme="scc"] .maxlps-hint,
+html[data-theme="scc"] .maxlps-inspect h2,
+html[data-theme="scc"] .maxlps-inspect-rank,
+html[data-theme="scc"] .maxlps-detail dt,
+html[data-theme="scc"] .maxlps-loop .lps-field-hint {
+  color: var(--ink) !important;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve {
+  background: #f1f5f9 !important;
+}
+
+html[data-theme="scc"] .maxlps-gpu-cols button {
+  color: var(--steel);
+}
+
 html[data-theme="scc"] .gauge-foot,
 html[data-theme="scc"] .provision-col,
 html[data-theme="scc"] .provision-pane {
