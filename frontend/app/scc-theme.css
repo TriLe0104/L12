@@ -55,30 +55,15 @@ html[data-theme="scc"] .brand-l12 {
   letter-spacing: -0.03em;
 }
 
-html[data-theme="scc"] .brand-mark {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.55rem;
+html[data-theme="scc"] .brand-scc-mark {
+  color: #fff;
+  flex: none;
 }
 
-html[data-theme="scc"] .brand-mark .brand-scc-logo,
-html[data-theme="scc"] .brand-scc-logo {
-  width: auto;
-  height: 1.55rem;
-  max-width: 7.4rem;
-  object-fit: contain;
-  background: none;
-  padding: 0;
-  border-radius: 0;
-}
-
-html[data-theme="scc"] .brand-hero .brand-scc-logo {
-  width: min(13.5rem, 100%);
-  height: auto;
-  max-width: 13.5rem;
-  background: none;
-  padding: 0;
-  border-radius: 0;
+html[data-theme="scc"] .brand-hero .brand-scc-mark {
+  width: 5.5rem;
+  height: 5.5rem;
+  filter: none;
 }
 
 html[data-theme="scc"] .nav-link {
