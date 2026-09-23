@@ -585,9 +585,7 @@ def _argus_shelf_rows() -> dict[str, list[dict[str, Any]]]:
         return _ARGUS_SHELF
 
 
-def _merge_argus_shelves(rid: str) -> tuple[list[dict[str, Any]], float, bool]:
-    """Argus TotalPowerOut per power shelf. Shelves with no reading are omitted."""
-    live = _argus_shelf_rows().get(rid) or []
+def _rows_from_shelf_map(rid: str, live: list[dict[str, Any]], source: str) -> tuple[list[dict[str, Any]], float, bool]:
     out: list[dict[str, Any]] = []
     total = 0.0
     for src in live:
@@ -600,11 +598,27 @@ def _merge_argus_shelves(rid: str) -> tuple[list[dict[str, Any]], float, bool]:
                 "id": src.get("id") or f"{rid}-ps{int(src.get('index') or 0)}",
                 "index": int(src.get("index") or 0),
                 "kw": kw,
-                "source": "argus",
+                "source": source,
+                "sensor": src.get("sensor_name") or src.get("sensor"),
             }
         )
     out.sort(key=lambda x: int(x["index"]))
     return out, round(total, 3), bool(out)
+
+
+def _merge_argus_shelves(rid: str) -> tuple[list[dict[str, Any]], float, bool]:
+    """Argus TotalPowerOut fallback if BMC PowerShelf sensors are empty."""
+    return _rows_from_shelf_map(rid, _argus_shelf_rows().get(rid) or [], "argus")
+
+
+def _merge_shelves(rid: str) -> tuple[list[dict[str, Any]], float, bool, str]:
+    redfish, total, ok = _rows_from_shelf_map(rid, _live_shelf_rows().get(rid) or [], "redfish")
+    if ok:
+        return redfish, total, True, "redfish"
+    argus, total, ok = _merge_argus_shelves(rid)
+    if ok:
+        return argus, total, True, "argus"
+    return [], 0.0, False, "none"
 
 
 _LIVE_SHELF: dict[str, list[dict[str, Any]]] = {}
@@ -642,80 +656,105 @@ def _shelf_targets() -> list[dict[str, Any]]:
         return []
 
 
-def _poll_live_shelves() -> None:
-    global _LIVE_SHELF, _LIVE_SHELF_T, _LIVE_SHELF_BUSY
-    try:
-        from . import pxe_hop
+_LIVE_SHELF_ERR = ""
+_SHELF_WATCH: threading.Thread | None = None
+_SHELF_WATCH_LOCK = threading.Lock()
 
-        if not pxe_hop.status().get("connected"):
-            with _LIVE_GPU_LOCK:
-                _LIVE_SHELF = {}
-                _LIVE_SHELF_T = time.time()
-            return
-        nodes = _shelf_targets()
-        if not nodes:
-            with _LIVE_GPU_LOCK:
-                _LIVE_SHELF_T = time.time()
-            return
-        targets = [{"bmc_ip": n["bmc_ip"], "user": n["user"], "password": n["password"]} for n in nodes]
-        by_ip = pxe_hop.fetch_psu_power(targets)
-        raw_idx = [int(n["index"]) for n in nodes]
-        shift = 1 if raw_idx and min(raw_idx) == 0 else 0
-        by_rack: dict[str, list[dict[str, Any]]] = {}
-        for n in nodes:
-            rec = by_ip.get(n["bmc_ip"]) or {}
-            total_w = rec.get("total_w")
-            psus = rec.get("psus") or []
-            if total_w is None and psus:
-                total_w = sum(float(p.get("watts") or 0) for p in psus)
-            if total_w is None:
+
+def _ingest_shelf(index: dict[str, dict[str, Any]], node: dict[str, Any]) -> None:
+    global _LIVE_SHELF, _LIVE_SHELF_T, _LIVE_SHELF_ERR
+    ip = str(node.get("bmc_ip") or "")
+    meta = index.get(ip)
+    watts = node.get("total_w")
+    if watts is None:
+        watts = node.get("watts")
+    if not meta or watts is None:
+        return
+    kw = round(float(watts) / 1000.0, 3)
+    rec = {
+        "id": meta["id"],
+        "index": int(meta["index"]),
+        "kw": kw,
+        "source": "redfish",
+        "sensor_name": node.get("sensor_name"),
+        "path": node.get("path"),
+        "bmc_ip": ip,
+    }
+    rid = str(meta["rack_id"])
+    with _LIVE_GPU_LOCK:
+        rows = list(_LIVE_SHELF.get(rid) or [])
+        rows = [r for r in rows if int(r.get("index") or -1) != rec["index"]]
+        rows.append(rec)
+        rows.sort(key=lambda x: int(x.get("index") or 0))
+        _LIVE_SHELF[rid] = rows
+        _LIVE_SHELF_ERR = ""
+        _LIVE_SHELF_T = time.time()
+
+
+def _shelf_watch_forever() -> None:
+    global _LIVE_SHELF, _LIVE_SHELF_T, _LIVE_SHELF_ERR
+    while True:
+        try:
+            from . import pxe_hop
+
+            if not pxe_hop.status().get("connected"):
+                with _LIVE_GPU_LOCK:
+                    _LIVE_SHELF = {}
+                    _LIVE_SHELF_ERR = "pxe-hop-down"
+                    _LIVE_SHELF_T = time.time()
+                time.sleep(0.5)
                 continue
-            kw = round(float(total_w) / 1000.0, 3)
-            modules = []
-            for i, p in enumerate(psus):
-                w = p.get("watts")
-                if w is None:
-                    continue
-                modules.append(
-                    {
-                        "id": str(p.get("id") or i),
-                        "index": int(p.get("index") or i + 1),
-                        "kw": round(float(w) / 1000.0, 3),
-                    }
-                )
-            by_rack.setdefault(n["rack_id"], []).append(
-                {
+            nodes = _shelf_targets()
+            if not nodes:
+                with _LIVE_GPU_LOCK:
+                    _LIVE_SHELF_ERR = "no-pmc-targets"
+                    _LIVE_SHELF_T = time.time()
+                time.sleep(0.5)
+                continue
+            raw_idx = [int(n["index"]) for n in nodes]
+            shift = 1 if raw_idx and min(raw_idx) == 0 else 0
+            index = {
+                str(n["bmc_ip"]): {
                     "id": n["id"],
+                    "rack_id": n["rack_id"],
                     "index": int(n["index"]) + shift,
-                    "kw": kw,
-                    "psus": modules,
-                    "source": "redfish",
                 }
-            )
-        for items in by_rack.values():
-            items.sort(key=lambda x: int(x["index"]))
-        with _LIVE_GPU_LOCK:
-            if by_rack:
-                _LIVE_SHELF = by_rack
-            _LIVE_SHELF_T = time.time()
-    except Exception:
-        pass
-    finally:
-        _LIVE_SHELF_BUSY = False
+                for n in nodes
+            }
+            targets = [{"bmc_ip": n["bmc_ip"], "user": n["user"], "password": n["password"]} for n in nodes]
+
+            def on_event(payload: dict[str, Any], index: dict[str, dict[str, Any]] = index) -> None:
+                if payload.get("bmc_ip"):
+                    _ingest_shelf(index, payload)
+                    return
+                for node in payload.get("nodes") or []:
+                    if isinstance(node, dict):
+                        _ingest_shelf(index, node)
+
+            pxe_hop.stream_psu_power(targets, on_event, interval=1.0)
+        except Exception as exc:
+            with _LIVE_GPU_LOCK:
+                _LIVE_SHELF_ERR = str(exc)[:180]
+            time.sleep(0.5)
+
+
+def _ensure_shelf_watch() -> None:
+    global _SHELF_WATCH
+    with _SHELF_WATCH_LOCK:
+        t = _SHELF_WATCH
+        if t is not None and t.is_alive():
+            return
+        t = threading.Thread(target=_shelf_watch_forever, daemon=True, name="maxlps-psu-redfish")
+        _SHELF_WATCH = t
+        t.start()
 
 
 def _kick_live_shelf_poll() -> None:
-    global _LIVE_SHELF_BUSY
-    now = time.time()
-    with _LIVE_GPU_LOCK:
-        if _LIVE_SHELF_BUSY or (now - _LIVE_SHELF_T) < _LIVE_SHELF_TTL:
-            return
-        _LIVE_SHELF_BUSY = True
-    threading.Thread(target=_poll_live_shelves, daemon=True, name="maxlps-psu-redfish").start()
+    _ensure_shelf_watch()
 
 
 def _live_shelf_rows() -> dict[str, list[dict[str, Any]]]:
-    _kick_live_shelf_poll()
+    _ensure_shelf_watch()
     with _LIVE_GPU_LOCK:
         return {k: list(v) for k, v in _LIVE_SHELF.items()}
 
@@ -854,12 +893,15 @@ def _ingest_bmc(index: dict[str, tuple[str, str]], node: dict[str, Any]) -> None
 
 
 def _note_hop_down() -> None:
-    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_ERR
+    global _LIVE_GPU, _LIVE_GPU_SRC, _LIVE_GPU_T, _LIVE_GPU_ERR, _LIVE_SHELF, _LIVE_SHELF_T, _LIVE_SHELF_ERR
     with _LIVE_GPU_LOCK:
         _LIVE_GPU = {}
         _LIVE_GPU_SRC = "none"
         _LIVE_GPU_ERR = "pxe-hop-down"
         _LIVE_GPU_T = time.time()
+        _LIVE_SHELF = {}
+        _LIVE_SHELF_ERR = "pxe-hop-down"
+        _LIVE_SHELF_T = time.time()
 
 
 def _gpu_watch_forever() -> None:
@@ -918,10 +960,12 @@ def _kick_live_gpu_poll(*, force: bool = False) -> None:
 
 def force_live_gpu_poll() -> None:
     _ensure_gpu_watch()
+    _ensure_shelf_watch()
 
 
 def _live_gpu_readings() -> tuple[dict[str, dict[str, Any]], str]:
     _ensure_gpu_watch()
+    _ensure_shelf_watch()
     with _LIVE_GPU_LOCK:
         return dict(_LIVE_GPU), _LIVE_GPU_SRC
 
@@ -1256,15 +1300,16 @@ def snapshot(
 
     rack_out = []
     shelf_total = 0.0
-    argus_shelves = False
+    shelf_source = "none"
     for acc in rack_acc.values():
         gpu_kw = acc["gpu_w"] / 1000.0
         oh_kw = 0.0
         n_on = acc["n_live"] if acc["power_state"] != "off" else 0
-        shelves, live_sum, live = _merge_argus_shelves(str(acc["id"]))
+        shelves, live_sum, live, src = _merge_shelves(str(acc["id"]))
         if live:
             shelf_kw = live_sum
-            argus_shelves = True
+            if src == "redfish" or shelf_source != "redfish":
+                shelf_source = src
             if shelf_kw > gpu_kw + 0.001:
                 oh_kw = max(0.0, shelf_kw - gpu_kw)
         else:
@@ -1423,7 +1468,9 @@ def snapshot(
             "free_kw": round(free_kw, 1),
             "used_delta_kw": round(used_delta, 1),
             "shelf_kw": round(shelf_total, 1),
-            "shelf_source": "argus" if argus_shelves else "none",
+            "shelf_source": shelf_source,
+            "shelf_error": _LIVE_SHELF_ERR or None,
+            "shelf_poll_age_s": round(max(0.0, now - _LIVE_SHELF_T), 1) if _LIVE_SHELF_T else None,
             "gpu_source": "redfish" if live_n else "none",
             "gpu_error": _LIVE_GPU_ERR or None,
             "gpu_live": live_n,

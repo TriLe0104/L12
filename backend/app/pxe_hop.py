@@ -422,10 +422,25 @@ json.dump({"ok": True, "results": out}, sys.stdout)
 
 
 _HOP_PSU_POWER = r"""
-import base64, concurrent.futures, json, ssl, sys, urllib.error, urllib.request, re
+import base64, concurrent.futures, json, ssl, sys, threading, time, urllib.error, urllib.request
 spec = json.loads(sys.stdin.read() or "{}")
 ctx = ssl._create_unverified_context()
-timeout = float(spec.get("timeout") or 6)
+timeout = float(spec.get("timeout") or 1.2)
+interval = float(spec.get("interval") or 1)
+loop = bool(spec.get("loop"))
+_print_lock = threading.Lock()
+PATHS = [
+    "/redfish/v1/Chassis/PowerShelf_0/Sensors/total_power_out",
+    "/redfish/v1/Chassis/PowerShelf_0/Sensors/TotalPowerOut",
+    "/redfish/v1/Chassis/powershelf/Sensors/total_power_out",
+    "/redfish/v1/Chassis/PMC_0/Sensors/total_power_out",
+]
+
+def emit(obj):
+    with _print_lock:
+        json.dump(obj, sys.stdout)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 def get(url, user, password):
     req = urllib.request.Request(url, method="GET")
@@ -439,174 +454,84 @@ def get(url, user, password):
             try:
                 return code, json.loads(raw or "{}")
             except Exception:
-                return code, {}
+                return code, {"_error": "parse"}
     except urllib.error.HTTPError as e:
-        raw = (e.read() or b"").decode("utf-8", "replace")
-        try:
-            return int(e.code), json.loads(raw or "{}")
-        except Exception:
-            return int(e.code), {}
+        return e.code, {"_error": "HTTP %s" % e.code}
     except Exception as e:
         return 0, {"_error": str(e)}
 
-def num(x):
-    if isinstance(x, dict):
-        for k in ("Value", "Reading", "PowerOutputWatts", "LastPowerOutputWatts", "PowerConsumedWatts", "PowerInputWatts"):
-            if x.get(k) is not None and not isinstance(x.get(k), dict):
-                try:
-                    return float(x[k])
-                except Exception:
-                    pass
+def reading(body):
+    if not isinstance(body, dict) or body.get("_error"):
         return None
-    if isinstance(x, (int, float)):
-        return float(x)
+    v = body.get("Reading")
+    if isinstance(v, dict):
+        v = v.get("Reading") if v.get("Reading") is not None else v.get("Value")
     try:
-        return float(x)
+        w = float(v)
     except Exception:
         return None
-
-def is_watt_unit(u):
-    u = str(u or "").strip().lower()
-    return u in ("w", "watt", "watts", "kw") or u.endswith("w")
-
-def watt_points(obj, acc, depth=0):
-    if depth > 6 or not isinstance(obj, dict):
-        return
-    name = str(obj.get("Name") or obj.get("Id") or obj.get("MemberId") or "")
-    units = obj.get("ReadingUnits") or obj.get("Unit") or obj.get("Units") or ""
-    for key in ("pout", "Pout", "pin", "Pin", "PowerWatts", "PowerOutputWatts", "LastPowerOutputWatts", "PowerConsumedWatts", "PowerInputWatts"):
-        v = num(obj.get(key))
-        if v is not None:
-            acc.append((name or key, v, key))
-    rtype = str(obj.get("ReadingType") or "").lower()
-    if obj.get("Reading") is not None and (is_watt_unit(units) or rtype == "power"):
-        v = num(obj.get("Reading"))
-        if v is not None:
-            acc.append((name, v, "Reading"))
-    if obj.get("Value") is not None and (is_watt_unit(units) or rtype == "power"):
-        v = num(obj.get("Value"))
-        if v is not None:
-            acc.append((name, v, "Value"))
-    for k, v in obj.items():
-        if str(k).startswith("@") or k in ("RelatedItem", "Links", "Status", "Thresholds"):
-            continue
-        if isinstance(v, dict):
-            watt_points(v, acc, depth + 1)
-        elif isinstance(v, list):
-            for item in v[:24]:
-                if isinstance(item, dict):
-                    watt_points(item, acc, depth + 1)
-
-def members(body):
-    out = []
-    for m in (body or {}).get("Members") or []:
-        if isinstance(m, dict) and m.get("@odata.id"):
-            out.append(m["@odata.id"])
-    return out
+    if w < 0 or w > 80000:
+        return None
+    name = str(body.get("Id") or body.get("Name") or "total_power_out")
+    return name, w
 
 def fetch_shelf(target):
     ip = target.get("bmc_ip") or ""
-    user = target.get("user") or "root"
     password = target.get("password") or ""
-    out = {"bmc_ip": ip, "psus": [], "total_w": None, "error": None}
+    users = []
+    for u in (target.get("user") or "", "root", "ADMIN", "admin"):
+        if u and u not in users:
+            users.append(u)
+    out = {"bmc_ip": ip, "psus": [], "total_w": None, "sensor_name": None, "path": None, "error": None}
     if not ip:
         out["error"] = "no-ip"
         return out
-    host = "https://%s" % ip
-    st, col = get(host + "/redfish/v1/Chassis", user, password)
-    hrefs = members(col) if st == 200 else []
-    if not hrefs:
-        hrefs = ["/redfish/v1/Chassis/powershelf", "/redfish/v1/Chassis/PMC_0"]
-    hits = []
-    seen = set()
-    extra = []
-    for href in hrefs[:8]:
-        path = href if str(href).startswith("/") else "/" + str(href)
-        if path in seen:
-            continue
-        seen.add(path)
-        st, ch = get(host + path, user, password)
-        if st == 200 and isinstance(ch, dict):
-            watt_points(ch, hits)
-            for rel in ("Power", "Sensors", "EnvironmentMetrics", "PowerSubsystem"):
-                link = ch.get(rel)
-                if isinstance(link, dict) and link.get("@odata.id"):
-                    extra.append(link["@odata.id"])
-        extra.append(path + "/Power")
-        extra.append(path + "/Sensors")
-        extra.append(path + "/Sensors?$expand=Members")
-        extra.append(path + "/EnvironmentMetrics")
-        extra.append(path + "/PowerSubsystem")
-        extra.append(path + "/PowerSubsystem/PowerSupplies")
-        extra.append(path + "/Power/Oem/LiteOn/PowerUnits")
-        extra.append(path + "/PowerUnits")
-        extra.append(path + "/Sensors/TotalPowerOut")
-        extra.append(path + "/Sensors/total_power")
-    extra.append("/redfish/v1/Chassis/powershelf/Power/Oem/LiteOn/PowerUnits")
-    extra.append("/redfish/v1/Chassis/powershelf/Sensors")
-    extra.append("/redfish/v1/Chassis/chassis/Sensors")
-    extra.append("/redfish/v1/Chassis/chassis/Power")
-    for href in extra:
-        path = href if str(href).startswith("/") else "/" + str(href)
-        if path in seen:
-            continue
-        seen.add(path)
-        st, body = get(host + path, user, password)
-        if st != 200 or not isinstance(body, dict):
-            continue
-        watt_points(body, hits)
-        kids = members(body)
-        if "Sensor" in path or "PowerUnit" in path or "PowerSupplies" in path:
-            for kid in kids[:40]:
-                ident = str(kid).lower()
-                if "Sensor" in path and not any(x in ident for x in ("power", "pout", "psu", "watt", "pin", "total")):
-                    continue
-                if kid in seen:
-                    continue
-                seen.add(kid)
-                st2, body2 = get(host + kid, user, password)
-                if st2 == 200 and isinstance(body2, dict):
-                    watt_points(body2, hits)
-    psus = []
-    totals = []
-    used = set()
-    for name, watts, key in hits:
-        label = ("%s %s" % (name, key)).lower()
-        if "energy" in label or "kwh" in label or "joule" in label:
-            continue
-        if watts < 0 or watts > 40000:
-            continue
-        is_psu = bool(re.search(r"psu|powerdevice|power.?unit|power.?supply|pout|output.?power|ps[0-9]|pin\b", label))
-        is_total = bool(re.search(r"totalpower|total_power|total power|consumed", label))
-        if is_psu:
-            ident = name or key
-            if ident in used:
+    last_st = 0
+    for user in users:
+        for path in PATHS:
+            st, body = get("https://%s%s" % (ip, path), user, password)
+            last_st = st
+            parsed = reading(body)
+            if parsed is None:
                 continue
-            used.add(ident)
-            psus.append({"index": len(psus) + 1, "id": ident, "watts": watts})
-        elif is_total or key in ("PowerConsumedWatts", "PowerWatts"):
-            totals.append(watts)
-    out["psus"] = psus
-    if psus:
-        out["total_w"] = sum(p["watts"] for p in psus)
-    elif totals:
-        out["total_w"] = max(totals)
-    elif hits:
-        # last resort: largest plausible shelf reading
-        vals = [w for _n, w, _k in hits if 50 <= w <= 40000]
-        if vals:
-            out["total_w"] = max(vals)
-    if out["total_w"] is None:
-        out["error"] = "no-watt-reading"
+            name, watts = parsed
+            out["sensor_name"] = name
+            out["watts"] = watts
+            out["total_w"] = watts
+            out["path"] = path
+            out["user"] = user
+            out["psus"] = [{"index": 1, "id": name, "watts": watts}]
+            return out
+    out["error"] = "HTTP %s" % last_st if last_st else "no-watt-reading"
     return out
 
+def fetch_and_emit(target):
+    row = fetch_shelf(target)
+    emit(row)
+    return row
+
 targets = spec.get("targets") or []
-n = max(1, min(8, len(targets) or 1))
-nodes = []
-with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
-    for row in ex.map(fetch_shelf, targets):
-        nodes.append(row)
-json.dump({"ok": True, "nodes": nodes}, sys.stdout)
+n = max(1, min(18, len(targets) or 1))
+
+def once():
+    nodes = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+        for row in ex.map(fetch_and_emit if loop else fetch_shelf, targets):
+            nodes.append(row)
+    if not loop:
+        json.dump({"ok": True, "nodes": nodes}, sys.stdout)
+    else:
+        emit({"ok": True, "round": True})
+
+if not loop:
+    once()
+else:
+    while True:
+        t0 = time.time()
+        once()
+        dt = time.time() - t0
+        if dt < interval:
+            time.sleep(interval - dt)
 """
 
 
@@ -909,24 +834,77 @@ def _pmc_power_one(target: dict[str, str]) -> dict[str, Any]:
     return out
 
 
-def fetch_psu_power(targets: list[dict[str, str]], timeout: float = 70.0) -> dict[str, dict[str, Any]]:
-    """Per-PSU watts from each PMC via hop HTTPS, keyed by BMC IP."""
-    del timeout
+def stream_psu_power(
+    targets: list[dict[str, str]],
+    on_event,
+    *,
+    interval: float = 1.0,
+) -> None:
+    """1 Hz PowerShelf total_power_out on the hop; on_event(dict) per PMC line."""
+    if not targets:
+        return
+    try:
+        run("cat > /tmp/l12-psu-power.py", timeout=8, stdin_data=_HOP_PSU_POWER)
+    except Exception:
+        try:
+            _ensure_hop_scripts()
+        except Exception:
+            pass
+    spec = json.dumps({"timeout": 1.2, "interval": interval, "loop": True, "targets": targets})
+    client = _ssh()
+    stdin, stdout, stderr = client.exec_command(
+        "PYTHONUNBUFFERED=1 python3 -u /tmp/l12-psu-power.py",
+        timeout=None,
+    )
+    try:
+        stdin.write(spec)
+        stdin.channel.shutdown_write()
+    except Exception:
+        pass
+    stdout.channel.settimeout(3.0)
+    try:
+        while True:
+            try:
+                line = stdout.readline()
+            except Exception:
+                if not status().get("connected"):
+                    break
+                continue
+            if not line:
+                break
+            payload = _stdout_json(line)
+            if payload:
+                on_event(payload)
+    finally:
+        try:
+            stdout.channel.close()
+        except Exception:
+            pass
+
+
+def fetch_psu_power(targets: list[dict[str, str]], timeout: float = 20.0) -> dict[str, dict[str, Any]]:
+    """Delta GB300 PowerShelf total_power_out via hop, keyed by BMC IP."""
     if not targets:
         return {}
+    try:
+        run("cat > /tmp/l12-psu-power.py", timeout=8, stdin_data=_HOP_PSU_POWER)
+    except Exception:
+        try:
+            _ensure_hop_scripts()
+        except Exception:
+            pass
+    spec = json.dumps({"timeout": 1.2, "targets": targets})
+    _code, out, err = run("PYTHONUNBUFFERED=1 python3 -u /tmp/l12-psu-power.py", timeout=timeout, stdin_data=spec)
+    payload = _stdout_json(out)
+    if not payload:
+        raise RuntimeError(err or f"PowerShelf total_power_out empty (exit {_code})")
     by_ip: dict[str, dict[str, Any]] = {}
-    workers = min(8, max(1, len(targets)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {pool.submit(_pmc_power_one, t): t for t in targets}
-        for fut in concurrent.futures.as_completed(futs):
-            try:
-                row = fut.result()
-            except Exception as exc:
-                t = futs[fut]
-                row = {"bmc_ip": t.get("bmc_ip"), "psus": [], "total_w": None, "error": str(exc)}
-            ip = str(row.get("bmc_ip") or "")
-            if ip:
-                by_ip[ip] = row
+    for node in payload.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        ip = str(node.get("bmc_ip") or "")
+        if ip:
+            by_ip[ip] = node
     return by_ip
 
 

@@ -304,7 +304,7 @@ export default function MaxLpsPage() {
   const nRacks = view?.racks?.length ?? 0;
   const nGpus = totals?.gpu_live || totals?.gpus_listed || (view?.gpus ?? []).length;
   const gpuLive = view?.totals?.gpu_source === "redfish" && gpuUsedKw >= 0.05;
-  const rackLive = view?.totals?.shelf_source === "argus" && rackUsedKw >= 0.05;
+  const rackLive = (view?.totals?.shelf_source === "redfish" || view?.totals?.shelf_source === "argus") && rackUsedKw >= 0.05;
   const rackFlash = useOnceDelta(rackUsedKw, rackLive, 0.5);
   const gpuFlash = useOnceDelta(gpuUsedKw, gpuLive, 0.5);
   const rackDelta = rackFlash.delta;
@@ -484,7 +484,11 @@ export default function MaxLpsPage() {
           <span>Total rack</span>
           <b>{formatRackKw(rackUsedKw)}</b>
           <small>
-            {view?.totals?.shelf_source === "argus" ? "Argus TotalPowerOut" : "No PSU readings"}
+            {view?.totals?.shelf_source === "redfish"
+              ? "BMC PowerShelf total_power_out"
+              : view?.totals?.shelf_source === "argus"
+                ? "Argus TotalPowerOut (fallback)"
+                : "No PSU readings"}
           </small>
         </article>
         <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
@@ -558,10 +562,20 @@ export default function MaxLpsPage() {
           <header>
             <h2>Racks</h2>
             <p>
-              {view?.totals?.shelf_source === "argus"
-                ? "Argus TotalPowerOut per shelf"
-                : "Empty until Argus TotalPowerOut"}
-              {view?.totals?.shelf_source === "argus" && view?.racks?.length ? ` · ${formatRackKw(rackUsedKw)} total` : ""}
+              {view?.totals?.shelf_source === "redfish"
+                ? `BMC PowerShelf total_power_out${
+                    view.totals.shelf_poll_age_s == null
+                      ? ""
+                      : view.totals.shelf_poll_age_s < 1.5
+                        ? " · live"
+                        : ` · ${Math.round(view.totals.shelf_poll_age_s)}s ago`
+                  }`
+                : view?.totals?.shelf_source === "argus"
+                  ? "Argus TotalPowerOut (fallback)"
+                  : hop?.connected
+                    ? "Empty until BMC PowerShelf sensors arrive"
+                    : "Connect the PXE hop for shelf Redfish"}
+              {view?.totals?.shelf_source === "redfish" && view?.racks?.length ? ` · ${formatRackKw(rackUsedKw)} total` : ""}
             </p>
             {rackId ? (
               <button type="button" className="maxlps-clear" onClick={() => setRackId(null)}>

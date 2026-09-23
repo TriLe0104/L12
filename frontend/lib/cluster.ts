@@ -242,6 +242,8 @@ export interface MaxLpsView {
     used_delta_kw?: number;
     shelf_kw: number;
     shelf_source?: string;
+    shelf_error?: string | null;
+    shelf_poll_age_s?: number | null;
     gpu_source?: string;
     gpu_error?: string | null;
     gpu_live?: number;
