@@ -23,11 +23,11 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/kvm-edge.mjs ./kvm-edge.mjs
 
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
+ENV NEXT_INNER_PORT=3001
 ENV API_PROXY=http://host.docker.internal:8001
-# Docker overwrites HOSTNAME with the machine name; Next would then bind
-# that name only and 127.0.0.1:3333 would refuse connections.
-CMD ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
+CMD ["node", "kvm-edge.mjs"]

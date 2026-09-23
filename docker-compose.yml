@@ -59,7 +59,7 @@ services:
     environment:
       API_PROXY: http://host.docker.internal:8001
       PORT: "3000"
-    command: ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
+      NEXT_INNER_PORT: "3001"
     ports:
       - "3333:3000"
     depends_on:

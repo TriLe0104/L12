@@ -64,7 +64,7 @@ def _inject_js(prefix: str, sess: dict[str, Any]) -> str:
         f"var PASS={json.dumps(password)};"
         f"var VIEW={json.dumps(view)};"
         f"var AUTH={json.dumps(auth)};"
-        "var WS_HOST=location.port==='8001'?location.host:(location.hostname+':8001');"
+        "var WS_HOST=(location.port==='3001'||location.port==='8001')?(location.hostname+':8001'):location.host;"
         "document.cookie='XSRF-TOKEN='+(AUTH||'1')+'; path=/';"
         "document.cookie='IsAuthenticated=true; path=/';"
         "try{localStorage.setItem('storedUsername',USER);}catch(e){}"
