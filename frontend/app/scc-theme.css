@@ -228,3 +228,172 @@ html[data-theme="scc"] .lps-hud {
   border: 1px solid var(--rule);
   border-radius: var(--radius);
 }
+
+html[data-theme="scc"] .summary-strip > div,
+html[data-theme="scc"] .gauge,
+html[data-theme="scc"] .stat-panel,
+html[data-theme="scc"] .net-panel,
+html[data-theme="scc"] .lps-panel,
+html[data-theme="scc"] .lps-loop,
+html[data-theme="scc"] .chart-plot,
+html[data-theme="scc"] .provision-app .network-table th,
+html[data-theme="scc"] .inv-group,
+html[data-theme="scc"] .provision-pane,
+html[data-theme="scc"] .provision-creds,
+html[data-theme="scc"] .lps-policy input,
+html[data-theme="scc"] .cluster-tools .field,
+html[data-theme="scc"] .range-bar button,
+html[data-theme="scc"] .range-custom input[type="datetime-local"] {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--rule);
+  color-scheme: light;
+}
+
+html[data-theme="scc"] .summary-strip span,
+html[data-theme="scc"] .summary-strip small,
+html[data-theme="scc"] .gauge h2,
+html[data-theme="scc"] .stat-panel h2,
+html[data-theme="scc"] .net-panel h2,
+html[data-theme="scc"] .gauge-foot span,
+html[data-theme="scc"] .gauge-detail,
+html[data-theme="scc"] .stat-panel dt,
+html[data-theme="scc"] .stat-panel small,
+html[data-theme="scc"] .stat-panel dd,
+html[data-theme="scc"] .chart-y span,
+html[data-theme="scc"] .chart-x,
+html[data-theme="scc"] .range-bar > span,
+html[data-theme="scc"] .range-bar em,
+html[data-theme="scc"] .lps-head h2,
+html[data-theme="scc"] .lps-loop h2,
+html[data-theme="scc"] .lps-policy p,
+html[data-theme="scc"] .lps-policy label,
+html[data-theme="scc"] .lps-field,
+html[data-theme="scc"] .lps-policy-pct,
+html[data-theme="scc"] .lps-field-hint,
+html[data-theme="scc"] .lps-rack-diff,
+html[data-theme="scc"] .lps-slot small,
+html[data-theme="scc"] .provision-app .network-count,
+html[data-theme="scc"] .provision-app .network-table th,
+html[data-theme="scc"] .provision-empty p,
+html[data-theme="scc"] .provision-empty span,
+html[data-theme="scc"] .prov-tree em,
+html[data-theme="scc"] .inv-group,
+html[data-theme="scc"] .inv-leaf td:first-child,
+html[data-theme="scc"] .field-label,
+html[data-theme="scc"] .cluster-tabs button {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .provision-empty span,
+html[data-theme="scc"] .summary-strip span,
+html[data-theme="scc"] .gauge-foot span,
+html[data-theme="scc"] .stat-panel dt,
+html[data-theme="scc"] .stat-panel small,
+html[data-theme="scc"] .lps-policy p,
+html[data-theme="scc"] .lps-policy label {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .stat-panel dd b[data-k="on"],
+html[data-theme="scc"] .gauge-arc strong,
+html[data-theme="scc"] .summary-strip b,
+html[data-theme="scc"] .lps-sum-col b {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .cluster-tabs button[data-active="true"] {
+  color: var(--signal);
+  border-bottom-color: var(--signal);
+}
+
+html[data-theme="scc"] .range-bar button[data-active="true"] {
+  background: #eff6ff;
+  border-color: var(--signal);
+  color: var(--signal);
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+html[data-theme="scc"] .gauge-arc path:first-of-type {
+  stroke: #dbe3ee;
+}
+
+html[data-theme="scc"] .gauge-arc path:last-of-type {
+  stroke: #2563eb;
+}
+
+html[data-theme="scc"] .net-grid {
+  stroke: #dbe3ee;
+}
+
+html[data-theme="scc"] .net-tick {
+  fill: var(--steel);
+}
+
+html[data-theme="scc"] .net-line-tx {
+  stroke: #2563eb;
+}
+
+html[data-theme="scc"] .net-fill-tx {
+  fill: rgba(37, 99, 235, 0.16);
+}
+
+html[data-theme="scc"] .net-line-rx {
+  stroke: #0f766e;
+}
+
+html[data-theme="scc"] .net-fill-rx {
+  fill: rgba(15, 118, 110, 0.12);
+}
+
+html[data-theme="scc"] .disk-line-w {
+  stroke: var(--steel);
+}
+
+html[data-theme="scc"] .lps-stack {
+  background: #e8eef6;
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .lps-policy-mark {
+  border-top-color: #64748b;
+}
+
+html[data-theme="scc"] .lps-stack[data-denied="true"] {
+  background: repeating-linear-gradient(-45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px);
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .provision-app .network-table th,
+html[data-theme="scc"] .inv-group {
+  background: #f1f5f9;
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .provision-app .network-table td {
+  color: var(--ink);
+  border-bottom-color: var(--rule);
+}
+
+html[data-theme="scc"] .provision-empty p {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+html[data-theme="scc"] .lps-tip {
+  background: #fff;
+  border-color: var(--rule);
+  color: var(--ink);
+  box-shadow: var(--shadow-lift);
+}
+
+html[data-theme="scc"] .lps-panel[data-active="true"] {
+  border-color: var(--signal);
+}
+
+html[data-theme="scc"] .gauge-foot,
+html[data-theme="scc"] .provision-col,
+html[data-theme="scc"] .provision-pane {
+  border-color: var(--rule);
+}
+
