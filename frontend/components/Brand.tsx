@@ -3,7 +3,7 @@
 import { useUiTheme } from "@/lib/ui-theme";
 
 const MARK = "/brand/l12-mark.png";
-const SCC_MARK = "/brand/supermicro.png";
+const SCC_MARK = "/brand/supermicro.svg";
 
 export function BrandLockup({ width = 260 }: { width?: number }) {
   const { theme, productName } = useUiTheme();

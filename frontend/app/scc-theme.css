@@ -56,16 +56,16 @@ html[data-theme="scc"] .brand-l12 {
 }
 
 html[data-theme="scc"] .brand-mark {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
 }
 
 html[data-theme="scc"] .brand-mark .brand-scc-logo,
 html[data-theme="scc"] .brand-scc-logo {
-  width: 11.2rem;
-  height: auto;
-  max-width: 100%;
+  width: auto;
+  height: 1.55rem;
+  max-width: 7.4rem;
   object-fit: contain;
   background: none;
   padding: 0;
@@ -73,9 +73,9 @@ html[data-theme="scc"] .brand-scc-logo {
 }
 
 html[data-theme="scc"] .brand-hero .brand-scc-logo {
-  width: min(18rem, 100%);
+  width: min(13.5rem, 100%);
   height: auto;
-  max-width: 18rem;
+  max-width: 13.5rem;
   background: none;
   padding: 0;
   border-radius: 0;
