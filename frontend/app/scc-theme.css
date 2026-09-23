@@ -365,9 +365,22 @@ html[data-theme="scc"] .lps-stack[data-denied="true"] {
 }
 
 html[data-theme="scc"] .provision-app .network-table th,
-html[data-theme="scc"] .inv-group {
-  background: #f1f5f9;
-  color: var(--ink);
+html[data-theme="scc"] .inv-group,
+html[data-theme="scc"] .inv-parent {
+  background: #e8eef6 !important;
+  color: var(--ink) !important;
+}
+
+html[data-theme="scc"] .inv-parent:hover,
+html[data-theme="scc"] .inv-group:hover {
+  background: #dbe7f4 !important;
+}
+
+html[data-theme="scc"] .inv-parent td,
+html[data-theme="scc"] .inv-group td,
+html[data-theme="scc"] .inv-parent em,
+html[data-theme="scc"] .inv-grand {
+  color: var(--ink) !important;
 }
 
 html[data-theme="scc"] .provision-app .network-table td {
