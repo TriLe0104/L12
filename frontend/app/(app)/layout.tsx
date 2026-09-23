@@ -51,7 +51,7 @@ const IconUser = () => (
 
 const navFor = (user: User | null) => [
   { href: "/cluster", label: "Cluster", icon: <IconCluster /> },
-  { href: "/maxlps", label: "Dynamic Power Mode", icon: <IconLps /> },
+  { href: "/maxlps", label: "Dynamic Power", icon: <IconLps /> },
   { href: "/network", label: "Network", icon: <IconNet /> },
   { href: "/provision", label: "Provision", icon: <IconProv /> },
   { href: "/testing", label: "Testing", icon: <IconTest /> },

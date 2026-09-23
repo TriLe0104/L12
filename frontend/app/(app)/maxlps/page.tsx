@@ -191,7 +191,7 @@ export default function MaxLpsPage() {
       }
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Dynamic Power Mode failed");
+      setError(err instanceof Error ? err.message : "Dynamic Power failed");
     }
   }, [rackId]);
 
@@ -433,7 +433,7 @@ export default function MaxLpsPage() {
           <p className="maxlps-kicker">
             {power?.mode === "static" ? "Monitoring · GPUs at max cap" : "Closed-loop GPU power"}
           </p>
-          <h1>Dynamic Power Mode</h1>
+          <h1>Dynamic Power</h1>
           <p>
             {topo
               ? `${topo.model} · ${topo.racks} racks · ${topo.nodes_per_rack} nodes/rack · ${topo.gpus_per_node} GPU/node · ${topo.gpu_count.toLocaleString()} GPU · TDP ${formatW(topo.gpu_tdp_w)}`
@@ -454,7 +454,7 @@ export default function MaxLpsPage() {
             Static
           </button>
           <button type="button" data-active={power?.mode === "dynamic"} disabled={locked} onClick={() => setMode("dynamic")}>
-            Dynamic Power Mode
+            Dynamic Power
           </button>
           <button type="button" disabled={locked} onClick={() => setMode("dynamic", true)}>
             Replay
@@ -674,7 +674,7 @@ export default function MaxLpsPage() {
                 <p>{hop?.connected ? "No GPU power readings yet" : "PXE hop is not connected"}</p>
                 <span>
                   {hop?.connected
-                    ? "Dynamic Power Mode only shows BMC EnvironmentMetrics. Wait for the next poll, or reopen hop if the jump dropped."
+                    ? "Dynamic Power only shows BMC EnvironmentMetrics. Wait for the next poll, or reopen hop if the jump dropped."
                     : "GPU bars stay empty until this API can SSH to the PXE host and read Redfish on 10.10.x."}
                 </span>
                 {!hop?.connected && mayEdit ? (
@@ -702,7 +702,7 @@ export default function MaxLpsPage() {
             <>
               <h2>{power?.mode === "static" ? "Monitor" : "Control loop"}</h2>
               {power?.mode === "static" ? (
-                <p className="lps-event">Dynamic Power Mode off — caps restored to BMC AllowableMax. Redfish watts still update.</p>
+                <p className="lps-event">Dynamic Power off — caps restored to BMC AllowableMax. Redfish watts still update.</p>
               ) : null}
               {power ? (
                 <PowerPolicyFields
@@ -773,7 +773,7 @@ export default function MaxLpsPage() {
           onConfirm={() => void connectHop()}
         >
           <p className="widget-meta" style={{ margin: "0 0 0.6rem" }}>
-            Dynamic Power Mode reads GPU watts from BMC Redfish on 10.10.x. SSH to the PXE host first. Password stays in this API process only.
+            Dynamic Power reads GPU watts from BMC Redfish on 10.10.x. SSH to the PXE host first. Password stays in this API process only.
           </p>
           <label>
             PXE IP

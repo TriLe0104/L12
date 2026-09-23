@@ -491,10 +491,10 @@ export default function ClusterPage() {
           )}
           {power && (
             <aside className="lps-hud" aria-label="Power limiter">
-              <div className="lps-hud-kicker">{power.mode === "dynamic" ? "Dynamic Power Mode" : "Static"}</div>
+              <div className="lps-hud-kicker">{power.mode === "dynamic" ? "Dynamic Power" : "Static"}</div>
               <strong>{formatKw(power.active.consumed_kw)}</strong>
               <span className="lps-hud-sub">
-                {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · static {power.racks_static_max ?? 0} · Dynamic Power Mode {power.racks_lps_max ?? 0}{power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW
+                {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · static {power.racks_static_max ?? 0} · Dynamic Power {power.racks_lps_max ?? 0}{power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW
               </span>
               <dl>
                 <div>
@@ -528,7 +528,7 @@ export default function ClusterPage() {
                   data-active={power.mode === "dynamic"}
                   onClick={() => api.patchClusterPower({ mode: "dynamic" }).then(setPower)}
                 >
-                  Dynamic Power Mode
+                  Dynamic Power
                 </button>
                 <button type="button" onClick={() => api.patchClusterPower({ mode: "dynamic", reset: true }).then(setPower)}>
                   Replay
