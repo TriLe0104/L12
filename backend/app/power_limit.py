@@ -501,7 +501,7 @@ def _seed_from_static(static_rows: list[RackAlloc]) -> None:
     avg = next((r.allocated_kw for r in static_rows if r.enabled), 0.0)
     STATE.last_event = (
         f"Static {n_static_cap()} racks at {avg:.0f} kW · "
-        f"MaxLPS {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
+        f"Dynamic Power Mode {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
     )
     STATE.last_step = 0.0
 
@@ -617,17 +617,17 @@ def _step(samples: list[Sample], budget_kw: float) -> float:
     if added:
         STATE.last_event = (
             f"Enabled {added} extra racks from leftover envelope · "
-            f"{len(STATE.pool_ids)} of {n_lps_cap()} MaxLPS racks"
+            f"{len(STATE.pool_ids)} of {n_lps_cap()} Dynamic Power Mode racks"
         )
     elif boosted:
         STATE.last_event = (
             f"Reallocated slack to {boosted} racks · "
-            f"static {n_static_cap()} · MaxLPS {n_lps_cap()}"
+            f"static {n_static_cap()} · Dynamic Power Mode {n_lps_cap()}"
         )
     elif hot_total and held_hot == hot_total:
         STATE.last_event = (
             f"Held {hot_total} hot racks at {STATE.max_rack_kw:.0f} kW cap · "
-            f"static {n_static_cap()} · MaxLPS {n_lps_cap()}"
+            f"static {n_static_cap()} · Dynamic Power Mode {n_lps_cap()}"
         )
 
     STATE.tick += 1
@@ -773,7 +773,7 @@ def apply_patch(
         STATE.budget_kw = None
         STATE.last_event = (
             f"Static {n_static_cap()} racks at {rack_policy_kw():.0f} kW · "
-            f"MaxLPS {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
+            f"Dynamic Power Mode {n_lps_cap()} racks [{rack_min_kw():.0f}–{STATE.max_rack_kw:.0f}] kW"
         )
         STATE.last_step = 0.0
 

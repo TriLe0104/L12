@@ -218,7 +218,7 @@ function SummaryBars({
   const pool = racks.filter((r) => r.enabled);
   const cols = [
     { key: "used", label: "Usage", kw: used, hint: "Power the workloads are drawing" },
-    { key: "avail", label: "Available", kw: available, hint: "Allocated on racks but not consumed — MaxLPS can move this" },
+    { key: "avail", label: "Available", kw: available, hint: "Allocated on racks but not consumed — Dynamic Power Mode can move this" },
     { key: "float", label: "Room to max", kw: floating, hint: "Still under max kW/rack — can land on these racks" },
   ];
   return (
@@ -616,8 +616,8 @@ export function PowerLimiterPanel({
   const gain = data.racks_lps_gain ?? Math.max(0, nLps - nStatic);
   const extraLabel =
     extraN > 0
-      ? `${extraN} extra rack${extraN === 1 ? "" : "s"} vs static · ${data.dynamic.racks_enabled ?? 0} of ${nLps} MaxLPS`
-      : `MaxLPS ${nLps} racks vs static ${nStatic}${gain > 0 ? ` · +${gain}` : ""}`;
+      ? `${extraN} extra rack${extraN === 1 ? "" : "s"} vs static · ${data.dynamic.racks_enabled ?? 0} of ${nLps} Dynamic Power Mode`
+      : `Dynamic Power Mode ${nLps} racks vs static ${nStatic}${gain > 0 ? ` · +${gain}` : ""}`;
   const maxKw = data.max_rack_kw ?? data.rack_hard_kw ?? 300;
   const minKw = data.min_rack_kw ?? 40;
   const envelope = data.envelope_kw ?? ((data.total_budget_kw ?? 0) * (data.threshold_pct ?? data.stay_under_pct ?? 80)) / 100;
@@ -638,7 +638,7 @@ export function PowerLimiterPanel({
         <div>
           <strong>Closed-loop power limiter</strong>
           <span>
-            {formatKw(data.total_budget_kw ?? data.budget_kw)} × {Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)}% · static {nStatic} · MaxLPS {nLps}
+            {formatKw(data.total_budget_kw ?? data.budget_kw)} × {Math.round(data.threshold_pct ?? data.stay_under_pct ?? 80)}% · static {nStatic} · Dynamic Power Mode {nLps}
             {gain > 0 ? ` (+${gain})` : ""} · [{Math.round(minKw)}–{Math.round(maxKw)}] kW
           </span>
         </div>
@@ -652,7 +652,7 @@ export function PowerLimiterPanel({
             disabled={locked}
             onClick={() => setMode("dynamic")}
           >
-            MaxLPS
+            Dynamic Power Mode
           </button>
           <button type="button" disabled={locked} onClick={() => setMode("dynamic", true)}>
             Replay
@@ -683,8 +683,8 @@ export function PowerLimiterPanel({
 
       <article className="lps-panel" data-kind="dyn" data-active={data.mode === "dynamic"}>
         <Totals
-          title="MaxLPS dynamic allocation"
-          kicker={`${data.dynamic.racks_enabled ?? 0} of ${nLps} MaxLPS racks · +${gain} vs static ${nStatic} · ${formatKw(envelope)} envelope`}
+          title="Dynamic Power Mode allocation"
+          kicker={`${data.dynamic.racks_enabled ?? 0} of ${nLps} Dynamic Power Mode racks · +${gain} vs static ${nStatic} · ${formatKw(envelope)} envelope`}
           used={dynUsed}
           available={dynAvail}
           floating={dynFloat}

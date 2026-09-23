@@ -91,8 +91,8 @@ export function MaxLpsInventoryPanel({
       </header>
       <p>
         {inventory.source === "inventory"
-          ? `${inventory.count} rack${inventory.count === 1 ? "" : "s"} in MaxLPS · ${inventory.layout.nodes_per_rack} nodes · ${inventory.layout.gpus_per_rack} GPU · ${inventory.layout.shelves_per_rack} PS`
-          : "Board still uses floor-plan simulation. Sync or add a rack to switch MaxLPS to this inventory."}
+          ? `${inventory.count} rack${inventory.count === 1 ? "" : "s"} in Dynamic Power Mode · ${inventory.layout.nodes_per_rack} nodes · ${inventory.layout.gpus_per_rack} GPU · ${inventory.layout.shelves_per_rack} PS`
+          : "Board still uses floor-plan simulation. Sync or add a rack to switch Dynamic Power Mode to this inventory."}
       </p>
       {syncNote ? <p>{syncNote}</p> : null}
       <div className="maxlps-inv-actions">

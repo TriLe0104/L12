@@ -31,7 +31,7 @@
   --tone-purple: #6d28d9;
 
   --rail-w: 3.6rem;
-  --rail-open: 14.5rem;
+  --rail-open: 16.5rem;
   --card-min: 18rem;
   /* the detail drawer's width, and below it the width the card inside actually
      gets: the drawer less .drawer-body's padding and the drawer's own border.
