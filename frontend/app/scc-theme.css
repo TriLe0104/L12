@@ -55,8 +55,22 @@ html[data-theme="scc"] .brand-l12 {
   letter-spacing: -0.03em;
 }
 
-html[data-theme="scc"] .brand-scc-mark {
-  color: #fff;
+html[data-theme="scc"] .brand-scc-logo {
+  width: auto;
+  height: 1.65rem;
+  max-width: 8.8rem;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 4px;
+  padding: 0.18rem 0.4rem;
+}
+
+html[data-theme="scc"] .brand-hero .brand-scc-logo {
+  width: min(16rem, 100%);
+  height: auto;
+  max-width: 16rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 8px;
 }
 
 html[data-theme="scc"] .nav-link {
