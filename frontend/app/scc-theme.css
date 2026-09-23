@@ -1,0 +1,230 @@
+/* SCC Mode — light SMC-style shell. Features and layout stay the same. */
+html[data-theme="scc"] {
+  --ink: #1e293b;
+  --ink-soft: #334155;
+  --steel: #64748b;
+  --steel-soft: #94a3b8;
+  --paper: #eef2f7;
+  --panel: #ffffff;
+  --field-bg: #ffffff;
+  --rule: #dbe3ee;
+  --rule-soft: #e8eef6;
+  --signal: #1d4ed8;
+  --signal-wash: rgba(29, 78, 216, 0.1);
+  --signal-soft: rgba(29, 78, 216, 0.16);
+  --signal-ring: rgba(29, 78, 216, 0.28);
+  --signal-ring-strong: rgba(29, 78, 216, 0.55);
+  --silver: #64748b;
+  --go: #16a34a;
+  --stop: #dc2626;
+  --rail-bg: #0d3b7a;
+  --rail-ink: #dbeafe;
+  --radius: 8px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px -16px rgba(15, 23, 42, 0.18);
+  --shadow-lift: 0 10px 28px -18px rgba(15, 23, 42, 0.28);
+}
+
+html[data-theme="scc"] body {
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image: linear-gradient(180deg, #f4f7fb 0%, #e8eef6 100%);
+}
+
+html[data-theme="scc"] .shell,
+html[data-theme="scc"] .shell:has(.rail:hover),
+html[data-theme="scc"] .shell:has(.rail:focus-within) {
+  grid-template-columns: var(--rail-open) minmax(0, 1fr);
+}
+
+html[data-theme="scc"] .rail {
+  color: var(--rail-ink);
+  background: linear-gradient(180deg, #0f4aa0 0%, #0b3270 100%);
+  border-right: 0;
+}
+
+html[data-theme="scc"] .brand-word,
+html[data-theme="scc"] .brand-sub,
+html[data-theme="scc"] .nav-label,
+html[data-theme="scc"] .rail-user {
+  opacity: 1;
+}
+
+html[data-theme="scc"] .brand-l12 {
+  color: #fff;
+  font-size: 0.92rem;
+  letter-spacing: -0.03em;
+}
+
+html[data-theme="scc"] .brand-scc-mark {
+  color: #fff;
+}
+
+html[data-theme="scc"] .nav-link {
+  color: #c7ddff;
+  border-left-color: transparent;
+  border-radius: 8px;
+}
+
+html[data-theme="scc"] .nav-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transform: none;
+}
+
+html[data-theme="scc"] .nav-link[data-active="true"] {
+  background: rgba(255, 255, 255, 0.16);
+  border-left-color: #fff;
+  color: #fff;
+}
+
+html[data-theme="scc"] .rail-foot {
+  border-top-color: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme="scc"] .rail-user b {
+  color: #fff;
+}
+
+html[data-theme="scc"] .icon-btn {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #dbeafe;
+}
+
+html[data-theme="scc"] .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+html[data-theme="scc"] .btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-card);
+}
+
+html[data-theme="scc"] .btn-primary:hover:not(:disabled) {
+  background: #1e40af;
+  border-color: #1e40af;
+  box-shadow: 0 0 0 3px var(--signal-ring);
+}
+
+html[data-theme="scc"] .maxlps-page,
+html[data-theme="scc"] .cluster-app,
+html[data-theme="scc"] .provision-app,
+html[data-theme="scc"] .network-app,
+html[data-theme="scc"] .testing-page,
+html[data-theme="scc"] .ui-settings {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .cluster-toolbar,
+html[data-theme="scc"] .maxlps-head,
+html[data-theme="scc"] .provision-app .cluster-kicker {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .cluster-toolbar,
+html[data-theme="scc"] .maxlps-loop,
+html[data-theme="scc"] .maxlps-shelves,
+html[data-theme="scc"] .maxlps-gpus,
+html[data-theme="scc"] .maxlps-stats article,
+html[data-theme="scc"] .maxlps-mix,
+html[data-theme="scc"] .maxlps-shelf,
+html[data-theme="scc"] .maxlps-gpu,
+html[data-theme="scc"] .maxlps-inspect,
+html[data-theme="scc"] .lps-panel,
+html[data-theme="scc"] .lps-hud,
+html[data-theme="scc"] .network-table-wrap,
+html[data-theme="scc"] .test-cats > *,
+html[data-theme="scc"] .provision-drawer,
+html[data-theme="scc"] .provision-pane,
+html[data-theme="scc"] .theme-dialog {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--rule);
+  box-shadow: var(--shadow-card);
+}
+
+html[data-theme="scc"] .lps-modes button,
+html[data-theme="scc"] .lps-hud-modes button {
+  background: #f8fafc;
+  color: var(--steel);
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .lps-modes button[data-active="true"],
+html[data-theme="scc"] .lps-hud-modes button[data-active="true"] {
+  border-color: var(--signal);
+  color: var(--signal);
+  box-shadow: inset 0 -2px 0 var(--signal);
+  background: #eff6ff;
+}
+
+html[data-theme="scc"] .maxlps-shelf-bar i[data-k="ps"][data-band="under"],
+html[data-theme="scc"] .maxlps-mix-bar > i[data-k="used"][data-band="under"] {
+  background: #22c55e;
+}
+
+html[data-theme="scc"] .login-art {
+  color: #eef4ff;
+  background: linear-gradient(165deg, #0f4aa0 0%, #0b3270 62%, #082456 100%);
+}
+
+html[data-theme="scc"] .login-art::before {
+  background:
+    radial-gradient(30rem 24rem at 32% 30%, rgba(255, 255, 255, 0.16), transparent 64%),
+    radial-gradient(26rem 22rem at 72% 68%, rgba(56, 189, 248, 0.18), transparent 66%);
+}
+
+html[data-theme="scc"] .login-art::after {
+  background: radial-gradient(120% 92% at 50% 0%, transparent 42%, rgba(8, 36, 86, 0.45) 100%);
+}
+
+html[data-theme="scc"] .login-form {
+  background: #fff;
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .brand-hero-mark,
+html[data-theme="scc"] .brand-hero .brand-scc-mark {
+  width: 5.5rem;
+  height: 5.5rem;
+  color: #fff;
+  filter: none;
+}
+
+html[data-theme="scc"] .brand-hero .brand-l12 {
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  color: #fff;
+}
+
+html[data-theme="scc"] .cluster-error {
+  color: #b91c1c;
+}
+
+html[data-theme="scc"] .provision-kvm-frame,
+html[data-theme="scc"] .kvm-frame {
+  background: #000;
+  color: #f5f5f5;
+}
+
+html[data-theme="scc"] .maxlps-gpu-cols button,
+html[data-theme="scc"] .network-table th,
+html[data-theme="scc"] .network-table td,
+html[data-theme="scc"] .maxlps-detail,
+html[data-theme="scc"] .cluster-kicker {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .maxlps-gpu-list,
+html[data-theme="scc"] .maxlps-shelf-list,
+html[data-theme="scc"] .cluster-canvas,
+html[data-theme="scc"] .network-app .network-table-wrap {
+  background: var(--panel);
+}
+
+html[data-theme="scc"] .maxlps-stats article,
+html[data-theme="scc"] .lps-hud {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}

@@ -48,6 +48,17 @@ const IconUser = () => (
     <path d="M5 19c1.2-3.4 3.6-5 7-5s5.8 1.6 7 5" fill="none" stroke="currentColor" strokeWidth="1.7" />
   </svg>
 );
+const IconGear = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.7" />
+    <path
+      d="M12 3.5 13.2 6l2.6.4 1.5 2.2-.8 2.5 1.6 2.1-1.6 2.1.8 2.5-1.5 2.2-2.6.4L12 20.5 10.8 18l-2.6-.4-1.5-2.2.8-2.5L5.9 10.8l1.6-2.1-.8-2.5L8.2 6.4l2.6-.4z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    />
+  </svg>
+);
 
 const navFor = (user: User | null) => [
   { href: "/cluster", label: "Cluster", icon: <IconCluster /> },
@@ -55,6 +66,7 @@ const navFor = (user: User | null) => [
   { href: "/network", label: "Network", icon: <IconNet /> },
   { href: "/provision", label: "Provision", icon: <IconProv /> },
   { href: "/testing", label: "Testing", icon: <IconTest /> },
+  { href: "/settings", label: "Settings", icon: <IconGear /> },
   { href: "/users", label: canAdministerPeople(user) ? "Users" : "Profile", icon: <IconUser /> },
 ];
 

@@ -6,8 +6,11 @@
   --steel-soft: #6e6e6e;
   --paper: #070707;
   --panel: #111111;
+  --field-bg: #141414;
   --rule: rgba(255, 255, 255, 0.1);
   --rule-soft: rgba(255, 255, 255, 0.06);
+  --rail-bg: #080808;
+  --rail-ink: #cdd6df;
 
   --signal: #e10600;
   --signal-wash: rgba(225, 6, 0, 0.14);
@@ -125,7 +128,8 @@ textarea {
   min-width: max-content;
 }
 
-.brand-mark img {
+.brand-mark img,
+.brand-mark .brand-scc-mark {
   display: block;
   width: 2rem;
   height: 2rem;
@@ -195,8 +199,8 @@ textarea {
   gap: 4px;
   padding: 14px 10px 12px;
   color: #cdd6df;
-  background: #080808;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--rail-bg);
+  border-right: 1px solid var(--rule-soft);
   z-index: 6;
 }
 
@@ -461,8 +465,8 @@ textarea {
   height: 2.15rem;
   border-radius: var(--radius);
   border: 1px solid var(--rule);
-  background: #141414;
-  color: #f5f5f5;
+  background: var(--field-bg);
+  color: var(--ink);
   padding: 0 0.625rem;
   font-size: 0.82rem;
   max-width: 100%;

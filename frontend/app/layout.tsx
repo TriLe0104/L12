@@ -1,9 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { Archivo, IBM_Plex_Mono } from "next/font/google";
+import Script from "next/script";
 
 import "./globals.css";
+import "./scc-theme.css";
 import { AuthProvider } from "@/lib/auth";
 import { ClawRevealProvider } from "@/components/ClawReveal";
+import { ThemeProvider } from "@/lib/ui-theme";
 import { RegisterSW } from "./register-sw";
 
 const ui = Archivo({
@@ -44,11 +47,16 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${ui.variable} ${mono.variable}`}>
+    <html lang="en" className={`${ui.variable} ${mono.variable}`} data-theme="meow">
       <body>
-        <ClawRevealProvider>
-          <AuthProvider>{children}</AuthProvider>
-        </ClawRevealProvider>
+        <Script id="ui-theme-boot" strategy="beforeInteractive">
+          {`try{var t=localStorage.getItem('l12-ui-theme');if(t==='scc'||t==='meow'){document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t==='scc'?'light':'dark'}}catch(e){}`}
+        </Script>
+        <ThemeProvider>
+          <ClawRevealProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </ClawRevealProvider>
+        </ThemeProvider>
         <RegisterSW />
       </body>
     </html>
