@@ -52,15 +52,16 @@ services:
     build:
       context: ./frontend
       args:
-        API_PROXY: http://127.0.0.1:8001
+        API_PROXY: http://host.docker.internal:8001
         NEXT_PUBLIC_API_BASE: ""
-    # Same host stack as the API so Next can proxy /api → :8001 without
-    # host.docker.internal. Browser only talks to :3333 (same-origin login).
-    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      API_PROXY: http://127.0.0.1:8001
-      PORT: "3333"
+      API_PROXY: http://host.docker.internal:8001
+      PORT: "3000"
     command: ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
+    ports:
+      - "3333:3000"
     depends_on:
       - api
 
