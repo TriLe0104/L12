@@ -633,3 +633,20 @@ html[data-theme="scc"] .cluster-canvas-pending {
   background: var(--paper);
 }
 
+html[data-theme="scc"] .theme-dialog-body .field {
+  background: var(--field-bg);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+html[data-theme="scc"] .theme-dialog-body label,
+html[data-theme="scc"] .theme-dialog-hint,
+html[data-theme="scc"] .theme-dialog-body p,
+html[data-theme="scc"] .theme-dialog-body .widget-meta {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .theme-dialog-body p b {
+  color: var(--ink);
+}
+

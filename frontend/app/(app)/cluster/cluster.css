@@ -1079,14 +1079,14 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #8a8a8a;
+  color: var(--steel);
 }
 
 .theme-dialog-body .field {
   width: 100%;
-  background: var(--panel);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--field-bg);
+  color: var(--ink);
+  border: 1px solid var(--hair-strong);
 }
 
 .theme-dialog-row {
@@ -1098,7 +1098,7 @@
 .theme-dialog-hint,
 .theme-dialog-body p {
   margin: 0;
-  color: #9a9a9a;
+  color: var(--steel);
   font-size: 0.82rem;
   font-weight: 400;
   letter-spacing: 0;
@@ -1106,7 +1106,7 @@
 }
 
 .theme-dialog-body p b {
-  color: #fff;
+  color: var(--ink);
 }
 
 .theme-dialog-actions {
