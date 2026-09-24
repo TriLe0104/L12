@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { Avatar } from "@/components/Avatar";
 import { BrandMark } from "@/components/Brand";
 import { canAdministerPeople, useAuth } from "@/lib/auth";
+import { useUiTheme } from "@/lib/ui-theme";
 import type { User } from "@/lib/types";
 import "@/app/scc-theme.css";
 
@@ -71,14 +72,31 @@ const navFor = (user: User | null) => [
   { href: "/users", label: canAdministerPeople(user) ? "Users" : "Profile", icon: <IconUser /> },
 ];
 
+const SCC_NAV = new Set(["/cluster", "/maxlps", "/provision", "/settings", "/users"]);
+
+function isSccTheme(theme: string) {
+  if (theme === "scc") return true;
+  if (typeof document === "undefined") return false;
+  return document.documentElement.getAttribute("data-theme") === "scc";
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
+  const { theme } = useUiTheme();
   const pathname = usePathname();
   const router = useRouter();
+  const items = navFor(user);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!user || !isSccTheme(theme)) return;
+    if (![...SCC_NAV].some((href) => pathname.startsWith(href))) {
+      router.replace("/maxlps");
+    }
+  }, [theme, user, pathname, router]);
 
   if (loading || !user) {
     return <div className="empty">Loading…</div>;
@@ -91,12 +109,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <BrandMark size={32} />
         </div>
 
-        {navFor(user).map((item) => (
+        {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}
             className="nav-link"
             data-active={pathname.startsWith(item.href)}
+            data-scc-hide={SCC_NAV.has(item.href) ? undefined : "true"}
             title={item.label}
           >
             <span className="nav-ico">{item.icon}</span>

@@ -32,6 +32,10 @@ export interface ClusterRack {
   mem_pct: number;
   power_pct: number;
   power_kw: number;
+  serial?: string | null;
+  bmc_ip?: string | null;
+  os_ip?: string | null;
+  bmc_mac?: string | null;
   created_at: string;
   updated_at: string;
   devices: ClusterDevice[];
@@ -66,6 +70,7 @@ export interface Campus {
   name: string;
   telemetry: Telemetry;
   halls: HallDetail[];
+  source?: "inventory" | "floor" | string;
 }
 
 export interface ClusterOverview {
@@ -436,12 +441,25 @@ export interface FabricPort {
 
 export interface ClusterMetrics {
   name: string;
+  source?: "inventory" | "floor" | string;
+  sensors?: {
+    power?: boolean;
+    gpu?: boolean;
+    cpu?: boolean;
+    mem?: boolean;
+    fabric?: boolean;
+    disk?: boolean;
+  };
   now: {
     cpu_pct: number;
     gpu_pct: number;
     mem_pct: number;
     power_kw: number;
     power_pct: number;
+    gpu_kw?: number;
+    gpu_tdp_kw?: number;
+    envelope_kw?: number;
+    available_kw?: number;
     tx_gbps: number;
     rx_gbps: number;
     disk_pct: number;
@@ -454,6 +472,7 @@ export interface ClusterMetrics {
     gpu: number;
     mem: number;
     power_kw: number;
+    gpu_kw?: number;
     tx_gbps: number;
     rx_gbps: number;
     disk_pct: number;
@@ -470,6 +489,8 @@ export interface ClusterMetrics {
     racks_on?: number;
     compute_nodes?: number;
     compute_on?: number;
+    gpus_per_node?: number;
+    nodes_per_rack?: number;
     spines?: number;
     leaves?: number;
     switches?: number;
@@ -636,6 +657,7 @@ export interface PowerRack {
   at_cap?: boolean;
   action: PowerAction;
   gap_pct: number | null;
+  meter_source?: string;
 }
 
 export interface PowerSummary {

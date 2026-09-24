@@ -1,0 +1,354 @@
+.pod-board {
+  --pod-fill: #e8b048;
+  --pod-track: var(--track);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.overview-dash .pod-board {
+  padding: 0;
+}
+
+.pod-infra {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  height: 100%;
+  padding: 0.4rem 0.5rem 0.45rem;
+  background: var(--panel);
+  border: 1px solid var(--hair);
+}
+
+.pod-infra-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.pod-infra-head h2 {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #c4c4c4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pod-board-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 1.45rem;
+  padding: 0 0.5rem;
+  border-radius: 2px;
+  border: 1px solid var(--hair);
+  background: var(--panel);
+  color: var(--steel);
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.pod-board-live i {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: #6e6e6e;
+}
+
+.pod-board-live[data-on="true"] {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.pod-board-live[data-on="true"] i {
+  background: #4ade80;
+}
+
+.pod-infra-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  min-width: 0;
+}
+
+.pod-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.pod-tabs button,
+.pod-view-toggle button {
+  flex: 0 0 auto;
+  height: 1.45rem;
+  padding: 0 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  background: var(--panel);
+  color: #9a9a9a;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pod-tabs button[data-on="true"],
+.pod-view-toggle button[data-on="true"] {
+  border-color: var(--signal);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+.pod-view-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  gap: 0.28rem;
+}
+
+.pod-view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.pod-view-toggle button svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.pod-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pod-grid[data-single="true"] {
+  grid-template-columns: 1fr;
+}
+
+.pod-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.45rem 0.55rem 0.4rem;
+  border: 1px solid var(--hair);
+  background: var(--panel);
+}
+
+.pod-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pod-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.pod-card h3 svg,
+.pod-card header small svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.pod-card header small {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 0.12rem;
+  color: #8a8a8a;
+  font-size: 0.58rem;
+}
+
+.pod-card-sum {
+  text-align: right;
+}
+
+.pod-card-sum b {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.pod-card-sum small {
+  display: block;
+  margin-top: 0.08rem;
+  color: #8a8a8a;
+  font-size: 0.58rem;
+}
+
+.pod-racks {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  min-height: 10.5rem;
+}
+
+.pod-rack {
+  flex: 1 1 3.4rem;
+  min-width: 3.2rem;
+  max-width: 4.6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.18rem;
+}
+
+.pod-rack-bar,
+.pod-rack-devices {
+  position: relative;
+  width: 100%;
+  height: 8.2rem;
+  border: 1px solid var(--hair);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.pod-rack-bar span {
+  position: absolute;
+  top: 0.3rem;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #c4c4c4;
+}
+
+.pod-rack-bar > i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--pod-fill);
+}
+
+.pod-rack[data-partial="true"] .pod-rack-bar {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--track),
+    var(--track) 5px,
+    color-mix(in srgb, var(--ink) 8%, var(--track)) 5px,
+    color-mix(in srgb, var(--ink) 8%, var(--track)) 10px
+  );
+}
+
+.pod-rack[data-partial="true"] .pod-rack-bar > i {
+  opacity: 0.28;
+}
+
+.pod-rack-ghost {
+  position: absolute;
+  top: 42%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  text-align: center;
+  font-size: 0.55rem;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+}
+
+.pod-rack-id {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+  font-size: 0.5rem;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #8a8a8a;
+  text-align: center;
+  word-break: break-all;
+}
+
+.pod-rack > b {
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pod-rack-devices {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.12rem;
+  padding: 0.2rem;
+  align-content: end;
+}
+
+.pod-rack-devices i {
+  display: block;
+  align-self: end;
+  min-height: 12%;
+  background: var(--pod-fill);
+}
+
+.pod-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--hair);
+  color: #8a8a8a;
+  font-size: 0.58rem;
+}
+
+.pod-card footer div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pod-card footer div:last-child {
+  text-align: right;
+}
+
+.pod-empty {
+  margin: 1.2rem 0;
+  text-align: center;
+  color: #8a8a8a;
+}
+
+@media (max-width: 1200px) {
+  .pod-grid {
+    grid-template-columns: 1fr;
+  }
+  .pod-infra-bar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 720px) {
+  .pod-rack-bar,
+  .pod-rack-devices {
+    height: 6.4rem;
+  }
+  .pod-racks {
+    min-height: 8.5rem;
+  }
+}

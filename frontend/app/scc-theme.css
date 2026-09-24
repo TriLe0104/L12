@@ -78,6 +78,10 @@ html[data-theme="scc"] .nav-link {
   border-radius: 8px;
 }
 
+html[data-theme="scc"] .nav-link[data-scc-hide="true"] {
+  display: none;
+}
+
 html[data-theme="scc"] .nav-link:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
@@ -496,5 +500,136 @@ html[data-theme="scc"] .gauge-foot,
 html[data-theme="scc"] .provision-col,
 html[data-theme="scc"] .provision-pane {
   border-color: var(--rule);
+}
+
+html[data-theme="scc"] .pod-board {
+  --pod-fill: #c98512;
+  --pod-track: var(--track);
+}
+
+html[data-theme="scc"] .pod-infra,
+html[data-theme="scc"] .pod-card,
+html[data-theme="scc"] .pod-board-live,
+html[data-theme="scc"] .pod-tabs button,
+html[data-theme="scc"] .pod-view-toggle button {
+  background: var(--panel);
+  border-color: var(--rule);
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .pod-infra-head h2,
+html[data-theme="scc"] .pod-tabs button,
+html[data-theme="scc"] .pod-view-toggle button {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .pod-card h3,
+html[data-theme="scc"] .pod-card-sum b,
+html[data-theme="scc"] .pod-rack > b {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .pod-card header small,
+html[data-theme="scc"] .pod-card footer,
+html[data-theme="scc"] .pod-rack-id,
+html[data-theme="scc"] .pod-rack-ghost {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .pod-tabs button[data-on="true"],
+html[data-theme="scc"] .pod-view-toggle button[data-on="true"] {
+  border-color: var(--signal);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+html[data-theme="scc"] .pod-board-live[data-on="true"] {
+  color: #15803d;
+  border-color: rgba(21, 128, 61, 0.28);
+}
+
+html[data-theme="scc"] .pod-rack-bar,
+html[data-theme="scc"] .pod-rack-devices {
+  background: var(--track);
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .pod-rack-bar span {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .gauge-foot b,
+html[data-theme="scc"] .gauge-arc strong,
+html[data-theme="scc"] .stat-panel dd,
+html[data-theme="scc"] .stat-panel dd b {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .maxlps-stats article[data-free="ok"] b {
+  color: #15803d;
+}
+
+html[data-theme="scc"] .maxlps-stats article[data-free="over"] b,
+html[data-theme="scc"] .maxlps-stats article[data-lead="true"] b {
+  color: #b45309;
+}
+
+html[data-theme="scc"] .maxlps-stats article[data-free="over"] b {
+  color: #dc2626;
+}
+
+html[data-theme="scc"] .cluster-app .network-table-wrap,
+html[data-theme="scc"] .rack-board,
+html[data-theme="scc"] .rack-board-table,
+html[data-theme="scc"] .rack-drop td,
+html[data-theme="scc"] .node-drop,
+html[data-theme="scc"] .rack-panel,
+html[data-theme="scc"] .cluster-floor,
+html[data-theme="scc"] .lps-hud {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .rack-board .inv-row[data-sel="true"] {
+  background: var(--signal-wash);
+}
+
+html[data-theme="scc"] .rack-caret,
+html[data-theme="scc"] .node-meta dt,
+html[data-theme="scc"] .node-meta span,
+html[data-theme="scc"] .rack-panel-title span {
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .node-meta dd,
+html[data-theme="scc"] .cluster-app .network-table th,
+html[data-theme="scc"] .cluster-app .network-table td {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .rack-panel {
+  border-left-color: var(--rule);
+}
+
+html[data-theme="scc"] .rack-panel-head,
+html[data-theme="scc"] .rack-panel-head .icon-btn {
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+html[data-theme="scc"] .rack-panel-title strong,
+html[data-theme="scc"] .rack-name-field {
+  color: var(--signal);
+}
+
+html[data-theme="scc"] .lps-hud strong,
+html[data-theme="scc"] .lps-hud-kicker {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .cluster-canvas-pending {
+  color: var(--steel);
+  background: var(--paper);
 }
 

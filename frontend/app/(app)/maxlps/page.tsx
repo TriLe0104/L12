@@ -297,6 +297,7 @@ export default function MaxLpsPage() {
       ? view.totals.allowable_kw
       : availableKw * gpuFrac;
   const gpuLeftKw = gpuAvailKw - gpuUsedKw;
+  const rackHeadroomKw = availableKw - rackUsedKw;
   const overheadKw = useMemo(
     () => (view?.racks ?? []).reduce((s, r) => s + (r.overhead_kw || 0), 0),
     [view?.racks],
@@ -482,22 +483,6 @@ export default function MaxLpsPage() {
       <section className="maxlps-stats">
         <article data-lead="true">
           <span>Total rack</span>
-          <b>{formatRackKw(rackUsedKw)}</b>
-          <small>
-            {view?.totals?.shelf_source === "redfish"
-              ? "BMC PowerShelf total_power_out"
-              : view?.totals?.shelf_source === "argus"
-                ? "Argus TotalPowerOut (fallback)"
-                : "No PSU readings"}
-          </small>
-        </article>
-        <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
-          <span>GPU cap left</span>
-          <b>{formatRackKw(Math.max(0, gpuLeftKw))}</b>
-          <small>GPU share of envelope − live watts</small>
-        </article>
-        <article>
-          <span>Rack sum</span>
           <b>
             {formatRackKw(rackUsedKw)}
             {Math.abs(rackDelta) >= 0.5 ? (
@@ -508,7 +493,11 @@ export default function MaxLpsPage() {
             ) : null}
           </b>
           <small>
-            Σ {nRacks.toLocaleString()} racks
+            {view?.totals?.shelf_source === "redfish"
+              ? "BMC PowerShelf total_power_out"
+              : view?.totals?.shelf_source === "argus"
+                ? "Argus TotalPowerOut (fallback)"
+                : "No PSU readings"}
           </small>
         </article>
         <article>
@@ -535,6 +524,18 @@ export default function MaxLpsPage() {
                 ? "Connect the PXE hop for Redfish"
                 : "No BMC Redfish readings yet"}
           </small>
+        </article>
+        <article data-free={rackHeadroomKw < 0 ? "over" : "ok"}>
+          <span>Total available power</span>
+          <b>{formatRackKw(rackHeadroomKw)}</b>
+          <small>
+            {thresholdPct.toFixed(0)}% × {formatRackKw(totalKw)} − rack {formatRackKw(rackUsedKw)}
+          </small>
+        </article>
+        <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
+          <span>GPU cap left</span>
+          <b>{formatRackKw(Math.max(0, gpuLeftKw))}</b>
+          <small>GPU share of envelope − live watts</small>
         </article>
       </section>
 

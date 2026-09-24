@@ -467,6 +467,10 @@ class RackOut(ORMModel):
     mem_pct: float = 0
     power_pct: float = 0
     power_kw: float = 0
+    serial: str | None = None
+    bmc_ip: str | None = None
+    os_ip: str | None = None
+    bmc_mac: str | None = None
     created_at: datetime
     updated_at: datetime
     devices: list[DeviceOut] = []
@@ -573,6 +577,7 @@ class CampusOut(BaseModel):
     name: str = "Firmus"
     telemetry: TelemetryOut
     halls: list[HallCampus]
+    source: str = "floor"
 
 
 class WorkloadOut(ORMModel):

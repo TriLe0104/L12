@@ -6,9 +6,15 @@ import { useRouter } from "next/navigation";
 import { AuthScreen } from "@/components/AuthScreen";
 import { useClawReveal } from "@/components/ClawReveal";
 import { LANDING, useAuth } from "@/lib/auth";
+import { useUiTheme } from "@/lib/ui-theme";
 
 export default function LoginPage() {
   const { user, loading, signIn } = useAuth();
+  const { theme } = useUiTheme();
+  const scc =
+    theme === "scc" ||
+    (typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "scc");
+  const home = scc ? "/maxlps" : LANDING;
   const claw = useClawReveal();
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -18,8 +24,8 @@ export default function LoginPage() {
   const hold = useRef(false);
 
   useEffect(() => {
-    if (!loading && user && !hold.current && !claw.active) router.replace(LANDING);
-  }, [loading, user, router, claw.active]);
+    if (!loading && user && !hold.current && !claw.active) router.replace(home);
+  }, [loading, user, router, claw.active, home]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,7 +36,7 @@ export default function LoginPage() {
       await signIn(email.trim(), password);
       claw.arm();
       await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      router.replace(LANDING);
+      router.replace(home);
       await claw.play();
     } catch (err) {
       hold.current = false;

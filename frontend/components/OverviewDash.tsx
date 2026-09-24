@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { ClusterMetrics, PowerLimiter as PowerLimiterData } from "@/lib/cluster";
-import { formatGbps, formatKw } from "@/lib/cluster";
-import { PowerLimiterPanel } from "@/components/PowerLimiter";
+import type { ClusterMetrics, HallDetail, PowerLimiter as PowerLimiterData } from "@/lib/cluster";
+import { formatGbps, formatKw, formatRackKw } from "@/lib/cluster";
+import { PodPowerBoard } from "@/components/PodPowerBoard";
 
 function Gauge({
   title,
@@ -47,7 +47,7 @@ function Gauge({
             strokeLinecap="butt"
           />
         </svg>
-        <strong data-wide={value.length > 6 ? "true" : undefined}>{value}</strong>
+        <strong data-wide={value.length > 5 ? "true" : undefined}>{value}</strong>
       </div>
       <div className="gauge-foot">
         <div>
@@ -100,9 +100,11 @@ function TimeChart({
   series,
   mode,
   label,
+  field = "power_kw",
 }: {
   series: ClusterMetrics["series"];
-  mode: "net" | "disk";
+  mode: "net" | "disk" | "kw";
+  field?: "power_kw" | "gpu_kw";
   label: string;
 }) {
   const W = 600;
@@ -114,6 +116,40 @@ function TimeChart({
     series[Math.floor(series.length / 2)] ? axisTime(series[Math.floor(series.length / 2)].t, spanSec) : "",
     series.at(-1) ? axisTime(series[series.length - 1].t, spanSec) : "",
   ];
+
+  if (mode === "kw") {
+    const values = series.map((p) => Number(field === "gpu_kw" ? p.gpu_kw : p.power_kw) || 0);
+    const peak = Math.max(1, ...values);
+    const y = (v: number) => H - (v / peak) * (H - 4);
+    const usedLine = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const usedArea = `0,${H} ${usedLine} ${W},${H}`;
+    const ticks = [
+      { y: 0, text: formatKw(peak) },
+      { y: 50, text: formatKw(peak / 2) },
+      { y: 100, text: "0" },
+    ];
+    return (
+      <div className="chart-plot">
+        <div className="chart-y" aria-hidden>
+          {ticks.map((t) => (
+            <span key={t.text} style={{ top: `${t.y}%`, transform: tickTransform(t.y) }}>
+              {t.text}
+            </span>
+          ))}
+        </div>
+        <svg className="net-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
+          <line x1="0" x2={W} y1={H / 2} y2={H / 2} className="net-grid" />
+          <polygon points={usedArea} className="net-fill-tx" />
+          <polyline points={usedLine} className="net-line-tx" />
+        </svg>
+        <div className="chart-x">
+          {xLabels.map((t, i) => (
+            <span key={`${i}-${t}`}>{t}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (mode === "net") {
     const peak = Math.max(1, ...series.map((p) => Math.max(p.tx_gbps, p.rx_gbps)));
@@ -208,7 +244,7 @@ const RANGE_LABEL: Record<string, string> = {
   "7d": "Last 7 days",
 };
 
-export function OverviewDash() {
+export function OverviewDash({ halls = [] }: { halls?: HallDetail[] }) {
   const [data, setData] = useState<ClusterMetrics | null>(null);
   const [power, setPower] = useState<PowerLimiterData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -274,11 +310,27 @@ export function OverviewDash() {
   const memUsed = ((data.mem_tb * last.mem) / 100).toFixed(2);
   const extraJobs = (data.workloads_running ?? []).filter((w) => w.name !== data.workload?.name);
 
+  const liveInv = data.source === "inventory";
+  const sensors = data.sensors ?? {};
   const racks = data.size.racks;
   const racksOn = data.size.racks_on ?? data.nodes.total - data.nodes.off;
+  const gpusPerNode = data.size.gpus_per_node ?? 4;
   const compute = data.size.compute_nodes ?? racks * 18;
-  const computeOn = data.size.compute_on ?? (racksOn * 18);
-  const switches = data.size.switches ?? (data.size.spines ?? 8) + (data.size.leaves ?? 0);
+  const computeOn = data.size.compute_on ?? compute;
+  const perRack = data.size.nodes_per_rack ?? (racks > 0 ? Math.round(compute / racks) : 18);
+  const switches = liveInv ? (data.size.switches ?? 0) : (data.size.switches ?? (data.size.spines ?? 8) + (data.size.leaves ?? 0));
+  const livePowerKw = power?.active.consumed_kw ?? last.power_kw;
+  const fmtPower = liveInv ? formatRackKw : formatKw;
+  const gpuLive = data.gpu_used;
+  const gpuKw = data.now.gpu_kw ?? last.gpu_kw ?? 0;
+  const gpuTdpKw = data.now.gpu_tdp_kw ?? (data.size.gpus * 1.4);
+  const gpuPct = data.now.gpu_pct ?? last.gpu;
+  const envelopeKw = data.now.envelope_kw ?? data.size.nameplate_kw;
+  const availableKw = data.now.available_kw ?? envelopeKw - livePowerKw;
+  const overheadKw = Math.max(0, livePowerKw - gpuKw);
+  const gpuTdpPct = gpuTdpKw > 0 ? (gpuKw / gpuTdpKw) * 100 : 0;
+  const nameplateKw = data.size.nameplate_kw;
+  const thresholdPct = power?.threshold_pct ?? power?.stay_under_pct ?? 80;
 
   return (
     <section className="overview-dash">
@@ -286,148 +338,210 @@ export function OverviewDash() {
         <div>
           <span>Racks</span>
           <b>{racks.toLocaleString()}</b>
-          <small>{racksOn} on · {data.nodes.off} off</small>
+          <small>
+            {liveInv
+              ? `${racksOn} on · ${fmtPower(livePowerKw)} shelf`
+              : `${racksOn} on · ${data.nodes.off} off`}
+          </small>
         </div>
         <div>
           <span>Compute nodes</span>
           <b>{compute.toLocaleString()}</b>
-          <small>{computeOn.toLocaleString()} on · 4 / rack</small>
-        </div>
-        <div>
-          <span>Switches</span>
-          <b>{switches}</b>
           <small>
-            {data.size.spines ?? 8} spine · {data.size.leaves ?? 0} leaf
+            {computeOn.toLocaleString()} on · {gpusPerNode} GPU / node
           </small>
         </div>
+        {liveInv ? (
+          <div>
+            <span>GPU draw</span>
+            <b>{fmtPower(gpuKw)}</b>
+            <small>
+              {gpuLive.toLocaleString()} live · {gpuTdpPct.toFixed(0)}% of {fmtPower(gpuTdpKw)} TDP
+            </small>
+          </div>
+        ) : (
+          <div>
+            <span>Switches</span>
+            <b>{switches}</b>
+            <small>
+              {data.size.spines ?? 8} spine · {data.size.leaves ?? 0} leaf
+            </small>
+          </div>
+        )}
         <div>
           <span>GPUs</span>
           <b>{data.size.gpus.toLocaleString()}</b>
           <small>
-            {data.gpu_used.toLocaleString()} used · {Math.round(last.gpu)}%
+            {liveInv
+              ? `${gpuLive.toLocaleString()} live · ${fmtPower(gpuKw)}`
+              : `${data.gpu_used.toLocaleString()} used · ${Math.round(last.gpu)}%`}
           </small>
         </div>
+        {liveInv ? (
+          <div>
+            <span>Available</span>
+            <b>{fmtPower(availableKw)}</b>
+            <small>
+              {thresholdPct.toFixed(0)}% envelope {fmtPower(envelopeKw)} − rack {fmtPower(livePowerKw)}
+            </small>
+          </div>
+        ) : (
+          <div>
+            <span>Fabric</span>
+            <b>{formatGbps(last.tx_gbps)}</b>
+            <small>
+              {data.size.active_links ?? "—"} links · {data.size.speed ?? "800G"}
+            </small>
+          </div>
+        )}
         <div>
-          <span>Fabric</span>
-          <b>{formatGbps(last.tx_gbps)}</b>
+          <span>{liveInv ? "Rack power" : "Power"}</span>
+          <b>{fmtPower(livePowerKw)}</b>
           <small>
-            {data.size.active_links ?? "—"} links · {data.size.speed ?? "800G"}
-          </small>
-        </div>
-        <div>
-          <span>Power</span>
-          <b>{formatKw(power?.active.consumed_kw ?? last.power_kw)}</b>
-          <small>
-            {power
-              ? `${formatKw(power.active.stranded_kw)} stranded · ${power.mode === "dynamic" ? "Dynamic Power" : "static"}`
-              : `${data.now.power_pct.toFixed(0)}% of ${formatKw(data.size.nameplate_kw)}`}
+            {liveInv
+              ? `Overhead ${fmtPower(overheadKw)} · ${data.now.power_pct.toFixed(0)}% of ${formatKw(nameplateKw)}`
+              : power
+                ? `${formatKw(power.active.stranded_kw)} stranded · ${power.mode === "dynamic" ? "Dynamic Power" : "static"}`
+                : `${data.now.power_pct.toFixed(0)}% of ${formatKw(data.size.nameplate_kw)}`}
           </small>
         </div>
       </div>
       <div className="gauge-row">
         <Gauge
           title="Cluster GPU"
-          pct={last.gpu}
-          value={`${last.gpu.toFixed(1)}%`}
-          used={`${data.gpu_used.toLocaleString()} GPU`}
+          pct={liveInv ? gpuPct : last.gpu}
+          value={`${(liveInv ? gpuPct : last.gpu).toFixed(1)}%`}
+          used={`${gpuLive.toLocaleString()} live`}
           total={`${data.size.gpus.toLocaleString()} GPU`}
-          detail={`72 GPU / rack · HBM3e · ${data.size.halls} halls`}
+          detail={
+            liveInv
+              ? `${sensors.gpu ? "Redfish PowerWatts" : "Waiting for hop / BMC"} · ${gpusPerNode} GPU / node`
+              : `72 GPU / rack · HBM3e · ${data.size.halls} halls`
+          }
         />
-        <Gauge
-          title="Cluster CPU"
-          pct={last.cpu}
-          value={`${last.cpu.toFixed(1)}%`}
-          used={`${coresUsed.toLocaleString()} cores`}
-          total={`${data.cpu_cores.toLocaleString()} cores`}
-          detail={`144 Grace cores / rack · 1m avg`}
-        />
-        <Gauge
-          title="Cluster memory"
-          pct={last.mem}
-          value={`${last.mem.toFixed(1)}%`}
-          used={`${memUsed} TB`}
-          total={`${data.mem_tb.toFixed(1)} TB`}
-          detail={`2.3 TB / rack · HBM + LPDDR`}
-        />
+        {liveInv ? (
+          <Gauge
+            title="GPU draw"
+            pct={gpuTdpKw > 0 ? (gpuKw / gpuTdpKw) * 100 : 0}
+            value={fmtPower(gpuKw)}
+            used={fmtPower(gpuKw)}
+            total={fmtPower(gpuTdpKw)}
+            detail={`${gpuLive.toLocaleString()} GPU live · ${fmtPower(gpuTdpKw)} TDP`}
+          />
+        ) : (
+          <Gauge
+            title="Cluster CPU"
+            pct={last.cpu}
+            value={`${last.cpu.toFixed(1)}%`}
+            used={`${coresUsed.toLocaleString()} cores`}
+            total={`${data.cpu_cores.toLocaleString()} cores`}
+            detail={`144 Grace cores / rack · 1m avg`}
+          />
+        )}
+        {liveInv ? (
+          <Gauge
+            title="Available power"
+            pct={envelopeKw > 0 ? Math.max(0, (availableKw / envelopeKw) * 100) : 0}
+            value={fmtPower(availableKw)}
+            used={fmtPower(Math.max(0, availableKw))}
+            total={fmtPower(envelopeKw)}
+            detail={`${fmtPower(envelopeKw)} envelope − rack ${fmtPower(livePowerKw)}`}
+          />
+        ) : (
+          <Gauge
+            title="Cluster memory"
+            pct={last.mem}
+            value={`${last.mem.toFixed(1)}%`}
+            used={`${memUsed} TB`}
+            total={`${data.mem_tb.toFixed(1)} TB`}
+            detail={`2.3 TB / rack · HBM + LPDDR`}
+          />
+        )}
         <Gauge
           title="Total power"
           pct={
-            power
-              ? (power.active.consumed_kw / Math.max(power.max_budget_kw ?? power.nameplate_kw ?? power.budget_kw, 1)) * 100
-              : data.now.power_pct
+            liveInv
+              ? data.now.power_pct
+              : power
+                ? (power.active.consumed_kw / Math.max(power.max_budget_kw ?? power.nameplate_kw ?? power.budget_kw, 1)) * 100
+                : data.now.power_pct
           }
-          value={formatKw(power?.active.consumed_kw ?? last.power_kw)}
-          used={formatKw(power?.active.consumed_kw ?? last.power_kw)}
-          total={formatKw(power?.max_budget_kw ?? power?.nameplate_kw ?? data.size.nameplate_kw)}
+          value={fmtPower(livePowerKw)}
+          used={fmtPower(livePowerKw)}
+          total={formatKw(liveInv ? data.size.nameplate_kw : (power?.max_budget_kw ?? power?.nameplate_kw ?? data.size.nameplate_kw))}
           detail={
-            power
-              ? `${formatKw(power.envelope_kw ?? power.budget_kw)} envelope · static ${power.racks_static_max ?? 0} · Dynamic Power ${power.racks_lps_max ?? 0}${power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [${Math.round(power.min_rack_kw ?? 40)}–${Math.round(power.max_rack_kw ?? 300)}] kW`
-              : `Set total power, threshold, min/max kW per rack`
+            liveInv
+              ? `BMC PowerShelf total_power_out · ${racks} registered rack${racks === 1 ? "" : "s"}`
+              : power
+                ? `${formatKw(power.envelope_kw ?? power.budget_kw)} envelope · static ${power.racks_static_max ?? 0} · Dynamic Power ${power.racks_lps_max ?? 0}${power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [${Math.round(power.min_rack_kw ?? 40)}–${Math.round(power.max_rack_kw ?? 300)}] kW`
+                : `Set total power, threshold, min/max kW per rack`
           }
         />
         <article className="stat-panel">
-          <h2>Cluster</h2>
+          <h2>{liveInv ? "Power" : "Cluster"}</h2>
           <dl>
             <div>
-              <dt>Racks</dt>
+              <dt>Rack draw</dt>
               <dd>
-                {racks} total · {racksOn} powered
+                {fmtPower(livePowerKw)}
                 <small>
-                  {data.size.halls} halls · {data.size.cols}×{data.size.rows} · {data.nodes.off} off
+                  {liveInv
+                    ? `${sensors.power ? "PowerShelf" : "No PSU meter"} · ${racksOn}/${racks} racks`
+                    : `${data.size.halls} halls · ${data.size.cols}×${data.size.rows} · ${data.nodes.off} off`}
                 </small>
               </dd>
             </div>
             <div>
-              <dt>Nodes</dt>
+              <dt>GPU draw</dt>
               <dd>
-                {compute.toLocaleString()} compute · {computeOn.toLocaleString()} on
+                {fmtPower(gpuKw)}
                 <small>
-                  4 trays / rack · {data.nodes.active} running · {data.nodes.ready} ready · {data.nodes.idle} idle
+                  {gpuLive.toLocaleString()} live · {gpuTdpPct.toFixed(0)}% of {fmtPower(gpuTdpKw)} TDP
                 </small>
               </dd>
             </div>
             <div>
-              <dt>Telemetry</dt>
+              <dt>Overhead</dt>
               <dd>
-                GPU {Math.round(last.gpu)}% · CPU {Math.round(last.cpu)}% · Mem {Math.round(last.mem)}%
-                <small>
-                  Disk {last.disk_pct.toFixed(0)}% · IB Tx {formatGbps(last.tx_gbps)} · Rx {formatGbps(last.rx_gbps)}
-                </small>
+                {fmtPower(overheadKw)}
+                <small>Shelf − GPU · {fmtPower(livePowerKw)} − {fmtPower(gpuKw)}</small>
               </dd>
             </div>
             <div>
-              <dt>Fabric</dt>
+              <dt>Available</dt>
               <dd>
-                {data.size.spines ?? 8} spine · {data.size.leaves ?? 0} leaf · {data.size.active_links ?? 0} links
+                {fmtPower(availableKw)}
                 <small>
-                  {data.size.active_ports ?? 0}/{data.size.total_ports ?? 0} ports up · {data.size.speed ?? "800 Gbps"}
+                  {thresholdPct.toFixed(0)}% of budget · envelope {fmtPower(envelopeKw)}
                 </small>
               </dd>
             </div>
-            <div>
-              <dt>Workload</dt>
-              <dd>
-                {data.workload ? (
-                  <>
-                    <b>{data.workload.name}</b>
-                    <small>
-                      {data.workload.kind} · {data.workload.gpu_allocation} GPU
-                      {data.workload.pods_running ? ` · ${data.workload.pods_running} pods` : ""}
-                      {extraJobs.length > 0 ? ` · +${extraJobs.length} more` : ""}
-                    </small>
-                  </>
-                ) : (
-                  <>
-                    None running
-                    <small>Launch from Testing</small>
-                  </>
-                )}
-              </dd>
-            </div>
+            {!liveInv && (
+              <div>
+                <dt>Workload</dt>
+                <dd>
+                  {data.workload ? (
+                    <>
+                      <b>{data.workload.name}</b>
+                      <small>
+                        {data.workload.kind} · {data.workload.gpu_allocation} GPU
+                        {data.workload.pods_running ? ` · ${data.workload.pods_running} pods` : ""}
+                        {extraJobs.length > 0 ? ` · +${extraJobs.length} more` : ""}
+                      </small>
+                    </>
+                  ) : (
+                    <>
+                      None running
+                      <small>Launch from Testing</small>
+                    </>
+                  )}
+                </dd>
+              </div>
+            )}
           </dl>
         </article>
       </div>
-      <PowerLimiterPanel data={power} onChange={setPower} />
+      <PodPowerBoard halls={halls} power={power} />
       <div className="chart-row">
         <div className="range-bar">
           <span>Range</span>
@@ -469,24 +583,51 @@ export function OverviewDash() {
         </div>
         <article className="net-panel">
           <header>
-            <h2>Network I/O</h2>
+            <h2>{liveInv ? "Rack power" : "Network I/O"}</h2>
             <span className="net-legend-inline">
-              <i data-k="tx" /> Tx {formatGbps(last.tx_gbps)}
-              <i data-k="rx" /> Rx {formatGbps(last.rx_gbps)}
+              {liveInv ? (
+                <>
+                  <i data-k="tx" /> Shelf {fmtPower(last.power_kw)}
+                </>
+              ) : (
+                <>
+                  <i data-k="tx" /> Tx {formatGbps(last.tx_gbps)}
+                  <i data-k="rx" /> Rx {formatGbps(last.rx_gbps)}
+                </>
+              )}
             </span>
           </header>
-          <TimeChart series={data.series} mode="net" label="Network I/O" />
+          <TimeChart
+            series={data.series}
+            mode={liveInv ? "kw" : "net"}
+            field="power_kw"
+            label={liveInv ? "Rack power" : "Network I/O"}
+          />
         </article>
         <article className="net-panel">
           <header>
-            <h2>Disk usage</h2>
+            <h2>{liveInv ? "GPU draw" : "Disk usage"}</h2>
             <span className="net-legend-inline">
-              <i data-k="tx" /> {last.disk_pct.toFixed(1)}% · {Math.round(data.disk_used_tb)} / {Math.round(data.disk_tb)} TB
-              <i data-k="rx" /> R {last.disk_read_gbs.toFixed(1)} GB/s
-              <i data-k="w" /> W {last.disk_write_gbs.toFixed(1)} GB/s
+              {liveInv ? (
+                <>
+                  <i data-k="tx" /> {fmtPower(last.gpu_kw ?? gpuKw)} Redfish
+                  <i data-k="rx" /> {gpuLive} GPU live
+                </>
+              ) : (
+                <>
+                  <i data-k="tx" /> {last.disk_pct.toFixed(1)}% · {Math.round(data.disk_used_tb)} / {Math.round(data.disk_tb)} TB
+                  <i data-k="rx" /> R {last.disk_read_gbs.toFixed(1)} GB/s
+                  <i data-k="w" /> W {last.disk_write_gbs.toFixed(1)} GB/s
+                </>
+              )}
             </span>
           </header>
-          <TimeChart series={data.series} mode="disk" label="Disk usage" />
+          <TimeChart
+            series={data.series}
+            mode={liveInv ? "kw" : "disk"}
+            field="gpu_kw"
+            label={liveInv ? "GPU draw" : "Disk usage"}
+          />
         </article>
       </div>
     </section>

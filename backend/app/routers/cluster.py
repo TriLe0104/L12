@@ -186,8 +186,180 @@ def telemetry_for(racks: list[Rack]) -> TelemetryOut:
     )
 
 
+def _inventory_campus(db: Session) -> CampusOut:
+    """Floor / rack views from registered MaxLPS racks + live PowerShelf / GPU."""
+    inv = maxlps_inventory.load_racks(db)
+    max_kw = float(power_limit.rack_hard_kw() or 135.0)
+    hist = maxlps_inventory.last_watt_by_rack(db)
+    grouped: dict[str, list] = {}
+    for rack in inv:
+        key = (rack.hall or "").strip() or "Live"
+        grouped.setdefault(key, []).append(rack)
+
+    halls_out: list[HallCampus] = []
+    all_racks: list[RackOut] = []
+    now = datetime.now(timezone.utc)
+    for hall_name, inv_racks in sorted(grouped.items(), key=lambda kv: kv[0].lower()):
+        slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in hall_name).strip("-") or "live"
+        hall_id = f"inv-{slug}"
+        n = len(inv_racks)
+        cols = min(8, max(2, n))
+        rows = max(1, (n + cols - 1) // cols)
+        placed: list[RackOut] = []
+        for i, rack in enumerate(inv_racks):
+            live = gpu_power.live_rack_draw(rack.id)
+            stored = hist.get(rack.id) or {}
+            shelf_kw = float(live.get("shelf_kw") or 0.0)
+            gpu_kw = float(live.get("gpu_kw") or 0.0)
+            if shelf_kw <= 0:
+                shelf_kw = float(stored.get("shelf_kw") or 0.0)
+            if gpu_kw <= 0:
+                gpu_kw = float(stored.get("gpu_kw") or 0.0)
+            n_nodes = maxlps_inventory.rack_populated_nodes(
+                rack, int(live.get("gpu_live") or 0), int(live.get("nodes_live") or 0)
+            )
+            n_gpu = n_nodes * gpu_power.GPUS_PER_NODE
+            tdp_kw = max(n_gpu, 1) * gpu_power.GPU_TDP_W / 1000.0
+            gpu_pct = min(100.0, gpu_kw / tdp_kw * 100.0) if tdp_kw > 0 and gpu_kw > 0 else 0.0
+            on = bool(rack.enabled) and (rack.power_state or "on") != "off"
+            nodes = sorted(rack.nodes, key=lambda n: n.index)
+            first = next((n for n in nodes if n.bmc_ip), nodes[0] if nodes else None)
+            keep_idx = {n.index for n in nodes if maxlps_inventory._node_populated(n)}
+            live_n = int(live.get("nodes_live") or 0)
+            if live_n:
+                keep_idx.update(range(1, live_n + 1))
+            elif n_nodes:
+                keep_idx.update(range(1, n_nodes + 1))
+            by_idx = {n.index: n for n in nodes}
+            devices: list[DeviceOut] = []
+            for idx in sorted(keep_idx):
+                node = by_idx.get(idx)
+                has_bmc = bool(node and (node.bmc_ip or "").strip())
+                devices.append(
+                    DeviceOut(
+                        id=node.id if node else f"{rack.id}-n{idx:02d}",
+                        rack_id=rack.id,
+                        name=(node.hostname if node and node.hostname else f"n{idx:02d}"),
+                        kind="compute",
+                        status="healthy" if on and (has_bmc or idx <= live_n) else ("offline" if on else "empty"),
+                        u_start=max(1, idx * 2),
+                        u_height=2,
+                        last_check_at=None,
+                        check_value=(node.bmc_ip or node.os_ip if node else None),
+                    )
+                )
+            for shelf in sorted(rack.shelves, key=lambda s: s.index):
+                devices.append(
+                    DeviceOut(
+                        id=shelf.id,
+                        rack_id=rack.id,
+                        name=f"PS-{shelf.index}",
+                        kind="power",
+                        status="healthy" if (shelf.ip or "").strip() and shelf_kw > 0 else "empty",
+                        u_start=1,
+                        u_height=1,
+                        last_check_at=None,
+                        check_value=shelf.ip,
+                    )
+                )
+            col = i % cols
+            row = i // cols
+            placed.append(
+                RackOut(
+                    id=rack.id,
+                    hall_id=hall_id,
+                    name=rack.label,
+                    x=1 + col,
+                    y=1 + row * 2,
+                    rotation=0,
+                    height_u=48,
+                    notes=rack.notes,
+                    power_state="on" if on else "off",
+                    run_status="ready" if on else "idle",
+                    cpu_pct=0.0,
+                    gpu_pct=round(gpu_pct, 1),
+                    mem_pct=0.0,
+                    power_pct=round(min(100.0, shelf_kw / max_kw * 100.0), 1) if max_kw else 0.0,
+                    power_kw=round(shelf_kw, 2),
+                    serial=rack.serial,
+                    bmc_ip=(first.bmc_ip if first else None),
+                    os_ip=(first.os_ip if first else None),
+                    bmc_mac=(first.bmc_mac if first else None),
+                    created_at=rack.created_at or now,
+                    updated_at=rack.updated_at or now,
+                    devices=devices,
+                )
+            )
+        all_racks.extend(placed)
+        power_kw = sum(r.power_kw for r in placed)
+        gpu_vals = [r.gpu_pct for r in placed if r.power_state == "on"]
+        on_n = sum(1 for r in placed if r.power_state == "on")
+        halls_out.append(
+            HallCampus(
+                id=hall_id,
+                name=hall_name,
+                description="Registered inventory",
+                width_tiles=max(8, cols + 2),
+                depth_tiles=max(6, rows * 2 + 2),
+                created_at=now,
+                updated_at=now,
+                rack_count=n,
+                telemetry=TelemetryOut(
+                    cpu_pct=0.0,
+                    gpu_pct=round(sum(gpu_vals) / len(gpu_vals), 1) if gpu_vals else 0.0,
+                    mem_pct=0.0,
+                    power_kw=round(power_kw, 2),
+                    racks_on=on_n,
+                    racks_total=n,
+                ),
+                racks=placed,
+            )
+        )
+    tel = TelemetryOut(
+        cpu_pct=0.0,
+        gpu_pct=round(sum(r.gpu_pct for r in all_racks) / len(all_racks), 1) if all_racks else 0.0,
+        mem_pct=0.0,
+        power_kw=round(sum(r.power_kw for r in all_racks), 2),
+        racks_on=sum(1 for r in all_racks if r.power_state == "on"),
+        racks_total=len(all_racks),
+    )
+    return CampusOut(name=cluster_name(db), telemetry=tel, halls=halls_out, source="inventory")
+
+
 @router.get("/overview", response_model=ClusterOverview)
 def overview(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> ClusterOverview:
+    if maxlps_inventory.inventory_count(db):
+        campus = _inventory_campus(db)
+        n_racks = campus.telemetry.racks_total
+        n_dev = sum(len(r.devices) for h in campus.halls for r in h.racks)
+        total_u = n_racks * 48
+        occupied_u = sum(d.u_height for h in campus.halls for r in h.racks for d in r.devices if d.kind != "empty")
+        status_counts = {"healthy": 0, "warning": 0, "critical": 0, "offline": 0, "empty": 0}
+        resources = {"compute": 0, "switch": 0, "power": 0, "empty": 0}
+        for h in campus.halls:
+            for r in h.racks:
+                for d in r.devices:
+                    status_counts[d.status] = status_counts.get(d.status, 0) + 1
+                    resources[d.kind] = resources.get(d.kind, 0) + 1
+        rack_power = {"on": campus.telemetry.racks_on, "off": n_racks - campus.telemetry.racks_on}
+        return ClusterOverview(
+            name=campus.name,
+            halls=len(campus.halls),
+            racks=n_racks,
+            devices=n_dev,
+            occupied_u=occupied_u,
+            total_u=total_u,
+            utilization_pct=round((occupied_u / total_u) * 100, 1) if total_u else 0.0,
+            cpu_pct=campus.telemetry.cpu_pct,
+            gpu_pct=campus.telemetry.gpu_pct,
+            mem_pct=campus.telemetry.mem_pct,
+            power_kw=campus.telemetry.power_kw,
+            device_status=status_counts,
+            resources=resources,
+            rack_power=rack_power,
+            rack_run={"idle": rack_power["off"], "running": 0, "ready": rack_power["on"]},
+            health_checks=[],
+        )
     halls = db.scalar(select(func.count()).select_from(DataHall)) or 0
     racks = db.scalar(select(func.count()).select_from(Rack)) or 0
     devices = list(db.scalars(select(Device)).all())
@@ -253,6 +425,141 @@ METRIC_SPANS = {
 }
 
 
+def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> dict:
+    """Cluster overview from registered MaxLPS racks + live Redfish / PowerShelf."""
+    racks = maxlps_inventory.load_racks(db)
+    n_racks = len(racks)
+    live_map = {r.id: gpu_power.live_rack_draw(r.id) for r in racks}
+    pop = maxlps_inventory.populated_counts(racks, live_map)
+    n_nodes = pop["nodes"]
+    n_gpus = pop["gpus"]
+    n_on = sum(1 for r in racks if r.enabled and (r.power_state or "on") != "off")
+    n_off = n_racks - n_on
+    halls = {r.hall for r in racks if r.hall}
+    snap, jobs = _maxlps_inputs(db)
+    view = gpu_power.snapshot(snap, top=1, workloads=[])
+    totals = (view or {}).get("totals") or {}
+    shelf_kw = float(totals.get("shelf_kw") or 0.0)
+    gpu_kw = float(totals.get("gpu_kw") or 0.0)
+    gpu_live = int(totals.get("gpu_live") or 0)
+    live_tdp_kw = gpu_live * gpu_power.GPU_TDP_W / 1000.0
+    slot_tdp_kw = n_gpus * gpu_power.GPU_TDP_W / 1000.0
+    tdp_kw = live_tdp_kw if live_tdp_kw > 0 else slot_tdp_kw
+    gpu_pct = min(100.0, (gpu_kw / tdp_kw) * 100.0) if tdp_kw > 0 and gpu_kw > 0 else 0.0
+    max_rack = float(snap.get("max_rack_kw") or 135)
+    nameplate = max(1.0, n_racks * max_rack)
+    budget = float(snap.get("total_budget_kw") or totals.get("total_kw") or 0.0)
+    thr = float(snap.get("threshold_pct") or snap.get("stay_under_pct") or 80.0)
+    envelope = (budget * thr / 100.0) if budget > 0 else float(totals.get("available_kw") or 0.0)
+    available_kw = envelope - shelf_kw
+    power_pct = min(100.0, (shelf_kw / nameplate) * 100.0) if nameplate else 0.0
+    history = maxlps_inventory.watt_series(db, start, end, points=48)
+    if history:
+        series = []
+        for p in history:
+            series.append(
+                {
+                    "t": p["t"],
+                    "cpu": 0.0,
+                    "gpu": gpu_pct,
+                    "mem": 0.0,
+                    "power_kw": p["power_kw"],
+                    "gpu_kw": p["gpu_kw"],
+                    "tx_gbps": 0.0,
+                    "rx_gbps": 0.0,
+                    "disk_pct": 0.0,
+                    "disk_read_gbs": 0.0,
+                    "disk_write_gbs": 0.0,
+                }
+            )
+    else:
+        series = [
+            {
+                "t": start + (end - start) * i / 47,
+                "cpu": 0.0,
+                "gpu": gpu_pct,
+                "mem": 0.0,
+                "power_kw": shelf_kw,
+                "gpu_kw": gpu_kw,
+                "tx_gbps": 0.0,
+                "rx_gbps": 0.0,
+                "disk_pct": 0.0,
+                "disk_read_gbs": 0.0,
+                "disk_write_gbs": 0.0,
+            }
+            for i in range(48)
+        ]
+    nodes_on = pop["nodes_on"]
+    return {
+        "name": cluster_name(db),
+        "source": "inventory",
+        "sensors": {
+            "power": bool(totals.get("shelf_source") in {"redfish", "argus"} or shelf_kw > 0),
+            "gpu": gpu_live > 0 or gpu_kw > 0,
+            "cpu": False,
+            "mem": False,
+            "fabric": False,
+            "disk": False,
+        },
+        "now": {
+            "cpu_pct": 0.0,
+            "gpu_pct": round(gpu_pct, 1),
+            "mem_pct": 0.0,
+            "power_kw": round(shelf_kw, 2),
+            "power_pct": round(power_pct, 1),
+            "gpu_kw": round(gpu_kw, 2),
+            "gpu_tdp_kw": round(tdp_kw, 1),
+            "envelope_kw": round(envelope, 1),
+            "available_kw": round(available_kw, 1),
+            "tx_gbps": 0.0,
+            "rx_gbps": 0.0,
+            "disk_pct": 0.0,
+            "disk_read_gbs": 0.0,
+            "disk_write_gbs": 0.0,
+        },
+        "series": series,
+        "size": {
+            "halls": len(halls) or 1,
+            "racks": n_racks,
+            "gpus": n_gpus,
+            "nameplate_kw": round(nameplate, 1),
+            "cols": max(1, n_racks),
+            "rows": 1,
+            "racks_on": n_on,
+            "compute_nodes": n_nodes,
+            "compute_on": nodes_on,
+            "gpus_per_node": gpu_power.GPUS_PER_NODE,
+            "nodes_per_rack": round(n_nodes / n_racks, 1) if n_racks else 0,
+            "spines": 0,
+            "leaves": 0,
+            "switches": 0,
+            "active_links": 0,
+            "active_ports": 0,
+            "total_ports": 0,
+            "speed": "—",
+        },
+        "nodes": {
+            "total": n_racks,
+            "active": 0,
+            "ready": n_on,
+            "idle": 0,
+            "off": n_off,
+            "compute_total": n_nodes,
+            "compute_on": nodes_on,
+        },
+        "workload": None,
+        "workloads_running": [],
+        "gpu_used": gpu_live,
+        "cpu_cores": 0,
+        "mem_tb": 0.0,
+        "disk_tb": 0.0,
+        "disk_used_tb": 0.0,
+        "range": span_key,
+        "from_ts": start,
+        "to_ts": end,
+    }
+
+
 @router.get("/metrics")
 def metrics(
     span: str = Query(default="5m", alias="range"),
@@ -261,6 +568,19 @@ def metrics(
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    now = time.time()
+    if from_ts is not None and to_ts is not None and to_ts > from_ts:
+        start, end = float(from_ts), float(to_ts)
+        span_key = "custom"
+    else:
+        window = METRIC_SPANS.get(span, METRIC_SPANS["5m"])
+        end = now
+        start = now - window
+        span_key = span if span in METRIC_SPANS else "5m"
+    maxlps_inventory.maybe_sync(db)
+    if maxlps_inventory.inventory_count(db):
+        return _inventory_metrics(db, start, end, span_key)
+
     rack_rows = list(db.scalars(select(Rack)).all())
     tel = telemetry_for(rack_rows)
     nameplate = max(1.0, len(rack_rows) * RACK_TDP_KW)
@@ -277,15 +597,6 @@ def metrics(
     fabric = build_fabric(halls)
     traffic = live_traffic(fabric)
 
-    now = time.time()
-    if from_ts is not None and to_ts is not None and to_ts > from_ts:
-        start, end = float(from_ts), float(to_ts)
-        span_key = "custom"
-    else:
-        window = METRIC_SPANS.get(span, METRIC_SPANS["5m"])
-        end = now
-        start = now - window
-        span_key = span if span in METRIC_SPANS else "5m"
     points = 48
     step = max(1.0, (end - start) / (points - 1))
     series = []
@@ -447,14 +758,15 @@ def _maxlps_inputs(db: Session) -> tuple[dict, list]:
     now = time.time()
     if _POWER_CACHE and now - _POWER_CACHE[0] < 1.0:
         return _POWER_CACHE[1], _POWER_CACHE[2]
-    works = _running_workloads(db)
     maxlps_inventory.maybe_sync(db)
     if maxlps_inventory.inventory_count(db):
         samples = maxlps_inventory.power_samples(db, demand_kw=power_limit.rack_policy_kw() * 0.65)
+        works: list = []
     else:
+        works = _running_workloads(db)
         rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
         samples = _power_samples(rack_rows, works)
-    snap = power_limit.snapshot(samples)
+    snap = gpu_power.overlay_live_consumed(power_limit.snapshot(samples))
     jobs = [
         {"id": w.id, "name": w.name, "kind": w.kind, "status": w.status, "gpu_allocation": w.gpu_allocation}
         for w in works
@@ -469,8 +781,8 @@ def _json(data: dict) -> Response:
 
 @router.get("/power")
 def power_limiter(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
+    snap, _jobs = _maxlps_inputs(db)
+    return snap
 
 
 @router.get("/maxlps")
@@ -558,12 +870,14 @@ def patch_power_limiter(
         gpu_power.LOOP.force = True
         gpu_power.LOOP.last_caps = None
     _invalidate_power_cache()
-    rack_rows = list(db.scalars(select(Rack).order_by(Rack.name)).all())
-    return power_limit.snapshot(_power_samples(rack_rows, _running_workloads(db)))
+    snap, _jobs = _maxlps_inputs(db)
+    return snap
 
 
 @router.get("/campus", response_model=CampusOut)
 def campus(_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> CampusOut:
+    if maxlps_inventory.inventory_count(db):
+        return _inventory_campus(db)
     halls = list(
         db.scalars(select(DataHall).options(selectinload(DataHall.racks)).order_by(DataHall.name)).all()
     )

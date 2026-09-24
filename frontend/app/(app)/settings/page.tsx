@@ -15,7 +15,7 @@ const OPTIONS: { id: UiTheme; title: string; kicker: string; blurb: string }[] =
     id: "scc",
     title: "SCC Mode",
     kicker: "SCC - Guarder",
-    blurb: "Light SMC-style panels and navy rail. Same features, customer-facing name.",
+    blurb: "Light SMC-style panels and navy rail. Nav is Cluster, Dynamic Power, Provision, Settings, and Users.",
   },
 ];
 

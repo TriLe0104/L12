@@ -1533,3 +1533,71 @@ def snapshot(
     LOOP.cached_key = cache_key
     LOOP.cache_t = now
     return out
+
+
+def live_rack_draw(rid: str) -> dict[str, Any]:
+    """PowerShelf + GPU Redfish for one inventory rack. Cache only — never blocks on Argus."""
+    try:
+        _ensure_shelf_watch()
+    except Exception:
+        pass
+    with _LIVE_GPU_LOCK:
+        redfish_rows = list(_LIVE_SHELF.get(rid) or [])
+        argus_rows = list((_ARGUS_SHELF or {}).get(rid) or [])
+        gpu_items = list(_LIVE_GPU.items())
+    redfish, total, ok = _rows_from_shelf_map(rid, redfish_rows, "redfish")
+    if ok:
+        src, live_sum, live = "redfish", total, True
+    else:
+        _argus, total, ok = _rows_from_shelf_map(rid, argus_rows, "argus")
+        src, live_sum, live = ("argus", total, True) if ok else ("none", 0.0, False)
+    gpu_w = 0.0
+    gpu_n = 0
+    node_idx: set[int] = set()
+    prefix = f"{rid}-"
+    for gid, rec in gpu_items:
+        if rec.get("watts") is None:
+            continue
+        if str(gid).startswith(prefix) or rec.get("rack_id") == rid:
+            gpu_w += float(rec["watts"])
+            gpu_n += 1
+            m = re.search(r"-n(\d+)-g", str(gid), re.I)
+            if m:
+                node_idx.add(int(m.group(1)))
+    return {
+        "shelf_kw": float(live_sum) if live else 0.0,
+        "metered": bool(live),
+        "source": src if live else "none",
+        "gpu_kw": round(gpu_w / 1000.0, 2),
+        "gpu_live": gpu_n,
+        "nodes_live": len(node_idx),
+    }
+
+
+def overlay_live_consumed(snap: dict[str, Any]) -> dict[str, Any]:
+    """Replace limiter-estimated draw with PowerShelf / Argus meters when present."""
+    if not snap:
+        return snap
+    total = 0.0
+    metered = 0
+    for r in snap.get("racks") or []:
+        rid = str(r.get("id") or "")
+        _shelves, live_sum, live, src = _merge_shelves(rid)
+        r["meter_source"] = src if live else "none"
+        if live:
+            r["consumed_kw"] = round(float(live_sum), 2)
+            r["usage_pct"] = power_limit.rack_usage_pct(float(live_sum))
+            total += float(live_sum)
+            metered += 1
+        else:
+            r["consumed_kw"] = 0.0
+            r["usage_pct"] = 0.0
+    if not metered:
+        return snap
+    used = round(total, 2)
+    for key in ("active", "static", "dynamic"):
+        block = dict(snap.get(key) or {})
+        block["consumed_kw"] = used
+        block["used_kw"] = used
+        snap[key] = block
+    return snap

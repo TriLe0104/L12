@@ -37,6 +37,48 @@ def inventory_count(db: Session) -> int:
     return int(db.scalar(select(func.count()).select_from(MaxLpsRack)) or 0)
 
 
+def _node_populated(node: MaxLpsNode) -> bool:
+    return bool(
+        (node.bmc_ip or "").strip()
+        or (node.hostname or "").strip()
+        or (node.serial or "").strip()
+        or (node.os_ip or "").strip()
+        or (node.bmc_mac or "").strip()
+        or (node.os_mac or "").strip()
+    )
+
+
+def rack_populated_nodes(rack: MaxLpsRack, live_gpus: int = 0, live_nodes: int = 0) -> int:
+    """Compute trays that actually exist: inventory identity or live Redfish, not empty NVL72 slots."""
+    named = sum(1 for n in rack.nodes if _node_populated(n))
+    from_live = int(live_nodes or 0)
+    if not from_live and live_gpus:
+        from_live = (int(live_gpus) + GPUS - 1) // GPUS
+    return max(named, from_live)
+
+
+def populated_counts(
+    racks: list[MaxLpsRack],
+    live_by_rack: dict[str, dict] | None = None,
+) -> dict[str, int]:
+    """Cluster compute/GPU totals: 4 GPUs per populated node."""
+    live_by_rack = live_by_rack or {}
+    n_nodes = 0
+    n_nodes_on = 0
+    for rack in racks:
+        live = live_by_rack.get(rack.id) or {}
+        nodes = rack_populated_nodes(rack, int(live.get("gpu_live") or 0), int(live.get("nodes_live") or 0))
+        n_nodes += nodes
+        if rack.enabled and (rack.power_state or "on") != "off":
+            n_nodes_on += nodes
+    return {
+        "nodes": n_nodes,
+        "nodes_on": n_nodes_on,
+        "gpus": n_nodes * GPUS,
+        "gpus_per_node": GPUS,
+    }
+
+
 def load_racks(db: Session) -> list[MaxLpsRack]:
     q = (
         select(MaxLpsRack)
@@ -278,18 +320,71 @@ def power_samples(db: Session, demand_kw: float = 0.0) -> list[dict[str, Any]]:
     rows = []
     for rack in db.scalars(select(MaxLpsRack).order_by(MaxLpsRack.label)).all():
         on = bool(rack.enabled) and (rack.power_state or "on") != "off"
+        _shelves, live_sum, live, _src = gpu_power._merge_shelves(rack.id)
+        demand = float(live_sum) if live else 0.0
+        if demand <= 0 and demand_kw and not live:
+            demand = 0.0
         rows.append(
             {
                 "id": rack.id,
                 "name": rack.label,
-                "hall_id": rack.hall or "",
+                "hall_id": rack.hall or "live",
                 "power_state": "on" if on else "off",
                 "run_status": "ready",
-                "demand_kw": float(demand_kw) if on else 0.0,
+                "demand_kw": demand if on else 0.0,
                 "saturating": False,
             }
         )
     return rows
+
+
+def _watt_ts(dt: datetime) -> float:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def watt_series(db: Session, start_ts: float, end_ts: float, points: int = 48) -> list[dict[str, Any]]:
+    """Downsampled PowerShelf / GPU kW history for the cluster overview."""
+    rows = list(db.scalars(select(MaxLpsClusterWatt).order_by(MaxLpsClusterWatt.ts.asc())).all())
+    if not rows:
+        return []
+    picked: list[MaxLpsClusterWatt] = []
+    for row in rows:
+        t = _watt_ts(row.ts)
+        if t < start_ts - 2 or t > end_ts + 2:
+            continue
+        picked.append(row)
+    if not picked:
+        picked = rows[-min(len(rows), points) :]
+    if len(picked) > points:
+        out_rows = []
+        last = len(picked) - 1
+        for i in range(points):
+            out_rows.append(picked[int(round(i * last / max(1, points - 1)))])
+        picked = out_rows
+    return [
+        {
+            "t": _watt_ts(r.ts),
+            "power_kw": round(float(r.used_kw or 0.0), 2),
+            "gpu_kw": round(float(r.gpu_kw or 0.0), 2),
+        }
+        for r in picked
+    ]
+
+
+def last_watt_by_rack(db: Session) -> dict[str, dict[str, float]]:
+    """Newest stored shelf/GPU kW per registered rack."""
+    rows = list(db.scalars(select(MaxLpsRackWatt).order_by(MaxLpsRackWatt.ts.desc()).limit(400)).all())
+    out: dict[str, dict[str, float]] = {}
+    for row in rows:
+        if row.rack_id in out:
+            continue
+        out[row.rack_id] = {
+            "shelf_kw": float(row.shelf_kw or 0.0),
+            "gpu_kw": float(row.gpu_kw or 0.0),
+        }
+    return out
 
 
 def record_from_view(db: Session, view: dict[str, Any]) -> None:

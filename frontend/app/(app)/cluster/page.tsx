@@ -16,6 +16,7 @@ import { formatKw } from "@/lib/cluster";
 import type { ZoomLevel } from "@/components/ClusterCanvas";
 
 import "./cluster.css";
+import "./pod-power.css";
 import "../network/network.css";
 
 const ClusterCanvas = dynamic(
@@ -55,7 +56,8 @@ export default function ClusterPage() {
   const [restarting, setRestarting] = useState(false);
   const [clusterName, setClusterName] = useState("Firmus");
 
-  const { data: power, setData: setPower, byId: powerByRack } = usePowerLimiter(tab === "floor");
+  const { data: power, setData: setPower, byId: powerByRack } = usePowerLimiter(tab === "floor" || tab === "racks");
+  const inventoryCampus = campus?.source === "inventory";
 
   const hall = halls.find((h) => h.id === hallId) ?? null;
   const selectedRacks = halls.flatMap((h) => h.racks).filter((r) => selectedIds.includes(r.id));
@@ -93,6 +95,16 @@ export default function ClusterPage() {
       cancelled = true;
     };
   }, [loadHalls, loadOverview]);
+
+  useEffect(() => {
+    if (tab !== "racks" && tab !== "floor") return;
+    const id = window.setInterval(() => {
+      loadHalls().catch(() => {
+        /* keep last campus */
+      });
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [tab, loadHalls]);
 
   function replaceRack(updated: ClusterRack) {
     const patch = (list: HallDetail[]) =>
@@ -405,7 +417,7 @@ export default function ClusterPage() {
                   </option>
                 ))}
               </select>
-              {mayEdit && (
+              {mayEdit && !inventoryCampus && (
                 <>
                   <button type="button" className="btn" onClick={openHallDialog} disabled={busy}>
                     New hall
@@ -436,7 +448,7 @@ export default function ClusterPage() {
 
       {tab === "overview" && (
         <section className="cluster-overview">
-          <OverviewDash />
+          <OverviewDash halls={halls} />
         </section>
       )}
 
@@ -452,7 +464,7 @@ export default function ClusterPage() {
               selectedIds={selectedIds}
               focusHallId={flyHallId}
               placeMode={placeMode}
-              canEdit={mayEdit}
+              canEdit={mayEdit && !inventoryCampus}
               powerByRack={powerByRack}
               onSelect={(id, opts) => {
                 setPlaceMode(false);
@@ -486,7 +498,11 @@ export default function ClusterPage() {
             />
           ) : (
             <div className="cluster-canvas cluster-canvas-pending">
-              {mayEdit ? "Create a data hall to start laying out racks." : "No data halls yet."}
+              {inventoryCampus
+                ? "Register a rack in Dynamic Power to see it on the floor."
+                : mayEdit
+                  ? "Create a data hall to start laying out racks."
+                  : "No data halls yet."}
             </div>
           )}
           {power && (
@@ -710,7 +726,7 @@ export default function ClusterPage() {
               rack={selected}
               tab={rackTab}
               onTab={setRackTab}
-              canEdit={mayEdit}
+              canEdit={mayEdit && !inventoryCampus}
               busy={busy || restarting}
               power={powerByRack[selected.id]}
               onClose={() => setSelectedIds([])}
