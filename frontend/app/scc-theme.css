@@ -22,6 +22,9 @@ html[data-theme="scc"] {
   --track: #e2e8f0;
   --track-muted: #e8eef6;
   --btn-hover: #f1f5f9;
+  --hair: #dbe3ee;
+  --hair-strong: #cbd5e1;
+  --overlay: rgba(255, 255, 255, 0.94);
   --radius: 8px;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px -16px rgba(15, 23, 42, 0.18);
   --shadow-lift: 0 10px 28px -18px rgba(15, 23, 42, 0.28);

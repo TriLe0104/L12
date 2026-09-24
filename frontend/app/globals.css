@@ -14,6 +14,9 @@
   --track: #1a1a1a;
   --track-muted: #181818;
   --btn-hover: #1c1c1c;
+  --hair: rgba(255, 255, 255, 0.08);
+  --hair-strong: rgba(255, 255, 255, 0.14);
+  --overlay: rgba(8, 8, 8, 0.9);
 
   --signal: #e10600;
   --signal-wash: rgba(225, 6, 0, 0.14);

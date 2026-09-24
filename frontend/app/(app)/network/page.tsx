@@ -510,7 +510,7 @@ export default function NetworkPage() {
             )}
           </aside>
           <div className="ports-table">
-            <div className="cluster-toolbar" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="cluster-toolbar">
               <div className="cluster-tools" style={{ marginLeft: 0 }}>
                 <input
                   className="field"
