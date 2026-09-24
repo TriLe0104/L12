@@ -11,6 +11,9 @@
   --rule-soft: rgba(255, 255, 255, 0.06);
   --rail-bg: #080808;
   --rail-ink: #cdd6df;
+  --track: #1a1a1a;
+  --track-muted: #181818;
+  --btn-hover: #1c1c1c;
 
   --signal: #e10600;
   --signal-wash: rgba(225, 6, 0, 0.14);
@@ -494,7 +497,7 @@ textarea {
 }
 
 .btn:hover:not(:disabled) {
-  background: #1c1c1c;
+  background: var(--btn-hover);
   border-color: rgba(255, 255, 255, 0.28);
   transform: translateY(-1px);
   box-shadow: 0 8px 18px -14px rgba(0, 0, 0, 0.9);
@@ -3426,7 +3429,7 @@ button.jobcard-thumb:focus-visible {
 
 .list-panel,
 .detail-panel {
-  background: #111;
+  background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   box-shadow: none;
@@ -3721,8 +3724,8 @@ button.jobcard-thumb:focus-visible {
   flex-direction: column;
   justify-content: center;
   padding: 48px clamp(28px, 6vw, 76px);
-  background: #090909;
-  color: #f5f5f5;
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .auth-form {

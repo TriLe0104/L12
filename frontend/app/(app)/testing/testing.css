@@ -2,8 +2,8 @@
   min-height: 100%;
   height: 100%;
   padding: 0.85rem 1.1rem 1rem;
-  background: #070707;
-  color: #f5f5f5;
+  background: var(--paper);
+  color: var(--ink);
   overflow: auto;
 }
 
@@ -18,7 +18,7 @@
   text-align: left;
   padding: 0.55rem 0.7rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #101010;
+  background: var(--panel);
   color: #c4c4c4;
   cursor: pointer;
 }
@@ -26,7 +26,7 @@
 .test-cats button[data-active="true"] {
   border-color: #e10600;
   color: #fff;
-  background: #1a0c0c;
+  background: var(--signal-wash);
 }
 
 .test-cats b {
@@ -52,15 +52,15 @@
   text-align: left;
   padding: 0.5rem 0.6rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #0c0c0c;
-  color: #d8d8d8;
+  background: var(--panel);
+  color: var(--ink);
   cursor: pointer;
   min-height: 3.4rem;
 }
 
 .test-card[data-active="true"] {
   border-color: #e10600;
-  background: #160a0a;
+  background: var(--signal-wash);
   color: #fff;
 }
 
@@ -83,7 +83,7 @@
   margin-bottom: 0.7rem;
   padding: 0.45rem 0.55rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #0c0c0c;
+  background: var(--panel);
 }
 
 .test-launch strong {
@@ -130,7 +130,7 @@
 .testing-table-wrap {
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #0c0c0c;
+  background: var(--panel);
 }
 
 .testing-table {
@@ -164,7 +164,7 @@
 }
 
 .testing-table tr[data-status="running"] .status-cell {
-  color: #f5f5f5;
+  color: var(--ink);
 }
 
 .testing-table tr[data-status="stopped"],

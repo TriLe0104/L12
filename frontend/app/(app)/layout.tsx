@@ -8,6 +8,7 @@ import { Avatar } from "@/components/Avatar";
 import { BrandMark } from "@/components/Brand";
 import { canAdministerPeople, useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
+import "@/app/scc-theme.css";
 
 const IconCluster = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">

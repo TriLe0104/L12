@@ -19,6 +19,9 @@ html[data-theme="scc"] {
   --stop: #dc2626;
   --rail-bg: #0d3b7a;
   --rail-ink: #dbeafe;
+  --track: #e2e8f0;
+  --track-muted: #e8eef6;
+  --btn-hover: #f1f5f9;
   --radius: 8px;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px -16px rgba(15, 23, 42, 0.18);
   --shadow-lift: 0 10px 28px -18px rgba(15, 23, 42, 0.28);
@@ -321,11 +324,11 @@ html[data-theme="scc"] .range-bar button[data-active="true"] {
   box-shadow: inset 0 -2px 0 var(--signal);
 }
 
-html[data-theme="scc"] .gauge-arc path:first-of-type {
+html[data-theme="scc"] .gauge-track {
   stroke: #dbe3ee;
 }
 
-html[data-theme="scc"] .gauge-arc path:last-of-type {
+html[data-theme="scc"] .gauge-used {
   stroke: #2563eb;
 }
 

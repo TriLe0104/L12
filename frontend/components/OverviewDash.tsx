@@ -34,14 +34,14 @@ function Gauge({
           <path
             d="M16 66 A 44 44 0 0 1 104 66"
             fill="none"
-            stroke="#1c1c1c"
+            className="gauge-track"
             strokeWidth="8"
             strokeLinecap="butt"
           />
           <path
             d="M16 66 A 44 44 0 0 1 104 66"
             fill="none"
-            stroke="#e10600"
+            className="gauge-used"
             strokeWidth="8"
             strokeDasharray={`${dash} ${c}`}
             strokeLinecap="butt"

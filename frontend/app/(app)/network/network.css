@@ -3,8 +3,8 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  color: #f5f5f5;
-  background: #070707;
+  color: var(--ink);
+  background: var(--paper);
 }
 
 .network-live-pill {
@@ -14,7 +14,7 @@
   height: 2.15rem;
   padding: 0 0.7rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #111;
+  background: var(--panel);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
@@ -94,23 +94,23 @@
 }
 
 .nmap-node rect {
-  fill: #141414;
+  fill: var(--panel);
   stroke: rgba(255, 255, 255, 0.14);
   stroke-width: 1;
 }
 
 .nmap-node[data-role="spine"] rect {
-  fill: #1a1a1a;
+  fill: var(--track);
   stroke: #e10600;
 }
 
 .nmap-node[data-role="leaf"] rect {
-  fill: #161616;
+  fill: var(--panel);
   stroke: rgba(255, 255, 255, 0.22);
 }
 
 .nmap-node[data-role="rack"] rect {
-  fill: #101010;
+  fill: var(--paper);
   stroke: rgba(255, 255, 255, 0.1);
 }
 
@@ -170,7 +170,7 @@
   margin-right: 0.35rem;
   vertical-align: -1px;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  background: #141414;
+  background: var(--field-bg);
 }
 
 .network-legend b[data-k="spine"] {
@@ -190,7 +190,7 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  background: #0b0b0b;
+  background: var(--paper);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 0;
 }
@@ -268,7 +268,7 @@
 
 .tbar-track {
   height: 6px;
-  background: #1c1c1c;
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -341,7 +341,7 @@
 .cage {
   aspect-ratio: 1.15 / 1;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #0a0a0a;
+  background: var(--panel);
   color: #6a6a6a;
   font-size: 0.58rem;
   font-family: var(--font-mono), monospace;
@@ -352,7 +352,7 @@
 .cage[data-state="Active"] {
   background: #2a0d0d;
   border-color: #e10600;
-  color: #f5f5f5;
+  color: var(--ink);
 }
 
 .cage[data-sel="true"] {
@@ -382,7 +382,7 @@
 .network-table th {
   position: sticky;
   top: 0;
-  background: #0c0c0c;
+  background: var(--panel);
   color: #8a8a8a;
   font-weight: 600;
   font-size: 0.68rem;
@@ -400,7 +400,7 @@
 }
 
 .network-table tr[data-state="Active"] .port-state {
-  color: #f5f5f5;
+  color: var(--ink);
 }
 
 .network-table tbody tr:hover {
@@ -435,7 +435,7 @@
 }
 
 .kpi {
-  background: #101010;
+  background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 0.75rem 0.85rem;
 }
@@ -501,7 +501,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0.45rem 0.5rem 0.5rem;
   cursor: pointer;
-  background: #0c0c0c;
+  background: var(--panel);
 }
 
 .spine-cell[data-sel="true"] {
@@ -540,7 +540,7 @@
   height: 0.5rem;
   margin-right: 0.3rem;
   vertical-align: -1px;
-  background: #1a1a1a;
+  background: var(--track);
   border: 1px solid #e10600;
 }
 
