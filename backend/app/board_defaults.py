@@ -215,7 +215,7 @@ DEFAULT_INSPECTION_OPTIONS = ["formal", "standard", "source", "none"]
 DEFAULT_HARDWARE_OPTIONS = ["no", "yes"]
 DEFAULT_PRIORITY_OPTIONS = ["hot", "high", "normal", "low"]
 
-# v2: shop-floor status catalog (need material → ready to ship).
+# v2: default status catalog (need material → ready to ship).
 # v3: materialTypes → selectionLists (options keyed by select field).
 # v4: Priority card field visible by default (was historically hidden).
 # v5: seed inspection / hardware / priority into selectionLists.

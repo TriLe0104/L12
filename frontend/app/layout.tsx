@@ -25,7 +25,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "L12 App",
-  description: "L12 cluster testing — data halls, racks, and health.",
+  description: "L12 — AI server cluster testing: data halls, racks, power, fabric, and provision.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [

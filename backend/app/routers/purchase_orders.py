@@ -130,7 +130,7 @@ def allocate_job_no(
     *,
     reserved: dict[str, int] | None = None,
 ) -> str:
-    """Next shop-floor job order: YYMMDD-NN for the day the job is due."""
+    """Next job order: YYMMDD-NN for the day the job is due."""
     prefix = _job_date_prefix(day)
     db_max = _job_seq_for_prefix(db, prefix)
     mem = reserved.get(prefix, 0) if reserved else 0

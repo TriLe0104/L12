@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="L12 App API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="L12 Cluster Testing API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(

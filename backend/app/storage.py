@@ -315,7 +315,7 @@ def storage_diagnostics() -> dict[str, object]:
 
     bucket = report["bucket"]
     key = f"_diagnostics/{uuid.uuid4().hex}.txt"
-    payload = b"po-calendar storage check"
+    payload = b"l12 storage check"
 
     def describe(exc: Exception) -> str:
         response = getattr(exc, "response", None)

@@ -1,4 +1,4 @@
-"""One-off: turn the supplied TVM logo (opaque black plate) into a transparent-background
+"""One-off: turn a supplied logo (opaque black plate) into a transparent-background
 wordmark plus PWA icons. Run with the backend venv after dropping a new logo in."""
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def main(src_path: str) -> None:
     lockup.save(OUT / "tvm-logo.png")
     print(f"wordmark  {lockup.size}")
 
-    # the "TVM" mark alone lives in the top-left ~40% of the lockup
+    # the mark alone lives in the top-left ~40% of the lockup
     mark = lockup.crop((0, 0, lockup.width, int(lockup.height * 0.42)))
     mark = mark.crop(mark.getbbox())
     mark.save(OUT / "tvm-mark.png")

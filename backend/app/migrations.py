@@ -80,7 +80,7 @@ REPAIRS: list[str] = [
     # Board settings stores status as lowercase keys (`need_material_size`). The old
     # Enum column persisted member NAMES (`NEW`); normalise so both shapes keep working.
     "UPDATE purchase_orders SET status = LOWER(status) WHERE status <> LOWER(status)",
-    # v2 shop-floor catalog — rewrite retired keys before board_settings validation
+    # v2 status catalog — rewrite retired keys before board_settings validation
     # can refuse to drop them. Idempotent; Python repair in board_service covers
     # aliases / case the SQL misses.
     "UPDATE purchase_orders SET status = 'need_material_size' WHERE status IN ('new')",

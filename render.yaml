@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: po-calendar-demo
+    name: l12
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile.render

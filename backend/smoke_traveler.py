@@ -203,7 +203,7 @@ def check_photos() -> None:
     workbook = load_workbook(BytesIO(xlsx))
     part, program = workbook[PART_SHEET], workbook[PROGRAM_SHEET]
     assert len(part._images) >= 2, (
-        f"work order should keep the TVM logo and add the part photo, got {len(part._images)}"
+        f"work order should keep the header logo and add the part photo, got {len(part._images)}"
     )
     assert len(program._images) >= 1, (
         f"program sheet missing the part photo, got {len(program._images)}"

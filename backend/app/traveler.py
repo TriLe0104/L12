@@ -948,7 +948,7 @@ def _xlsx_embed_photo(ws, cell_range: str, img_bytes: bytes | None, keep: list) 
 def _clear_workbook_artifacts(part, prog) -> None:
     """Blank template cells that cannot survive an openpyxl round-trip.
 
-    ``Part 555!A4`` (merged A4:O8, under the TVM logo) holds an Excel
+    ``Part 555!A4`` (merged A4:O8, under the header logo) holds an Excel
     image-in-cell rich value, stored in the file as an ``#VALUE!`` error plus
     a value-metadata pointer. openpyxl drops the rich-value parts, so the raw
     error is all that is left and Excel renders a literal ``#VALUE!``.
@@ -1626,8 +1626,8 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
         else:
             center(text, (x0 + x1) / 2, mid_y, font=font, size=size, width=width, height=height)
 
-    # Uploaded part photo in the top-right drawing slot (same band as the TVM
-    # logo). Cover the stock CAD artwork, then draw with the same bottom-left
+    # Uploaded part photo in the top-right drawing slot (same band as the
+    # header logo). Cover the stock CAD artwork, then draw with the same bottom-left
     # placement that used to work — mask=auto was swallowing JPEGs.
     photo_bytes = _photo_bytes(fields)
     _overlay_draw_photo(c, photo_bytes, 400.0, 58.0, 160.0, 108.0, wipe=True)
@@ -1693,7 +1693,7 @@ def _build_template_overlay_pdf(fields: dict[str, Any]) -> bytes:
 
     c.showPage()
 
-    # Leave the Excel-rendered TVM lockup alone — it is the wide/stretched
+    # Leave the Excel-rendered header lockup alone — it is the wide/stretched
     # header mark. The card photo sits in A4:O8, the merged box under it.
     _overlay_draw_photo(c, photo_bytes, 66.0, 100.5, 218.0, 50.5)
     # Material Type / Specification sit on a white Excel fill. Paint the same
