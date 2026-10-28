@@ -162,6 +162,7 @@ export default function MaxLpsPage() {
   const loadBusy = useRef(false);
   const [loopReset, setLoopReset] = useState(0);
   const [loopMs, setLoopMs] = useState(DEFAULT_INTERVAL_MS);
+  const [continuous, setContinuous] = useState(false);
   const [tableMs, setTableMs] = useState(TABLE_DEFAULT_MS);
   const [tableField, setTableField] = useState(String(TABLE_DEFAULT_MS));
   const tableMsRef = useRef(TABLE_DEFAULT_MS);
@@ -174,7 +175,9 @@ export default function MaxLpsPage() {
   const [viewH, setViewH] = useState(640);
   const listOuter = useRef<HTMLDivElement>(null);
   const prevUsed = useRef<number | null>(null);
-  const pollMs = Math.min(1000, Math.max(MIN_INTERVAL_MS, loopMs));
+  const pollMs = continuous
+    ? Math.min(250, Math.max(MIN_INTERVAL_MS, loopMs))
+    : Math.min(1000, Math.max(MIN_INTERVAL_MS, loopMs));
   const loopStepRef = useRef<number | null>(null);
   const reshuffleRef = useRef(false);
   const [wattTick, setWattTick] = useState(0);
@@ -205,6 +208,7 @@ export default function MaxLpsPage() {
       setView(next);
       metaRef.current = next.gpus;
       setLoopMs(intervalMsFromS(next.algo?.interval_s));
+      setContinuous(Boolean(next.algo?.continuous));
       const step = next.loop_step ?? next.tick ?? 0;
       if (loopStepRef.current == null || step !== loopStepRef.current) {
         loopStepRef.current = step;
@@ -384,10 +388,11 @@ export default function MaxLpsPage() {
   const rackAvailKw = availableKw > 0 ? availableKw : totalKw;
   const gpuFrac = (view?.algo?.gpu_power_percent ?? 75) / 100;
   const gpuAvailKw =
-    view?.totals?.allowable_kw && view.totals.allowable_kw > 0
+    typeof view?.totals?.allowable_kw === "number"
       ? view.totals.allowable_kw
-      : availableKw * gpuFrac;
-  const gpuLeftKw = gpuAvailKw - gpuUsedKw;
+      : Math.max(0, availableKw - rackUsedKw) * gpuFrac;
+  const gpuLeftKw =
+    typeof view?.totals?.gpu_left_kw === "number" ? view.totals.gpu_left_kw : gpuAvailKw - gpuUsedKw;
   const rackHeadroomKw = availableKw - rackUsedKw;
   const overheadKw = useMemo(
     () => (view?.racks ?? []).reduce((s, r) => s + (r.overhead_kw || 0), 0),
@@ -607,7 +612,7 @@ export default function MaxLpsPage() {
         <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
           <span>GPU cap left</span>
           <b>{formatRackKw(Math.max(0, gpuLeftKw))}</b>
-          <small>GPU share of envelope − live watts</small>
+          <small>Total available × GPU power % − draw. An uncapped node is held at its BMC max.</small>
         </article>
       </section>
 
@@ -695,7 +700,7 @@ export default function MaxLpsPage() {
                 step={1}
                 value={tableField}
                 aria-label="Power ranking refresh in milliseconds"
-                title="How often this ranking list re-reads live watts and reorders, in milliseconds. 1 ms to 120 s. A read still running finishes before the next one starts. Redfish and cap updates keep using Frequency."
+                title="How often this ranking list re-reads live watts and reorders, in milliseconds. 1 ms to 120 s. A read still running finishes before the next one starts. Redfish and cap updates keep using Frequency, or Continuous when that is on."
                 onChange={(e) => setTableField(e.target.value)}
                 onBlur={() => commitTable(tableField)}
                 onKeyDown={(e) => {
@@ -781,7 +786,7 @@ export default function MaxLpsPage() {
               {power?.mode === "static" ? (
                 <p className="lps-event">Dynamic Power off — caps restored to BMC AllowableMax. Redfish watts still update.</p>
               ) : null}
-              <RunOn onChange={onLoopTargets} />
+              <RunOn onChange={onLoopTargets} onWritten={() => void load()} />
               {power ? (
                 <PowerPolicyFields
                   data={power}
@@ -797,6 +802,7 @@ export default function MaxLpsPage() {
               )}
               <LoopFields
                 intervalS={view?.algo?.interval_s ?? 10}
+                continuous={Boolean(view?.algo?.continuous)}
                 gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 desiredCapPct={view?.algo?.desired_cap_percent ?? 80}
                 gpuMinW={view?.algo?.gpu_min_w ?? 200}
@@ -807,8 +813,14 @@ export default function MaxLpsPage() {
               <p className="lps-event">
                 tick {power?.tick ?? view?.tick ?? 0}
                 {power?.last_event ? ` · ${power.last_event}` : ""}
-                {" · next in "}
-                <EtaClock ms={loopMs} resetKey={loopReset} />
+                {continuous ? (
+                  " · back to back"
+                ) : (
+                  <>
+                    {" · next in "}
+                    <EtaClock ms={loopMs} resetKey={loopReset} />
+                  </>
+                )}
               </p>
               {selected ? (
                 <>
@@ -834,7 +846,9 @@ export default function MaxLpsPage() {
               ) : (
                 <p className="maxlps-hint">
                   {view?.algo
-                    ? `Click a GPU for process, curve, and per-GPU min/max · every ${formatInterval(intervalMsFromS(view.algo.interval_s))}`
+                    ? view.algo.continuous
+                      ? "Click a GPU for process, curve, and per-GPU min/max · PowerWatts and caps run back to back"
+                      : `Click a GPU for process, curve, and per-GPU min/max · every ${formatInterval(intervalMsFromS(view.algo.interval_s))}`
                     : "Click a GPU to inspect it."}
                 </p>
               )}
@@ -1381,7 +1395,13 @@ function ShelfRow({
   );
 }
 
-function RunOn({ onChange }: { onChange: (racks: LoopTargetRack[]) => void }) {
+function RunOn({
+  onChange,
+  onWritten,
+}: {
+  onChange: (racks: LoopTargetRack[]) => void;
+  onWritten?: () => void;
+}) {
   const [racks, setRacks] = useState<LoopTargetRack[]>([]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const writing = useRef(false);
@@ -1414,6 +1434,7 @@ function RunOn({ onChange }: { onChange: (racks: LoopTargetRack[]) => void }) {
       const next = await api.patchLoopTargets(body);
       setRacks(next.racks);
       onChange(next.racks);
+      onWritten?.();
     } catch {
       writing.current = false;
       try {
@@ -1457,7 +1478,7 @@ function RunOn({ onChange }: { onChange: (racks: LoopTargetRack[]) => void }) {
           {onCount} / {nodeCount}
         </span>
       </div>
-      <p>Caps post only for checked nodes. Unchecked nodes still count in GPU power used and in the cap left to allocate, then return to their BMC max.</p>
+      <p>Caps post only for checked nodes. Unchecked nodes still count in GPU power used, return to their BMC max, and that max comes off GPU cap left.</p>
       <div className="maxlps-run-list" role="group" aria-label="Racks and nodes in the control loop">
         {racks.length ? (
           racks.map((rack) => {
@@ -1520,6 +1541,7 @@ function RunOn({ onChange }: { onChange: (racks: LoopTargetRack[]) => void }) {
 
 function LoopFields({
   intervalS,
+  continuous,
   gpuPowerPct,
   desiredCapPct,
   gpuMinW,
@@ -1528,6 +1550,7 @@ function LoopFields({
   onChange,
 }: {
   intervalS: number;
+  continuous: boolean;
   gpuPowerPct: number;
   desiredCapPct: number;
   gpuMinW: number;
@@ -1627,8 +1650,30 @@ function LoopFields({
       }}
     >
       <PolicyField
+        label="Continuous"
+        tip="When on, the next PowerWatts read starts as soon as the previous one finishes, and PowerLimitWatts is sent the same way when the cap needs an update. Frequency still paces power shelves, and paces both calls when this is off. An unchanged cap, within 2 W, is not sent again."
+      >
+        <button
+          type="button"
+          className="maxlps-continuous"
+          data-active={continuous ? "true" : "false"}
+          aria-pressed={continuous}
+          aria-label="Continuous PowerWatts and PowerLimitWatts"
+          disabled={locked}
+          onClick={() => {
+            if (locked) return;
+            void api
+              .patchClusterPower({ continuous: !continuous })
+              .then(() => onChange())
+              .catch(() => undefined);
+          }}
+        >
+          {continuous ? "On" : "Off"}
+        </button>
+      </PolicyField>
+      <PolicyField
         label="Frequency"
-        tip="How often live power is read, the GPU cap is calculated, and a new cap is sent, in milliseconds. 1 ms to 300 s. A read that is still running finishes before the next one starts. An unchanged cap is not sent again."
+        tip="How often live power is read, the GPU cap is calculated, and a new cap is sent, in milliseconds, when Continuous is off. 1 ms to 300 s. A read that is still running finishes before the next one starts. An unchanged cap is not sent again. Power shelves always use this."
       >
         <span className="lps-policy-pct">
           <input
@@ -1645,7 +1690,7 @@ function LoopFields({
       </PolicyField>
       <PolicyField
         label="GPU power"
-        tip="Share of available power (total × threshold) reserved for GPUs. Caps refit to this on the next frequency tick."
+        tip="Percent of total available power used as the GPU cap. Total available is threshold × total minus the live rack draw. Caps refit to this on the next cap pass."
       >
         <span className="lps-policy-pct">
           <input
@@ -1654,7 +1699,7 @@ function LoopFields({
             max={100}
             step={1}
             value={gpuPct}
-            aria-label="GPU share of available power"
+            aria-label="GPU power percent of total available power"
             {...bind(setGpuPct)}
           />
           %
@@ -1990,7 +2035,7 @@ function GpuInspector({
         </div>
         <div className="maxlps-inspect-span">
           <dt>Workload</dt>
-          <dd>
+          <dd title={live.workload && live.workload !== "—" ? live.workload : undefined}>
             {live.workload ?? gpu.workload ?? "—"}
             {(live.workloadKind ?? gpu.workload_kind) && (live.workloadKind ?? gpu.workload_kind) !== "idle"
               ? ` · ${live.workloadKind ?? gpu.workload_kind}`

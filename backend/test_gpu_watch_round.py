@@ -128,8 +128,20 @@ def test_unselected_gpus_consume_cap_left() -> None:
     assert gpu_power._unselected_draw_w(rows, None) == 0.0
     assert gpu_power._unselected_draw_w(rows, set()) == 1200.0
     assert max(0.0, share - 1200.0) == 0.0
-    # Static has no SetPoint fit. Cap left is still the share minus every live watt.
+    # Static has no SetPoint fit. Cap left is still the share minus every live watt
+    # while every node is selected. An uncapped node is held at its BMC max.
     assert share - used == share - 1200.0
+    uncapped = [
+        {"rack_id": "r1", "node": 1, "watts": 180.0, "hw_max": 1400.0},
+        {"rack_id": "r1", "node": 1, "watts": 180.0, "hw_max": 1400.0},
+        {"rack_id": "r1", "node": 2, "watts": 190.0, "hw_max": 1400.0},
+    ]
+    hold = gpu_power._unselected_hold_w(uncapped, {("r1", 2)})
+    assert hold == 2800.0
+    draw_left = 10_000.0 - (180.0 + 180.0 + 190.0)
+    held_left = 10_000.0 - 190.0 - hold
+    assert held_left == 10_000.0 - 190.0 - 2800.0
+    assert held_left < draw_left
 
 
 def test_live_power_response_follows_the_latest_read() -> None:

@@ -81,6 +81,9 @@ class LoopState:
         self.last_posted: dict[str, float] = {}
         self.cap_result: dict[str, dict[str, int]] = {}
         self.control = True
+        # When on, PowerWatts and PowerLimitWatts run back to back.
+        # Frequency still paces shelves, and paces both calls when this is off.
+        self.continuous = False
 
 
 LOOP = LoopState()
@@ -93,10 +96,20 @@ def apply_loop(
     desired_cap_percent: float | None = None,
     gpu_min_w: float | None = None,
     gpu_max_w: float | None = None,
+    continuous: bool | None = None,
 ) -> bool:
     """Tune the GPU cap loop. Percents may be 0–1 or 10–100."""
     changed = False
     reset_caps = False
+    if continuous is not None:
+        flag = bool(continuous)
+        if flag != LOOP.continuous:
+            changed = True
+            # Recompute on the next pass. Leave the last posted watts so an
+            # unchanged cap, within 2 W, is still not sent again.
+            if flag:
+                LOOP.force = True
+        LOOP.continuous = flag
     if interval_s is not None:
         v = max(MIN_INTERVAL_S, min(MAX_INTERVAL_S, float(interval_s)))
         if abs(v - LOOP.interval_s) >= 0.0005:
@@ -199,15 +212,33 @@ def _row_in_loop(rec: dict[str, Any], keys: set[tuple[str, int]] | None) -> bool
 def _unselected_draw_w(live_rows: list[dict[str, Any]], loop_keys: set[tuple[str, int]] | None) -> float:
     """Live watts on nodes that are not selected for a dynamic cap.
 
-    Those watts stay in GPU power used and come off the GPU share before a
-    cap is allocated. Dynamic and static both count them. Caps are not posted
-    to these nodes.
+    Those watts stay in GPU power used. Caps are not posted to these nodes.
     """
     total = 0.0
     for rec in live_rows:
         if _row_in_loop(rec, loop_keys):
             continue
         total += max(0.0, float(rec.get("watts") or 0.0))
+    return total
+
+
+def _unselected_hold_w(live_rows: list[dict[str, Any]], loop_keys: set[tuple[str, int]] | None) -> float:
+    """Power reserved for nodes that are not in the loop.
+
+    An uncapped node is restored to its BMC max, so GPU cap left holds that
+    ceiling, not only the watts it is drawing right now.
+    """
+    total = 0.0
+    for rec in live_rows:
+        if _row_in_loop(rec, loop_keys):
+            continue
+        draw = max(0.0, float(rec.get("watts") or 0.0))
+        ceiling = rec.get("hw_max")
+        if ceiling is None:
+            ceiling = rec.get("bmc_hi")
+        if ceiling is None:
+            ceiling = GPU_TDP_W
+        total += max(draw, float(ceiling))
     return total
 
 
@@ -534,6 +565,264 @@ def _ensure_hist(
     return list(LOOP.gpu_hist.get(gid) or [])
 
 
+_GID_RE = re.compile(r"^(?P<rack>.+)-n(?P<node>\d+)-g(?P<gpu>\d+)$")
+_PROC_TTL = 2.0
+_OS_LOGIN_TTL = 5.0
+_PROC_LOCK = threading.Lock()
+_PROC_BUSY: set[str] = set()
+# os ip -> (stamp, rows by nvidia-smi index, command succeeded)
+_PROC_CACHE: dict[str, tuple[float, dict[int, dict[str, Any]], bool]] = {}
+_OS_LOGIN_LOCK = threading.Lock()
+_OS_LOGIN: dict[str, tuple[float, dict[str, str] | None]] = {}
+_UNKNOWN_PROC = {"process": "—", "workload": "—", "workload_kind": "idle", "pid": 0}
+_IDLE_PROC = {"process": "idle", "workload": "—", "workload_kind": "idle", "pid": 0}
+
+# One shot on the node OS. The first nvidia-smi must succeed; an empty app
+# list is a real idle GPU, not a failed read.
+_OS_PROC_SH = """set -e
+nvidia-smi --query-gpu=index,uuid --format=csv,noheader,nounits
+printf '\\n--APPS--\\n'
+nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory --format=csv,noheader,nounits || true
+printf '\\n--CMD--\\n'
+pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader,nounits 2>/dev/null || true)
+for p in $pids; do
+  case $p in
+    ''|*[!0-9]*) continue ;;
+  esac
+  printf '%s ' "$p"
+  if [ -r "/proc/$p/cmdline" ]; then
+    tr '\\0' ' ' < "/proc/$p/cmdline"
+  fi
+  printf '\\n'
+done
+"""
+
+
+def _parse_gid(gpu_id: str) -> tuple[str, int, int] | None:
+    match = _GID_RE.match(gpu_id or "")
+    if not match:
+        return None
+    node = int(match.group("node"))
+    gpu = int(match.group("gpu"))
+    if node < 1 or gpu < 1 or gpu > GPUS_PER_NODE:
+        return None
+    return match.group("rack"), node, gpu
+
+
+def _csv_cell(value: str) -> str:
+    text = (value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        return text[1:-1].strip()
+    return text
+
+
+def _procs_from_smi(raw: str) -> tuple[dict[int, dict[str, Any]], bool]:
+    """Parse one node OS nvidia-smi dump. False means the read did not succeed."""
+    text = raw or ""
+    if "--APPS--" not in text:
+        return {}, False
+    gpu_part, rest = text.split("--APPS--", 1)
+    if "--CMD--" in rest:
+        app_part, cmd_part = rest.split("--CMD--", 1)
+    else:
+        app_part, cmd_part = rest, ""
+    uuid_index: dict[str, int] = {}
+    for line in gpu_part.splitlines():
+        parts = [_csv_cell(part) for part in line.split(",")]
+        if len(parts) < 2 or not parts[0].lstrip("-").isdigit():
+            continue
+        uuid_index[parts[1]] = int(parts[0])
+    cmds: dict[int, str] = {}
+    for line in cmd_part.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, cmd = line.partition(" ")
+        if not pid_s.isdigit():
+            continue
+        cmds[int(pid_s)] = cmd.strip()
+    grouped: dict[int, list[tuple[int, int, str, str]]] = {}
+    for line in app_part.splitlines():
+        parts = [_csv_cell(part) for part in line.split(",")]
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+        idx = uuid_index.get(parts[0])
+        if idx is None:
+            continue
+        mem = 0
+        if len(parts) >= 4:
+            try:
+                mem = int(float(parts[3]))
+            except ValueError:
+                mem = 0
+        pid = int(parts[1])
+        name = parts[2]
+        base = (name.rsplit("/", 1)[-1] or name)[:80]
+        cmd = (cmds.get(pid) or name)[:160]
+        grouped.setdefault(idx, []).append((mem, pid, base, cmd))
+    out: dict[int, dict[str, Any]] = {}
+    for idx, bucket in grouped.items():
+        bucket.sort(key=lambda row: row[0], reverse=True)
+        _mem, pid, base, cmd = bucket[0]
+        extra = len(bucket) - 1
+        workload = cmd or base or "—"
+        if extra:
+            workload = f"{workload} +{extra}"[:160]
+        out[idx] = {
+            "process": base or "—",
+            "workload": workload,
+            "workload_kind": "idle",
+            "pid": pid,
+        }
+    return out, True
+
+
+def _proc_row(rows: dict[int, dict[str, Any]] | None, *, ok: bool, gpu_n: int) -> dict[str, Any]:
+    if not ok or rows is None:
+        return dict(_UNKNOWN_PROC)
+    found = rows.get(gpu_n - 1)
+    if not found:
+        return dict(_IDLE_PROC)
+    return found
+
+
+def _load_os_login(rack_id: str, node_index: int) -> dict[str, str] | None:
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from .db import SessionLocal
+        from .models import MaxLpsNode
+
+        with SessionLocal() as db:
+            node = db.scalars(
+                select(MaxLpsNode)
+                .where(MaxLpsNode.rack_id == rack_id, MaxLpsNode.index == node_index)
+                .options(selectinload(MaxLpsNode.rack))
+                .limit(1)
+            ).first()
+            if node is None:
+                return None
+            os_ip = (node.os_ip or "").strip()
+            user = (node.os_username or "").strip()
+            password = node.os_password or ""
+            pxe = (node.rack.pxe_server or "").strip() if node.rack is not None else ""
+        if not os_ip or not user or not password:
+            return None
+        return {"os_ip": os_ip, "user": user, "password": password, "pxe": pxe}
+    except Exception:
+        return None
+
+
+def _os_login_for(rack_id: str, node_index: int) -> dict[str, str] | None:
+    key = f"{rack_id}|{node_index}"
+    now = time.time()
+    with _OS_LOGIN_LOCK:
+        hit = _OS_LOGIN.get(key)
+        if hit and now - hit[0] < _OS_LOGIN_TTL:
+            return hit[1]
+    loaded = _load_os_login(rack_id, node_index)
+    with _OS_LOGIN_LOCK:
+        _OS_LOGIN[key] = (time.time(), loaded)
+    return loaded
+
+
+def _read_os_procs(login: dict[str, str]) -> tuple[dict[int, dict[str, Any]], bool]:
+    """nvidia-smi on the node OS, through that rack's PXE. No password in the command."""
+    import paramiko
+
+    from . import pxe_hop
+
+    host = login["os_ip"]
+    pxe = (login.get("pxe") or "").strip()
+    try:
+        if pxe:
+            if not pxe_hop.ensure_host(pxe):
+                return {}, False
+            with pxe_hop.on_host(pxe):
+                local = pxe_hop.open_https_tunnel(f"ssh-{host}", host, 22)
+        else:
+            pxe_hop.ensure_saved()
+            chosen = pxe_hop.bind_target(host)
+            with pxe_hop.on_host(chosen):
+                local = pxe_hop.open_https_tunnel(f"ssh-{host}", host, 22)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                "127.0.0.1",
+                port=int(local),
+                username=login["user"],
+                password=login["password"],
+                timeout=8,
+                allow_agent=False,
+                look_for_keys=False,
+                banner_timeout=8,
+                auth_timeout=8,
+            )
+            stdin, stdout, _stderr = client.exec_command("bash -s", timeout=8)
+            stdin.write(_OS_PROC_SH)
+            stdin.channel.shutdown_write()
+            stdout.channel.settimeout(8)
+            raw = stdout.read().decode("utf-8", "replace")
+            code = stdout.channel.recv_exit_status()
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+    except Exception:
+        return {}, False
+    if code != 0:
+        return {}, False
+    return _procs_from_smi(raw)
+
+
+def _refresh_os_procs(login: dict[str, str]) -> None:
+    ip = login["os_ip"]
+    try:
+        rows, ok = _read_os_procs(login)
+        now = time.time()
+        with _PROC_LOCK:
+            prev = _PROC_CACHE.get(ip)
+            if ok:
+                _PROC_CACHE[ip] = (now, rows, True)
+            elif prev:
+                _PROC_CACHE[ip] = (now, prev[1], prev[2])
+            else:
+                _PROC_CACHE[ip] = (now, {}, False)
+    finally:
+        with _PROC_LOCK:
+            _PROC_BUSY.discard(ip)
+
+
+def _gpu_process(gpu_id: str) -> dict[str, Any]:
+    """Latest process on this GPU. A read still running keeps the previous one."""
+    parsed = _parse_gid(gpu_id)
+    if not parsed:
+        return dict(_UNKNOWN_PROC)
+    rack_id, node_index, gpu_n = parsed
+    login = _os_login_for(rack_id, node_index)
+    if not login:
+        return dict(_UNKNOWN_PROC)
+    ip = login["os_ip"]
+    now = time.time()
+    with _PROC_LOCK:
+        hit = _PROC_CACHE.get(ip)
+        stale = hit is None or now - hit[0] >= _PROC_TTL
+        if stale and ip not in _PROC_BUSY:
+            _PROC_BUSY.add(ip)
+            threading.Thread(
+                target=_refresh_os_procs, args=(dict(login),), daemon=True, name="maxlps-gpu-proc"
+            ).start()
+        rows = hit[1] if hit else None
+        ok = bool(hit and hit[2])
+        tried = hit is not None
+    if tried and not ok:
+        return {"process": "—", "workload": "OS did not answer", "workload_kind": "idle", "pid": 0}
+    return _proc_row(rows, ok=ok, gpu_n=gpu_n)
+
+
 def watch_curve(gpu_id: str) -> dict[str, Any]:
     """Live inspector trace: append a sample and return the retained window."""
     now = time.time()
@@ -559,32 +848,28 @@ def watch_curve(gpu_id: str) -> dict[str, Any]:
         if live.get("max_w") is not None:
             hi = float(live["max_w"])
         curve = _ensure_hist(gpu_id, now, watts, sp, lo, hi, hot=False, run="ready", off=False)
+        proc = _gpu_process(gpu_id)
         return {
             "id": gpu_id,
             "watts": round(watts, 1),
             "setpoint_w": round(sp, 1),
             "min_w": round(lo, 1),
             "max_w": round(hi, 1),
-            "process": "—",
-            "workload": "—",
-            "workload_kind": "idle",
-            "pid": 0,
+            **proc,
             "curve": curve,
             "read_ms": live_read_ms(gpu_id),
             **cap_post_stats(gpu_id),
         }
     watts = float(cached.get("watts") or 0.0) if cached and cached.get("source") == "redfish" else 0.0
     sp = float(cached.get("setpoint_w") or 0.0) if cached and cached.get("source") == "redfish" else 0.0
+    proc = _gpu_process(gpu_id)
     return {
         "id": gpu_id,
         "watts": round(watts, 1),
         "setpoint_w": round(sp, 1),
         "min_w": round(lo, 1),
         "max_w": round(hi, 1),
-        "process": "—",
-        "workload": "—",
-        "workload_kind": "idle",
-        "pid": 0,
+        **proc,
         "curve": list(LOOP.gpu_hist.get(gpu_id) or []),
         "read_ms": live_read_ms(gpu_id),
         **cap_post_stats(gpu_id),
@@ -614,6 +899,41 @@ def _poll_wait_s(elapsed_s: float, interval_s: float | None = None) -> float:
     return max(0.0, float(interval) - max(0.0, elapsed_s))
 
 
+# A hop that fails before this, or a loop with no BMCs, must not tight-spin SQLite.
+_GPU_SPIN_FLOOR_S = 0.05
+
+
+def _gpu_round_wait_s(elapsed_s: float, *, had_targets: bool) -> float:
+    """Seconds before the next PowerWatts round.
+
+    Continuous starts the next read as soon as this one finishes. A pass with
+    no BMCs, or one that returned in under 50 ms, still waits so an empty
+    inventory or a dead hop does not tight-spin SQLite. Shelves do not use
+    this; they stay on Frequency.
+    """
+    elapsed = max(0.0, float(elapsed_s))
+    if not had_targets:
+        return max(float(LOOP.interval_s), _GPU_SPIN_FLOOR_S)
+    if LOOP.continuous:
+        if elapsed < _GPU_SPIN_FLOOR_S:
+            return _GPU_SPIN_FLOOR_S - elapsed
+        return 0.0
+    return _poll_wait_s(elapsed)
+
+
+def _cap_check_open(*, due: bool, busy: bool) -> bool:
+    """True when a PowerLimitWatts pass may start.
+
+    Frequency opens a pass on each tick. Continuous opens one whenever the
+    previous pass has finished. A pass still running does not start another.
+    """
+    if busy:
+        return False
+    if LOOP.continuous:
+        return True
+    return bool(due)
+
+
 def _sleep_poll_interval(started: float) -> None:
     time.sleep(_poll_wait_s(time.time() - started))
 
@@ -627,7 +947,9 @@ def _note_usage(gid: str, watts: float, now: float) -> None:
     last = LOOP.sample_t.get(gid, 0.0)
     # One sample per Frequency tick. A slower interval still keeps a reading
     # about every 0.7s so the cap uses the window average, not one spike.
-    if now - last < min(0.7, max(LOOP.interval_s, MIN_INTERVAL_S)):
+    # Continuous keeps every reading so the next cap sees the latest watts.
+    gap = 0.0 if LOOP.continuous else min(0.7, max(LOOP.interval_s, MIN_INTERVAL_S))
+    if gap > 0 and now - last < gap:
         return
     LOOP.sample_t[gid] = now
     q = LOOP.usage_win.get(gid)
@@ -642,6 +964,39 @@ def _window_avg(gid: str, fallback: float) -> float:
     if not q:
         return fallback
     return sum(q) / len(q)
+
+
+def _gpu_allowable_w(envelope_w: float, rack_draw_w: float, gpu_frac: float) -> float:
+    """GPU cap budget. GPU power % of total available power.
+
+    Total available is the threshold envelope minus live rack draw.
+    The cap stays inside that available power.
+    """
+    headroom = max(0.0, float(envelope_w) - max(0.0, float(rack_draw_w)))
+    frac = min(1.0, max(0.0, float(gpu_frac)))
+    return headroom * frac
+
+
+def _shown_rack_draw_w(racks: list[tuple[str, bool, str]], envelope_w: float) -> float:
+    """Watts of live shelf draw for the racks the page still shows.
+
+    A rack that would push the running sum past the envelope is left out,
+    matching the snapshot filter that builds the rack list.
+    """
+    items: list[tuple[bool, str, float]] = []
+    for rid, extra, label in racks:
+        _rows, live_sum, live, _src = _merge_shelves(rid)
+        shelf_kw = float(live_sum) if live else 0.0
+        items.append((bool(extra), label, shelf_kw))
+    items.sort(key=lambda row: (row[0], row[1]))
+    used_kw = 0.0
+    limit_kw = max(0.0, float(envelope_w)) / 1000.0
+    for _extra, _label, shelf_kw in items:
+        nxt = used_kw + shelf_kw
+        if nxt > limit_kw + 0.05:
+            continue
+        used_kw = nxt
+    return used_kw * 1000.0
 
 
 def _post_caps(
@@ -1559,6 +1914,7 @@ def _finish_gpu_round(
 def _gpu_watch_forever() -> None:
     while True:
         t0 = time.time()
+        had_targets = False
         try:
             from . import pxe_hop
 
@@ -1578,6 +1934,7 @@ def _gpu_watch_forever() -> None:
                 )
                 _sleep_poll_idle()
                 continue
+            had_targets = True
             grouped, bare = group_by_pxe(nodes, _rack_pxe_map(), lambda n: n[0])
             missing_pw = 0
             hopped: set[str] = set()
@@ -1624,7 +1981,11 @@ def _gpu_watch_forever() -> None:
                 _LIVE_GPU_ERR = str(exc)[:180]
                 if not _LIVE_GPU:
                     _LIVE_GPU_T = time.time()
-        _sleep_poll_interval(t0)
+        wait = _gpu_round_wait_s(time.time() - t0, had_targets=had_targets)
+        if wait:
+            time.sleep(wait)
+        if had_targets and LOOP.continuous:
+            _schedule_continuous_caps()
 
 
 _WATCH_THREAD: threading.Thread | None = None
@@ -1701,6 +2062,11 @@ def _live_bounds(gid: str, live: dict[str, Any]) -> tuple[float, float]:
 
 
 _CAP_BUSY = False
+_CAP_FOLLOW = False
+_CAP_FOLLOW_THREAD: threading.Thread | None = None
+_CAP_FOLLOW_LOCK = threading.Lock()
+_SNAP_LOCK = threading.Lock()
+_LAST_POWER_SNAP: dict[str, Any] | None = None
 
 
 def live_read_ms(gpu_id: str) -> float | None:
@@ -1805,14 +2171,63 @@ def _apply_gpu_caps(patches: list[dict[str, Any]]) -> None:
                 _remember_caps(left, [])
             except Exception:
                 pass
+        global _CAP_FOLLOW
         _CAP_BUSY = False
+        if LOOP.continuous:
+            _schedule_continuous_caps()
+        else:
+            _CAP_FOLLOW = False
+
+
+def _schedule_continuous_caps() -> None:
+    """Run one cap check as soon as the previous PowerLimitWatts pass is done.
+
+    A check still running, or a cap post still in flight, does not start a
+    second one. The flag asks that in-flight pass to look again when it finishes.
+    """
+    global _CAP_FOLLOW, _CAP_FOLLOW_THREAD
+    if not LOOP.continuous:
+        return
+    with _CAP_FOLLOW_LOCK:
+        if _CAP_BUSY:
+            _CAP_FOLLOW = True
+            return
+        running = _CAP_FOLLOW_THREAD
+        if running is not None and running.is_alive() and running is not threading.current_thread():
+            _CAP_FOLLOW = True
+            return
+        _CAP_FOLLOW = False
+        nxt = threading.Thread(target=_continuous_cap_pass, daemon=True, name="maxlps-cap-follow")
+        _CAP_FOLLOW_THREAD = nxt
+        nxt.start()
+
+
+def _continuous_cap_pass() -> None:
+    global _CAP_FOLLOW, _CAP_FOLLOW_THREAD
+    try:
+        snap = _LAST_POWER_SNAP
+        if isinstance(snap, dict) and LOOP.continuous:
+            snapshot(snap)
+    except Exception:
+        pass
+    with _CAP_FOLLOW_LOCK:
+        if _CAP_BUSY:
+            return
+        again = _CAP_FOLLOW and LOOP.continuous
+        _CAP_FOLLOW = False
+        if _CAP_FOLLOW_THREAD is threading.current_thread():
+            _CAP_FOLLOW_THREAD = None
+    if again:
+        _schedule_continuous_caps()
 
 
 def _kick_cap_patch(patches: list[dict[str, Any]]) -> None:
-    global _CAP_BUSY
+    global _CAP_BUSY, _CAP_FOLLOW
     if not patches:
         return
     if _CAP_BUSY:
+        if LOOP.continuous:
+            _CAP_FOLLOW = True
         return
     _CAP_BUSY = True
     threading.Thread(target=_apply_gpu_caps, args=(patches,), daemon=True, name="maxlps-gpu-cap").start()
@@ -1841,6 +2256,27 @@ def snapshot(
     gpu_id: str | None = None,
     workloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    global _LAST_POWER_SNAP
+    if isinstance(power_snap, dict):
+        _LAST_POWER_SNAP = power_snap
+    with _SNAP_LOCK:
+        return _snapshot_locked(
+            power_snap,
+            top=top,
+            rack_id=rack_id,
+            gpu_id=gpu_id,
+            workloads=workloads,
+        )
+
+
+def _snapshot_locked(
+    power_snap: dict[str, Any],
+    *,
+    top: int = 0,
+    rack_id: str | None = None,
+    gpu_id: str | None = None,
+    workloads: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     now = time.time()
     rows = power_snap.get("racks") or []
     cache_key = (
@@ -1853,6 +2289,7 @@ def snapshot(
         round(LOOP.gpu_min_w, 1),
         round(LOOP.gpu_max_w, 1),
         round(LOOP.interval_s, 3),
+        bool(LOOP.continuous),
         round(_LIVE_GPU_T, 2),
         len(_LIVE_GPU),
         round(sum(float(r.get("watts") or 0) for r in _LIVE_GPU.values()), 1),
@@ -1860,8 +2297,10 @@ def snapshot(
         LOOP.control,
     )
     due = LOOP.force or (now - LOOP.last_step >= LOOP.interval_s)
+    # Continuous must not serve a short cache that skips the cap check.
     if (
-        not gpu_id
+        not LOOP.continuous
+        and not gpu_id
         and not due
         and LOOP.cached_out is not None
         and LOOP.cached_key == cache_key
@@ -1878,7 +2317,8 @@ def snapshot(
     grace = max(0.01, min(1.0, float(power_snap.get("stay_under_pct") or power_snap.get("threshold_pct") or 80.0) / 100.0))
     gpu_frac = LOOP.gpu_power_percent
     desired_p = LOOP.desired_cap_percent
-    max_allowable_w = power_budget_w * grace * gpu_frac
+    envelope_w = power_budget_w * grace
+    active_racks: list[tuple[str, bool, str]] = []
 
     records: list[dict[str, Any]] = []
     overhead_total_w = 0.0
@@ -1890,6 +2330,7 @@ def snapshot(
         off = (r.get("power_state") or "on") == "off" or not enabled
         if off or denied:
             continue
+        active_racks.append((rid, bool(r.get("extra")), _rack_label(r.get("name") or "", r.get("label") or "")))
         hot = bool(r.get("hot") or r.get("at_cap"))
         alloc_kw = float(r.get("allocated_kw") or 0.0)
         used_kw = float(r.get("consumed_kw") or 0.0)
@@ -1921,6 +2362,8 @@ def snapshot(
                     }
                 )
 
+    max_allowable_w = _gpu_allowable_w(envelope_w, _shown_rack_draw_w(active_racks, envelope_w), gpu_frac)
+
     live_map, _live_src = _live_gpu_readings()
     ident = _gpu_identity()
     live_rows: list[dict[str, Any]] = []
@@ -1948,7 +2391,13 @@ def snapshot(
     if controlling != LOOP.control:
         set_control(controlling)
         due = LOOP.force or (now - LOOP.last_step >= LOOP.interval_s)
-    should_post = bool(controlling and controlled) and (due or (not LOOP.last_posted and not _CAP_BUSY))
+    cap_open = _cap_check_open(due=due, busy=_CAP_BUSY)
+    if LOOP.continuous and _CAP_BUSY and (controlled or live_rows):
+        global _CAP_FOLLOW
+        _CAP_FOLLOW = True
+    should_post = bool(controlling and controlled) and (
+        cap_open or (not LOOP.last_posted and not _CAP_BUSY)
+    )
     release_ids = take_loop_release() if controlling else set()
     if not controlling:
         take_loop_release()
@@ -1990,15 +2439,16 @@ def snapshot(
         LOOP.step_n += 1
     best_p = LOOP.last_best_p
     if should_post:
-        if not due:
+        # Continuous posts without advancing the Frequency clock.
+        if not due and not LOOP.continuous:
             LOOP.last_step = now
             LOOP.force = False
             LOOP.step_n += 1
         avgs = [_window_avg(r["id"], float(r["watts"])) for r in controlled]
         bounds = [(float(r["bmc_lo"]), float(r["bmc_hi"])) for r in controlled]
-        # Unselected live watts stay in the GPU sum and reduce what is left
-        # to allocate. The same draw is in totals.gpu_kw in static mode.
-        share_left_w = max(0.0, max_allowable_w - _unselected_draw_w(live_rows, loop_keys))
+        # Unselected nodes stay in the GPU sum. Cap left holds each of them
+        # at its BMC max, then the checked nodes share what remains.
+        share_left_w = max(0.0, max_allowable_w - _unselected_hold_w(live_rows, loop_keys))
         new_caps, best_p = _post_caps(avgs, share_left_w, desired_p, bounds)
         LOOP.last_best_p = best_p
         LOOP.last_caps = new_caps
@@ -2032,7 +2482,7 @@ def snapshot(
         patches.extend(release_patches)
         release_patches = []
         _kick_cap_patch(patches)
-    elif due and not controlling and live_rows and not _CAP_BUSY:
+    elif cap_open and not controlling and live_rows:
         creds = {ip: (user, pw) for _rid, _idx, ip, user, pw in _gpu_live_targets()}
         patches = []
         for rec in live_rows:
@@ -2201,10 +2651,18 @@ def snapshot(
     picked: dict[str, Any] | None = None
     gpu_total_w = 0.0
     cap_total_w = 0.0
+    gpu_committed_w = 0.0
     for i, (watts, gid, rec, sp, lo, hi) in enumerate(gpu_pool, start=1):
         # Selected and unselected live GPUs both count, in dynamic and static.
+        # An uncapped node is held at its BMC max so cap left moves when the
+        # checkbox changes, before that node's watts catch up.
         gpu_total_w += watts
         cap_total_w += sp
+        if _row_in_loop(rec, loop_keys):
+            gpu_committed_w += watts
+        else:
+            ceiling = float(rec.get("hw_max") or hi or GPU_TDP_W)
+            gpu_committed_w += max(float(watts), ceiling)
         if i > limit and not (gpu_id and gid == gpu_id):
             continue
         meta = ident.get(gid) or {}
@@ -2336,10 +2794,12 @@ def snapshot(
             or live_n,
             "cap_kw": round(cap_total_w / 1000.0, 1),
             "allowable_kw": round(max_allowable_w / 1000.0, 1),
+            "gpu_left_kw": round((max_allowable_w - gpu_committed_w) / 1000.0, 1),
             "best_cap_percent": round(best_p * 100.0, 2),
         },
         "algo": {
             "control": LOOP.control,
+            "continuous": bool(LOOP.continuous),
             "interval_s": round(LOOP.interval_s, 3),
             "power_budget_w": round(power_budget_w, 0),
             "budget_grace": round(grace * 100.0, 1),

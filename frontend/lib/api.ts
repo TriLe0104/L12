@@ -681,6 +681,7 @@ export const api = {
     desired_cap_percent?: number;
     gpu_min_w?: number;
     gpu_max_w?: number;
+    continuous?: boolean;
   }) =>
     request<import("./cluster").PowerLimiter>("/api/cluster/power", {
       method: "PATCH",

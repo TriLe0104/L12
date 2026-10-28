@@ -283,10 +283,12 @@ export interface MaxLpsView {
     gpus_total: number;
     cap_kw?: number;
     allowable_kw?: number;
+    gpu_left_kw?: number;
     best_cap_percent?: number;
   };
   algo?: {
     control?: boolean;
+    continuous?: boolean;
     interval_s?: number;
     power_budget_w: number;
     budget_grace: number;

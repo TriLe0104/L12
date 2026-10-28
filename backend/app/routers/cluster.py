@@ -682,6 +682,7 @@ class PowerPatch(BaseModel):
     desired_cap_percent: float | None = Field(default=None, ge=10, le=100)
     gpu_min_w: float | None = Field(default=None, ge=50, le=2000)
     gpu_max_w: float | None = Field(default=None, ge=50, le=2000)
+    continuous: bool | None = None
 
 
 def _power_samples(rack_rows: list[Rack], workloads: list[Workload] | None = None) -> list[dict]:
@@ -857,6 +858,7 @@ def patch_power_limiter(
         desired_cap_percent=payload.desired_cap_percent,
         gpu_min_w=payload.gpu_min_w,
         gpu_max_w=payload.gpu_max_w,
+        continuous=payload.continuous,
     )
     if (
         payload.total_budget_kw is not None
