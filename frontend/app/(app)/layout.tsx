@@ -6,7 +6,9 @@ import { useEffect } from "react";
 
 import { Avatar } from "@/components/Avatar";
 import { BrandMark } from "@/components/Brand";
+import { P5Messenger } from "@/components/P5Messenger";
 import { canAdministerPeople, useAuth } from "@/lib/auth";
+import { bounceKvmIframe } from "@/lib/kvmFrame";
 import { useUiTheme } from "@/lib/ui-theme";
 import type { User } from "@/lib/types";
 import "@/app/scc-theme.css";
@@ -86,17 +88,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const items = navFor(user);
+  const kvmFrame = bounceKvmIframe();
 
   useEffect(() => {
+    if (bounceKvmIframe()) return;
     if (!loading && !user) router.replace("/login");
   }, [loading, user, router]);
 
   useEffect(() => {
+    if (bounceKvmIframe()) return;
     if (!user || !isSccTheme(theme)) return;
     if (![...SCC_NAV].some((href) => pathname.startsWith(href))) {
       router.replace("/maxlps");
     }
   }, [theme, user, pathname, router]);
+
+  if (kvmFrame) {
+    return <div className="empty">Opening BMC…</div>;
+  }
 
   if (loading || !user) {
     return <div className="empty">Loading…</div>;
@@ -122,6 +131,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="nav-label">{item.label}</span>
           </Link>
         ))}
+        <div className="rail-mona" />
 
         <div className="rail-foot">
           <Avatar initials={user.initials} avatarUrl={user.avatar_url} title={user.name} />
@@ -136,6 +146,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="main">{children}</main>
+      <P5Messenger />
     </div>
   );
 }

@@ -47,10 +47,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${ui.variable} ${mono.variable}`} data-theme="meow">
+    <html lang="en" className={`${ui.variable} ${mono.variable}`} data-theme="meow" suppressHydrationWarning>
       <body>
         <Script id="ui-theme-boot" strategy="beforeInteractive">
-          {`try{var t=localStorage.getItem('l12-ui-theme');if(t==='scc'||t==='meow'){document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t==='scc'?'light':'dark'}}catch(e){}`}
+          {`try{var t=localStorage.getItem('l12-ui-theme');var el=document.documentElement;if((t==='scc'||t==='meow')&&el.getAttribute('data-theme')!==t)el.setAttribute('data-theme',t)}catch(e){}`}
         </Script>
         <ThemeProvider>
           <ClawRevealProvider>

@@ -16,12 +16,27 @@ from ..security import get_current_user, require_editor
 router = APIRouter(prefix="/api/maxlps", tags=["maxlps"])
 
 
+class NodeAssignIn(BaseModel):
+    index: int | None = Field(default=None, ge=1, le=18)
+    serial: str | None = None
+    hostname: str | None = None
+    bmc_mac: str | None = None
+    bmc_ip: str | None = None
+    bmc_user: str | None = None
+    bmc_password: str | None = None
+    os_mac: str | None = None
+    os_ip: str | None = None
+    os_username: str | None = None
+    os_password: str | None = None
+
+
 class RackCreateIn(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     serial: str | None = Field(default=None, max_length=80)
     hall: str | None = Field(default=None, max_length=80)
     notes: str | None = None
     model: str | None = Field(default="GB300-NVL72", max_length=80)
+    node: NodeAssignIn | None = None
 
 
 class RackPatchIn(BaseModel):
@@ -43,6 +58,8 @@ class NodePatchIn(BaseModel):
     bmc_password: str | None = None
     os_mac: str | None = None
     os_ip: str | None = None
+    os_username: str | None = None
+    os_password: str | None = None
 
 
 class ShelfPatchIn(BaseModel):
@@ -70,13 +87,23 @@ def inventory_schema(_user: User = Depends(get_current_user)) -> dict:
 @router.post("/sync")
 def sync_inventory(_user: User = Depends(require_editor), db: Session = Depends(get_db)) -> dict:
     try:
-        result = inv.sync_from_controller(db)
-    except RuntimeError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+        result = inv.sync_live_infra(db, force=True) or {}
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    errors = [str(item) for item in (result.get("errors") or [])]
+    ok = list(result.get("ok_pxes") or [])
+    if errors and not ok:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "; ".join(errors))
     racks = [inv.dump_rack(r, secrets=True) for r in inv.load_racks(db)]
-    return {"ok": True, **result, "racks": racks, "count": len(racks), "source": "inventory" if racks else "floor"}
+    return {
+        "ok": True,
+        **result,
+        "racks": racks,
+        "count": len(racks),
+        "source": "inventory" if racks else "none",
+        "errors": errors,
+        "ok_pxes": ok,
+    }
 
 
 @router.get("/inventory")
@@ -85,11 +112,10 @@ def list_inventory(
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    if sync:
-        inv.maybe_sync(db)
+    inv.sync_live_infra(db, force=sync)
     racks = [inv.dump_rack(r, secrets=True) for r in inv.load_racks(db)]
     return {
-        "source": "inventory" if racks else "floor",
+        "source": "inventory" if racks else "none",
         "count": len(racks),
         "racks": racks,
         "layout": {
@@ -116,6 +142,8 @@ def create_rack(
             hall=body.hall,
             notes=body.notes,
             model=body.model,
+            origin="manual",
+            node=body.node.model_dump(exclude_unset=True) if body.node else None,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -148,6 +176,23 @@ def delete_rack(
     if not inv.delete_rack(db, rack_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MaxLPS rack not found")
     return {"ok": True, "id": rack_id}
+
+
+@router.post("/racks/{rack_id}/nodes", status_code=status.HTTP_201_CREATED)
+def assign_node(
+    rack_id: str,
+    body: NodeAssignIn,
+    _user: User = Depends(require_editor),
+    db: Session = Depends(get_db),
+) -> dict:
+    rack = inv.get_rack(db, rack_id)
+    if rack is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MaxLPS rack not found")
+    try:
+        node = inv.assign_node(db, rack, body.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return inv.dump_node(node, secrets=True)
 
 
 @router.patch("/nodes/{node_id}")

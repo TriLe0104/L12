@@ -577,7 +577,7 @@ class CampusOut(BaseModel):
     name: str = "Firmus"
     telemetry: TelemetryOut
     halls: list[HallCampus]
-    source: str = "floor"
+    source: str = "none"
 
 
 class WorkloadOut(ORMModel):

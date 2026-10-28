@@ -1,0 +1,707 @@
+{
+  "system": {
+    "hostname": "PathAI-B300-N5",
+    "os_version": "Ubuntu 24.04.3 LTS",
+    "kernel_version": "6.8.0-87-generic",
+    "system_pn": "SYS-422GS-NB3RT-ALC",
+    "system_sn": "S979806X6328124",
+    "motherboard": {
+      "vendor": "Supermicro",
+      "part_number": "X14DBG-LC",
+      "serial_number": "HM257S003871"
+    },
+    "chassis_sn": "CG405AO42010013"
+  },
+  "firmware": {
+    "bios_version": "1.5 (Date: 02/05/2026)",
+    "bmc_version": "N/A (BMC unreachable)",
+    "cpld_version": "N/A (BMC unreachable)",
+    "bkc_version": "N/A (BMC unreachable)"
+  },
+  "tpm": {
+    "model": "N/A",
+    "revision": "N/A"
+  },
+  "network_ssh": {
+    "source": "DHCP",
+    "ip_address": "10.10.1.10",
+    "subnet": "255.255.0.0",
+    "gateway": "10.10.11.250",
+    "mac": "90:5a:08:9c:d5:0e",
+    "interface": "ens3923f0np0"
+  },
+  "network_bmc": {
+    "source": "DHCP Address",
+    "ip_address": "192.168.8.186",
+    "subnet": "255.255.255.0",
+    "gateway": "192.168.8.1",
+    "mac": "7c:c2:55:90:8f:4c"
+  },
+  "cpu": {
+    "info": {
+      "model": "Intel(R) Xeon(R) 6776P;",
+      "counts": "2 Sockets x 64 Cores x 2 Threads",
+      "max_frequency": "4.60 GHz"
+    }
+  },
+  "memory": {
+    "summary": "4031 GB Total",
+    "modules": [
+      {
+        "locator": "P1-DIMMA1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9358"
+      },
+      {
+        "locator": "P1-DIMMA2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9121"
+      },
+      {
+        "locator": "P1-DIMMB1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C931A"
+      },
+      {
+        "locator": "P1-DIMMB2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9318"
+      },
+      {
+        "locator": "P1-DIMMC1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C935B"
+      },
+      {
+        "locator": "P1-DIMMC2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9359"
+      },
+      {
+        "locator": "P1-DIMMD1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C930F"
+      },
+      {
+        "locator": "P1-DIMMD2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9312"
+      },
+      {
+        "locator": "P1-DIMME1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9127"
+      },
+      {
+        "locator": "P1-DIMME2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C911F"
+      },
+      {
+        "locator": "P1-DIMMF1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9120"
+      },
+      {
+        "locator": "P1-DIMMF2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9125"
+      },
+      {
+        "locator": "P1-DIMMG1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9126"
+      },
+      {
+        "locator": "P1-DIMMG2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9122"
+      },
+      {
+        "locator": "P1-DIMMH1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9124"
+      },
+      {
+        "locator": "P1-DIMMH2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C911E"
+      },
+      {
+        "locator": "P2-DIMMA1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE0426044365483B"
+      },
+      {
+        "locator": "P2-DIMMA2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436CCBC2"
+      },
+      {
+        "locator": "P2-DIMMB1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE04260443654BDF"
+      },
+      {
+        "locator": "P2-DIMMB2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE0426044365462C"
+      },
+      {
+        "locator": "P2-DIMMC1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE0426044365462B"
+      },
+      {
+        "locator": "P2-DIMMC2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE04260443654BD2"
+      },
+      {
+        "locator": "P2-DIMMD1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE04260443654BCF"
+      },
+      {
+        "locator": "P2-DIMMD2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436547B3"
+      },
+      {
+        "locator": "P2-DIMME1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436CA421"
+      },
+      {
+        "locator": "P2-DIMME2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436CCBC7"
+      },
+      {
+        "locator": "P2-DIMMF1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9316"
+      },
+      {
+        "locator": "P2-DIMMF2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C935E"
+      },
+      {
+        "locator": "P2-DIMMG1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C935F"
+      },
+      {
+        "locator": "P2-DIMMG2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9313"
+      },
+      {
+        "locator": "P2-DIMMH1",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9314"
+      },
+      {
+        "locator": "P2-DIMMH2",
+        "size": "128 GB",
+        "speed": "5200 MT/s",
+        "part_number": "M321RAJA0MB2-CCPWC",
+        "serial_number": "80CE042604436C9319"
+      }
+    ]
+  },
+  "storage": [
+    {
+      "name": "nvme0n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11321",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme1n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11322",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme2n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11319",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme3n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YB05864",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme4n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11318",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme5n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11323",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme6n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11331",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "nvme7n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "SAMSUNG MZTL67T6HBLC-00AW7",
+      "serial": "S7UUNG0YA11325",
+      "firmware": "LDDJ3U2Q",
+      "health": "OK"
+    },
+    {
+      "name": "/dev/bus/0",
+      "type": "megaraid",
+      "size": "3.84 TB",
+      "model": "SAMSUNG MZ1L23T8",
+      "serial": "S667NN0Y102926",
+      "firmware": "502Q",
+      "health": "OK"
+    },
+    {
+      "name": "/dev/bus/0",
+      "type": "megaraid",
+      "size": "3.84 TB",
+      "model": "SAMSUNG MZ1L23T8",
+      "serial": "S667NN0Y102922",
+      "firmware": "502Q",
+      "health": "OK"
+    }
+  ],
+  "accelerators_gpu": {
+    "global_vbios": "",
+    "devices": [
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:10:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426022540"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:38:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426022557"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:5E:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426021729"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:71:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426022508"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:90:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426023655"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:B9:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426022583"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:DD:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426020606"
+      },
+      {
+        "name": "NVIDIA B300 SXM6 PC",
+        "pci_bus": " 00000000:EF:00.0",
+        "vbios": " 97.10.52.00.18",
+        "serial": " 1651426022340"
+      }
+    ]
+  },
+  "pcie_devices": [
+    {
+      "device_bus": "21:00.0",
+      "description": "ASPEED Technology, Inc. ASPEED Graphics Family (rev 52)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "49:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "4a:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "4b:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "4c:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "a2:00.0",
+      "description": "Intel Corporation Ethernet Controller X710 for 10GBASE-T (rev 02)",
+      "link_status": "Speed 8GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 8GT/s"
+    },
+    {
+      "device_bus": "a2:00.1",
+      "description": "Intel Corporation Ethernet Controller X710 for 10GBASE-T (rev 02)",
+      "link_status": "Speed 8GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 8GT/s"
+    },
+    {
+      "device_bus": "c9:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "ca:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "cb:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    },
+    {
+      "device_bus": "cc:00.0",
+      "description": "Samsung Electronics Co Ltd NVMe SSD Controller PM9DXa",
+      "link_status": "Speed 32GT/s, Width x4",
+      "link_capacity": "Port #0, Speed 32GT/s"
+    }
+  ],
+  "network_interfaces": [
+    {
+      "interface": "ens3923f0np0",
+      "mac": "90:5a:08:9c:d5:0e",
+      "bus": "0000:a2:00.0",
+      "firmware": "9.50 0x8000fd37 1.3815.0",
+      "part_number": "AOM-GP805-IO",
+      "serial_number": "OA257S009707",
+      "link_status": "Speed: 1000Mb/s Duplex: Full Link detected: yes "
+    },
+    {
+      "interface": "ens3923f1np1",
+      "mac": "90:5a:08:9c:d5:0f",
+      "bus": "0000:a2:00.1",
+      "firmware": "9.50 0x8000fd37 1.3815.0",
+      "part_number": "AOM-GP805-IO",
+      "serial_number": "OA257S009707",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "enxbe3af2b6059f",
+      "mac": "be:3a:f2:b6:05:9f",
+      "bus": "usb-0000:22:00.0-3.1",
+      "firmware": "RNDIS device",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Half Link detected: yes "
+    },
+    {
+      "interface": "ibp13s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3d:0a",
+      "bus": "0000:0d:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp53s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:da",
+      "bus": "0000:35:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibs1",
+      "mac": "00:00:10:47:fe:80:00:00:00:00:00:00:8c:91:3a:03:00:b2:00:6e",
+      "bus": "0000:48:00.0",
+      "firmware": "28.43.8002 (MT_0000000838)",
+      "part_number": "MCX75310AAS-NEAT",
+      "serial_number": "MT2541XZ05VJ",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp91s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:fa",
+      "bus": "0000:5b:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp110s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:ea",
+      "bus": "0000:6e:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp141s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3d:4a",
+      "bus": "0000:8d:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibs3921f0",
+      "mac": "00:00:10:67:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:d6",
+      "bus": "0000:a3:00.0",
+      "firmware": "28.46.5500 (NVD0000000079)",
+      "part_number": "V000S4N03X",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: 100000Mb/s Duplex: Full Link detected: no "
+    },
+    {
+      "interface": "ibs3921f1",
+      "mac": "00:00:11:67:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:d7",
+      "bus": "0000:a3:00.1",
+      "firmware": "28.46.5500 (NVD0000000079)",
+      "part_number": "V000S4N03X",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: 100000Mb/s Duplex: Full Link detected: no "
+    },
+    {
+      "interface": "ibs3921f2",
+      "mac": "00:00:10:e7:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:d8",
+      "bus": "0000:a3:00.2",
+      "firmware": "28.46.5500 (NVD0000000079)",
+      "part_number": "V000S4N03X",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: 100000Mb/s Duplex: Full Link detected: no "
+    },
+    {
+      "interface": "ibs3921f3",
+      "mac": "00:00:11:e7:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3c:d9",
+      "bus": "0000:a3:00.3",
+      "firmware": "28.46.5500 (NVD0000000079)",
+      "part_number": "V000S4N03X",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: 100000Mb/s Duplex: Full Link detected: no "
+    },
+    {
+      "interface": "ibp182s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3d:1a",
+      "bus": "0000:b6:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp200s0",
+      "mac": "00:00:10:47:fe:80:00:00:00:00:00:00:8c:91:3a:03:00:90:23:76",
+      "bus": "0000:c8:00.0",
+      "firmware": "28.43.8002 (MT_0000000838)",
+      "part_number": "MCX75310AAS-NEAT",
+      "serial_number": "MT2541XZ01XF",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp218s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3d:3a",
+      "bus": "0000:da:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    },
+    {
+      "interface": "ibp236s0",
+      "mac": "00:00:10:26:fe:80:00:00:00:00:00:00:74:25:54:03:00:85:3d:2a",
+      "bus": "0000:ec:00.0",
+      "firmware": "40.46.5500 (NVD0000000072)",
+      "part_number": "MLX000647",
+      "serial_number": "1951426570938",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    }
+  ],
+  "power_and_fan": {
+    "power_supplies": [
+      {
+        "location": "PSU1",
+        "part_number": "PWS-6K62G-2R",
+        "serial_number": "P6K62CP32DB0007"
+      },
+      {
+        "location": "PSU2",
+        "part_number": "PWS-6K62G-2R",
+        "serial_number": "P6K62CP27CB0139"
+      },
+      {
+        "location": "PSU3",
+        "part_number": "PWS-6K62G-2R",
+        "serial_number": "P6K62CP32DB0011"
+      },
+      {
+        "location": "PSU4",
+        "part_number": "PWS-6K62G-2R",
+        "serial_number": "P6K62CP27CB0095"
+      },
+      {
+        "location": "PSU5",
+        "part_number": "To Be Filled By O.E.M.",
+        "serial_number": "To Be Filled By O.E.M."
+      },
+      {
+        "location": "PSU6",
+        "part_number": "To Be Filled By O.E.M.",
+        "serial_number": "To Be Filled By O.E.M."
+      },
+      {
+        "location": "PSU7",
+        "part_number": "To Be Filled By O.E.M.",
+        "serial_number": "To Be Filled By O.E.M."
+      },
+      {
+        "location": "PSU8",
+        "part_number": "To Be Filled By O.E.M.",
+        "serial_number": "To Be Filled By O.E.M."
+      }
+    ],
+    "fans": [
+      {
+        "index": 1,
+        "name": "MB Fan 1-4"
+      },
+      {
+        "index": 2,
+        "name": "PS 1-4 Fan"
+      },
+      {
+        "index": 3,
+        "name": "Rear Fan"
+      }
+    ]
+  },
+  "sensors": "CPU1 Temp        | 01h | ok  |  3.1 | 33 degrees C\nCPU2 Temp        | 02h | ok  |  3.2 | 33 degrees C\nSystem Temp      | 0Bh | ok  |  7.1 | 30 degrees C\nPeripheral Temp  | 0Ch | ok  |  7.2 | 28 degrees C\nInlet Temp       | 09h | ok  | 55.1 | 23 degrees C\nCPU1_VRMIN Temp  | 10h | ok  | 21.1 | 37 degrees C\nCPU1_VRMON Temp  | 16h | ok  | 21.2 | 38 degrees C\nCPU1_VRMHV0 Temp | 11h | ok  | 21.5 | 34 degrees C\nCPU2_VRMIN Temp  | 12h | ok  | 21.3 | 40 degrees C\nCPU2_VRMON Temp  | 17h | ok  | 21.4 | 36 degrees C\nCPU2_VRMHV0 Temp | 14h | ok  | 21.7 | 33 degrees C\nP1_DIMMA~D Temp  | B0h | ok  | 32.0 | 20 degrees C\nP1_DIMME~H Temp  | B4h | ok  | 32.1 | 22 degrees C\nP2_DIMMA~D Temp  | BCh | ok  | 32.2 | 22 degrees C\nP2_DIMME~H Temp  | BDh | ok  | 32.3 | 22 degrees C\nPLX1 Temp        | 27h | ok  |  8.7 | 30 degrees C\nPLX2 Temp        | 28h | ok  |  8.7 | 31 degrees C\nAOM_NIC Temp     | 60h | ok  | 11.1 | 33 degrees C\nAOC_PORTA Temp   | A0h | ok  | 11.1 | 47 degrees C\nAOC_NIC2 Temp    | 61h | ok  | 11.2 | 52 degrees C\nAOC_NIC1 Temp    | 62h | ok  | 11.3 | 50 degrees C\nAOM_SAS Temp     | 0Fh | ok  | 11.1 | 38 degrees C\nNVMe_SSDA Temp   | 20h | ok  | 37.1 | 36 degrees C\nNVMe_SSDB Temp   | 21h | ok  | 37.2 | 37 degrees C\nHGX GPU Temp     | E0h | ok  | 11.1 | 23 degrees C\nHGX HSC Temp     | E2h | ok  | 11.3 | 40 degrees C\nHGX Inlet Temp   | E3h | ok  | 11.4 | 27 degrees C\nHGX FPGA Temp    | E4h | ok  | 11.5 | 37 degrees C\nHGX HBM Temp     | E5h | ok  | 11.6 | 27 degrees C\nHGX Board Temp   | E6h | ok  | 11.7 | 50 degrees C\nHGX NVLink Temp  | E7h | ok  | 11.8 | 33 degrees C\nHGX NVMGMT Temp  | EAh | ok  | 11.11 | 45 degrees C\nHGX HMC Temp     | EBh | ok  | 11.12 | 39 degrees C\nHGX CX8 Temp     | ECh | ok  | 11.13 | 59 degrees C\nM2SSD Temp       | 51h | ok  | 37.1 | 32 degrees C\n",
+  "logs": {
+    "dmesg_errors": "\"[   28.819165] Failed to find VA for GUID: A13CDD48-C822-4913-B0CF-3CB46823D376, PA: 0x0\\n[   28.819168] Failed to find VA for GUID: A13CDD48-C822-4913-B0CF-3CB46823D376, PA: 0x0\\n[   28.819169] Failed to find VA for GUID: 77CFBB8C-8F09-4C3B-B7E8-103A65101C60, PA: 0x0\\n[   28.819170] Failed to find VA for GUID: 77CFBB8C-8F09-4C3B-B7E8-103A65101C60, PA: 0x0\\n[   28.819171] Failed to find VA for GUID: 5402385F-F04B-44D8-984C-BEF829AC2AE0, PA: 0x0\\n[   28.819172] Failed to find VA for GUID: 5402385F-F04B-44D8-984C-BEF829AC2AE0, PA: 0x0\\n[   28.819173] Failed to find VA for GUID: F6A58D47-E04F-4F5A-86B8-2A50D4AA109B, PA: 0x0\\n[   28.819174] Failed to find VA for GUID: F6A58D47-E04F-4F5A-86B8-2A50D4AA109B, PA: 0x0\\n[   28.819175] Failed to find VA for GUID: 1DE4055D-D2F3-4E11-B7D9-7D6C19173FEE, PA: 0x0\\n[   28.819175] Failed to find VA for GUID: 1DE4055D-D2F3-4E11-B7D9-7D6C19173FEE, PA: 0x0\\n[   30.488101] pci 0000:10:00.0: DOE: [378] failed to cache protocols : -5\\n[   30.488106] pci 0000:10:00.0: DOE: [378] failed to create mailbox: -5\\n[   30.569100] pci 0000:38:00.0: DOE: [378] failed to cache protocols : -5\\n[   30.569102] pci 0000:38:00.0: DOE: [378] failed to create mailbox: -5\\n[   30.822101] pci 0000:5e:00.0: DOE: [378] failed to cache protocols : -5\\n[   30.822102] pci 0000:5e:00.0: DOE: [378] failed to create mailbox: -5\\n[   30.888101] pci 0000:71:00.0: DOE: [378] failed to cache protocols : -5\\n[   30.888103] pci 0000:71:00.0: DOE: [378] failed to create mailbox: -5\\n[   31.053101] pci 0000:90:00.0: DOE: [378] failed to cache protocols : -5\\n[   31.053102] pci 0000:90:00.0: DOE: [378] failed to create mailbox: -5\\n[   31.145100] pci 0000:b9:00.0: DOE: [378] failed to cache protocols : -5\\n[   31.145102] pci 0000:b9:00.0: DOE: [378] failed to create mailbox: -5\\n[   31.398100] pci 0000:dd:00.0: DOE: [378] failed to cache protocols : -5\\n[   31.398101] pci 0000:dd:00.0: DOE: [378] failed to create mailbox: -5\\n[   31.464101] pci 0000:ef:00.0: DOE: [378] failed to cache protocols : -5\\n[   31.464102] pci 0000:ef:00.0: DOE: [378] failed to create mailbox: -5\\n[   49.031320] user: probe of wq1.0 failed with error -95\\n[   49.031363] user: probe of wq1.1 failed with error -95\\n[   49.031383] user: probe of wq1.2 failed with error -95\\n[   49.031405] user: probe of wq1.3 failed with error -95\\n[   49.031423] user: probe of wq1.4 failed with error -95\\n[   49.031438] user: probe of wq1.5 failed with error -95\\n[   49.044777] user: probe of wq1.6 failed with error -95\\n[   49.044799] user: probe of wq1.7 failed with error -95\\n[   49.044822] user: probe of wq1.8 failed with error -95\\n[   49.044849] user: probe of wq1.9 failed with error -95\\n[   49.044866] user: probe of wq1.10 failed with error -95\\n[   49.044881] user: probe of wq1.11 failed with error -95\\n[   49.044897] user: probe of wq1.12 failed with error -95\\n[   49.044919] user: probe of wq1.13 failed with error -95\\n[   49.044933] user: probe of wq1.14 failed with error -95\\n[   49.044948] user: probe of wq1.15 failed with error -95\\n[   49.238035] user: probe of wq3.0 failed with error -95\\n[   49.239584] user: probe of wq3.1 failed with error -95\\n[   49.239621] user: probe of wq3.2 failed with error -95\\n[   49.239680] user: probe of wq3.3 failed with error -95\\n[   49.239697] user: probe of wq3.4 failed with error -95\\n[   49.239713] user: probe of wq3.5 failed with error -95\\n[   49.239731] user: probe of wq3.6 failed with error -95\\n[   49.239748] user: probe of wq3.7 failed with error -95\\n[   49.239764] user: probe of wq3.8 failed with error -95\\n[   49.239785] user: probe of wq3.9 failed with error -95\\n[   49.239801] user: probe of wq3.10 failed with error -95\\n[   49.239819] user: probe of wq3.11 failed with error -95\\n[   49.239835] user: probe of wq3.12 failed with error -95\\n[   49.239851] user: probe of wq3.13 failed with error -95\\n[   49.239867] user: probe of wq3.14 failed with error -95\\n[   49.239885] user: probe of wq3.15 failed with error -95\\n[   50.330367] user: probe of wq5.0 failed with error -95\\n[   50.330391] user: probe of wq5.1 failed with error -95\\n[   50.330408] user: probe of wq5.2 failed with error -95\\n[   50.330424] user: probe of wq5.3 failed with error -95\\n[   50.330443] user: probe of wq5.4 failed with error -95\\n[   50.330458] user: probe of wq5.5 failed with error -95\\n[   50.330477] user: probe of wq5.6 failed with error -95\\n[   50.330494] user: probe of wq5.7 failed with error -95\\n[   50.330507] user: probe of wq5.8 failed with error -95\\n[   50.330524] user: probe of wq5.9 failed with error -95\\n[   50.330540] user: probe of wq5.10 failed with error -95\\n[   50.330554] user: probe of wq5.11 failed with error -95\\n[   50.330569] user: probe of wq5.12 failed with error -95\\n[   50.330582] user: probe of wq5.13 failed with error -95\\n[   50.330599] user: probe of wq5.14 failed with error -95\\n[   50.330614] user: probe of wq5.15 failed with error -95\\n[   50.511469] user: probe of wq7.0 failed with error -95\\n[   50.511494] user: probe of wq7.1 failed with error -95\\n[   50.511533] user: probe of wq7.2 failed with error -95\\n[   50.511552] user: probe of wq7.3 failed with error -95\\n[   50.511571] user: probe of wq7.4 failed with error -95\\n[   50.511588] user: probe of wq7.5 failed with error -95\\n[   50.511604] user: probe of wq7.6 failed with error -95\\n[   50.511618] user: probe of wq7.7 failed with error -95\\n[   50.511687] user: probe of wq7.8 failed with error -95\\n[   50.511704] user: probe of wq7.9 failed with error -95\\n[   50.511718] user: probe of wq7.10 failed with error -95\\n[   50.511737] user: probe of wq7.11 failed with error -95\\n[   50.511752] user: probe of wq7.12 failed with error -95\\n[   50.511770] user: probe of wq7.13 failed with error -95\\n[   50.511788] user: probe of wq7.14 failed with error -95\\n[   50.511813] user: probe of wq7.15 failed with error -95\\n[  180.578773] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.591278] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.601049] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.673430] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.689323] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.721093] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.728704] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n[  180.745553] NVRM: _gpuFabricProbeRbmSleepLinks: Error setting links to sleep on linkmask 0x0\\n\"",
+    "bmc_sel_critical": "\"   1 | 02/01/2026 | 11:46:46 PM PST | Unknown #0xff |  | Asserted\\n   2 | 02/01/2026 | 01:06:24 AM PST | Fan #0x47 |  | Asserted\\n   3 | 04/28/2026 | 05:26:55 PM PDT | Unknown #0xff |  | Asserted\\n   4 | 04/28/2026 | 05:27:08 PM PDT | Unknown #0xff |  | Asserted\\n   5 | 04/28/2026 | 05:30:25 PM PDT | Fan #0x47 |  | Deasserted\\n   6 | 04/28/2026 | 05:43:33 PM PDT | Unknown #0xff | () | Asserted\\n   7 | 04/28/2026 | 05:56:18 PM PDT | Unknown #0xff |  | Asserted\\n   8 | 04/28/2026 | 05:56:30 PM PDT | Unknown #0xff |  | Asserted\\n   9 | 04/28/2026 | 05:58:14 PM PDT | Unknown #0xff | () | Asserted\\n   a | 04/29/2026 | 10:45:44 AM PDT | Unknown #0xff |  | Asserted\\n   b | 04/29/2026 | 10:45:56 AM PDT | Unknown #0xff |  | Asserted\\n  10 | 04/29/2026 | 11:07:58 AM PDT | Unknown #0xff |  | Asserted\\n  11 | 04/29/2026 | 11:08:11 AM PDT | Unknown #0xff |  | Asserted\\n  16 | 04/29/2026 | 04:20:32 PM PDT | Unknown #0xff |  | Asserted\\n  17 | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  18 | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  19 | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  1a | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  1b | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  1c | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  1d | 04/29/2026 | 04:29:57 PM PDT | Unknown #0xff |  | Asserted\\n  1e | 05/01/2026 | 10:42:45 AM PDT | Power Supply #0xc0 | Failure detected () | Asserted\\n  1f | 05/01/2026 | 10:42:46 AM PDT | Power Supply #0xc0 | Power Supply AC lost () | Asserted\\n  20 | 05/01/2026 | 10:43:29 AM PDT | Power Supply #0xc1 | Failure detected () | Asserted\\n  21 | 05/01/2026 | 10:43:30 AM PDT | Power Supply #0xc1 | Power Supply AC lost () | Asserted\\n  22 | 05/01/2026 | 10:43:31 AM PDT | Power Supply #0xc3 | Failure detected () | Asserted\\n  23 | 05/01/2026 | 10:43:32 AM PDT | Power Supply #0xc3 | Power Supply AC lost () | Asserted\\n  24 | 05/01/2026 | 10:43:33 AM PDT | Fan #0x47 | Lower Critical going low  | Asserted\\n  25 | 05/01/2026 | 10:43:34 AM PDT | Fan #0x47 |  | Asserted\\n  26 | 05/04/2026 | 01:46:26 PM PDT | Unknown #0xff |  | Asserted\\n  2b | 05/04/2026 | 01:55:52 PM PDT | Unknown #0xff |  | Asserted\\n  2c | 05/04/2026 | 01:55:58 PM PDT | Unknown #0xff |  | Asserted\\n  2d | 05/04/2026 | 01:56:03 PM PDT | Unknown #0xff |  | Asserted\\n\""
+  }
+}

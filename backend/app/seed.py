@@ -41,7 +41,24 @@ def _seed_users(db: Session) -> None:
     db.commit()
 
 
+def _operator_owns_inventory(db: Session) -> bool:
+    """A saved PXE or a removed/live rack means the demo campus must not be reseeded."""
+    from .models import HiddenRack, MaxLpsRack, PxeServer
+
+    if db.scalar(select(PxeServer.id).limit(1)) is not None:
+        return True
+    if db.scalar(select(HiddenRack.id).limit(1)) is not None:
+        return True
+    if db.scalar(select(MaxLpsRack.id).limit(1)) is not None:
+        return True
+    return (
+        db.scalar(select(InventoryNode.id).where(InventoryNode.source != "demo").limit(1)) is not None
+    )
+
+
 def _seed_firmus(db: Session) -> None:
+    if _operator_owns_inventory(db):
+        return
     halls = list(db.scalars(select(DataHall)).all())
     hall_count = len(halls)
     rack_count = db.scalar(select(func.count()).select_from(Rack)) or 0
@@ -49,7 +66,7 @@ def _seed_firmus(db: Session) -> None:
     if hall_count == 4 and rack_count == 256 and halls and max(h.depth_tiles for h in halls) <= 12:
         return
 
-    for node in list(db.scalars(select(InventoryNode)).all()):
+    for node in list(db.scalars(select(InventoryNode).where(InventoryNode.source == "demo")).all()):
         db.delete(node)
     for hall in halls:
         db.delete(hall)

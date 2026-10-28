@@ -34,7 +34,7 @@ function readStored(): UiTheme {
 
 function applyTheme(next: UiTheme) {
   document.documentElement.setAttribute("data-theme", next);
-  document.documentElement.style.colorScheme = next === "scc" ? "light" : "dark";
+  document.documentElement.style.removeProperty("color-scheme");
   try {
     window.localStorage.setItem(KEY, next);
   } catch {

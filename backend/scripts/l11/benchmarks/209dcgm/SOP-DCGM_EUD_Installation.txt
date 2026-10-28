@@ -1,0 +1,39 @@
+# make sure CUDA is installed
+nvidia-smi | head -n 3
+
+# install DCGM
+apt install -y datacenter-gpu-manager-4-cuda13
+
+# Configure DCGM
+systemctl enable nvidia-dcgm
+systemctl restart dcgm
+
+# Check DCGM
+dcgmi discovery -l
+
+
+
+############################
+# Install EUD extenstion
+# Download EUD_580.95.10.tar.gz from NVOnline
+############################
+
+tar -xvzf EUD_580.95.10.tar.gz
+dpkg -i EUD_580.95.10/nvidia-diagnostic-local-repo-ubuntu2404-580.95.10-mode1_1.0-1_amd64.deb
+cp /var/nvidia-diagnostic-local-repo-ubuntu2404-580.95.10-mode1/nvidia-diagnostic-local-4E2C38D9-keyring.gpg /usr/share/keyrings/
+
+
+# Cleanup
+rm -r EUD_580.95.10
+rm EUD_580.95.10.tar.gz
+
+# install EUD
+apt update
+apt install nvidia-diagnostic-580
+
+# Run test with EUD ~120 minutes
+dcgmi diag -r 4
+
+# OR just run the EUD test ~30 minutes
+dcgmi diag -r eud -p "eud.suite_level=4"
+

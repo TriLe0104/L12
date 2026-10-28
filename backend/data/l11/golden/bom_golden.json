@@ -1,0 +1,749 @@
+{
+  "system": {
+    "hostname": "localhost",
+    "os_version": "Ubuntu 26.04.1 LTS",
+    "kernel_version": "7.0.0-2018-nvidia-bos-64k",
+    "system_pn": "",
+    "system_sn": "",
+    "motherboard": {
+      "vendor": "",
+      "part_number": "",
+      "serial_number": ""
+    },
+    "chassis_sn": ""
+  },
+  "firmware": {
+    "bios_version": "(Date: )",
+    "bmc_version": "70.00.06.01",
+    "cpld_version": "Unknown",
+    "bkc_version": "Unknown"
+  },
+  "tpm": {
+    "model": "N/A",
+    "revision": "N/A"
+  },
+  "network_ssh": {
+    "source": "Static",
+    "ip_address": "10.10.3.52",
+    "subnet": "255.255.0.0",
+    "gateway": "10.10.11.250",
+    "mac": "90:5a:08:c4:98:7d",
+    "interface": "enx905a08c4987d"
+  },
+  "network_bmc": {
+    "source": "",
+    "ip_address": "10.10.17.177",
+    "subnet": "",
+    "gateway": "",
+    "mac": ""
+  },
+  "cpu": {
+    "info": {
+      "model": "Olympus;",
+      "counts": "2 Sockets x 88 Cores x 2 Threads",
+      "max_frequency": "3.37 GHz"
+    }
+  },
+  "memory": {
+    "summary": "1319 GB Total",
+    "modules": []
+  },
+  "storage": [
+    {
+      "name": "nvme0n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "MTFDLBT7T6THA-1BK1DABYY",
+      "serial": "",
+      "firmware": "",
+      "health": "Warning"
+    },
+    {
+      "name": "nvme1n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "MTFDLBT7T6THA-1BK1DABYY",
+      "serial": "",
+      "firmware": "",
+      "health": "Warning"
+    },
+    {
+      "name": "nvme2n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "MTFDLBT7T6THA-1BK1DABYY",
+      "serial": "",
+      "firmware": "",
+      "health": "Warning"
+    },
+    {
+      "name": "nvme3n1",
+      "type": "disk",
+      "size": "1.7T",
+      "model": "MTFDLBT1T9THG-1BP1DFCYY",
+      "serial": "",
+      "firmware": "",
+      "health": "Warning"
+    },
+    {
+      "name": "nvme4n1",
+      "type": "disk",
+      "size": "7T",
+      "model": "MTFDLBT7T6THA-1BK1DABYY",
+      "serial": "",
+      "firmware": "",
+      "health": "Warning"
+    }
+  ],
+  "accelerators_gpu": {
+    "global_vbios": "",
+    "devices": [
+      {
+        "name": "NVIDIA Graphics Device",
+        "pci_bus": " 00000002:81:00.0",
+        "vbios": " 99.00.16.0D.1A",
+        "serial": " 1642626000712"
+      },
+      {
+        "name": "NVIDIA Graphics Device",
+        "pci_bus": " 00000002:C1:00.0",
+        "vbios": " 99.00.16.0D.1A",
+        "serial": " 1642626000712"
+      },
+      {
+        "name": "NVIDIA Graphics Device",
+        "pci_bus": " 0000000A:81:00.0",
+        "vbios": " 99.00.16.0D.1A",
+        "serial": " 1642726000196"
+      },
+      {
+        "name": "NVIDIA Graphics Device",
+        "pci_bus": " 0000000A:E1:00.0",
+        "vbios": " 99.00.16.0D.1A",
+        "serial": " 1642726000196"
+      }
+    ]
+  },
+  "pcie_devices": [
+    {
+      "device_bus": "0001:03:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0001:03:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0001:03:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0001:03:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0001:06:00.0",
+      "description": "00.0 Non-Volatile memory controller: Micron Technology Inc 9550 PRO NVMe SSD (rev 01)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0002:a2:00.0",
+      "description": "00.0 VGA compatible controller: ASPEED Technology, Inc. ASPEED Graphics Family (rev 52)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0003:01:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0003:01:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0003:01:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0003:01:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0004:03:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0004:03:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0004:03:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0004:03:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0004:06:00.0",
+      "description": "00.0 Non-Volatile memory controller: Micron Technology Inc 9550 PRO NVMe SSD (rev 01)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0005:41:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies BF4 Family integrated network controller [BlueField-4 integrated network controller]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0005:41:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies BF4 Family integrated network controller [BlueField-4 integrated network controller]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0006:01:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0006:01:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0006:01:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0006:01:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0009:03:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0009:03:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0009:03:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0009:03:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "0009:06:00.0",
+      "description": "00.0 Non-Volatile memory controller: Micron Technology Inc 9550 PRO NVMe SSD (rev 01)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000a:a1:00.0",
+      "description": "00.0 Non-Volatile memory controller: Micron Technology Inc 7600 PRO NVMe SSD (rev 01)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000b:01:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000b:01:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000b:01:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000b:01:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000c:03:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000c:03:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000c:03:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000c:03:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000c:06:00.0",
+      "description": "00.0 Non-Volatile memory controller: Micron Technology Inc 9550 PRO NVMe SSD (rev 01)",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000d:41:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies BF4 Family integrated network controller [BlueField-4 integrated network controller]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000d:41:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies BF4 Family integrated network controller [BlueField-4 integrated network controller]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000d:41:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies BF4 Family Management Interface [BlueField-4 SoC Management Interface]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000e:01:00.0",
+      "description": "00.0 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000e:01:00.1",
+      "description": "00.1 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000e:01:00.2",
+      "description": "00.2 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    },
+    {
+      "device_bus": "000e:01:00.3",
+      "description": "00.3 Ethernet controller: Mellanox Technologies CX9 Family [ConnectX-9]",
+      "link_status": "",
+      "link_capacity": ""
+    }
+  ],
+  "network_interfaces": [
+    {
+      "interface": "enx905a08c4987d",
+      "mac": "90:5a:08:c4:98:7d",
+      "bus": "usb-0002:e1:00.0-3",
+      "firmware": "rtl8153b-2 v2 04/27/23",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: 1000Mb/s Duplex: Full Link detected: yes "
+    },
+    {
+      "interface": "enxc296c2947114",
+      "mac": "c2:96:c2:94:71:14",
+      "bus": "usb-0002:e1:00.0-1.1",
+      "firmware": "CDC Ethernet Device",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: 425Mb/s Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP1p3s0f0np0",
+      "mac": "3c:8b:6e:5c:67:da",
+      "bus": "0001:03:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP1p3s0f1np1",
+      "mac": "3c:8b:6e:5c:67:db",
+      "bus": "0001:03:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP1p3s0f2np2",
+      "mac": "3c:8b:6e:5c:67:dc",
+      "bus": "0001:03:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP1p3s0f3np3",
+      "mac": "3c:8b:6e:5c:67:dd",
+      "bus": "0001:03:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP3p1s0f0np0",
+      "mac": "3c:8b:6e:5c:67:ca",
+      "bus": "0003:01:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP3p1s0f1np1",
+      "mac": "3c:8b:6e:5c:67:cb",
+      "bus": "0003:01:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP3p1s0f2np2",
+      "mac": "3c:8b:6e:5c:67:cc",
+      "bus": "0003:01:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP3p1s0f3np3",
+      "mac": "3c:8b:6e:5c:67:cd",
+      "bus": "0003:01:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP4p3s0f0np0",
+      "mac": "3c:8b:6e:5c:67:fa",
+      "bus": "0004:03:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP4p3s0f1np1",
+      "mac": "3c:8b:6e:5c:67:fb",
+      "bus": "0004:03:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP4p3s0f2np2",
+      "mac": "3c:8b:6e:5c:67:fc",
+      "bus": "0004:03:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP4p3s0f3np3",
+      "mac": "3c:8b:6e:5c:67:fd",
+      "bus": "0004:03:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP5p65s0f0np0",
+      "mac": "3c:8b:6e:39:b7:46",
+      "bus": "0005:41:00.0",
+      "firmware": "82.48.1688 (MT_0000001875)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP5p65s0f1np1",
+      "mac": "3c:8b:6e:39:b7:47",
+      "bus": "0005:41:00.1",
+      "firmware": "82.48.1688 (MT_0000001875)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP6p1s0f0np0",
+      "mac": "3c:8b:6e:5c:67:ea",
+      "bus": "0006:01:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP6p1s0f1np1",
+      "mac": "3c:8b:6e:5c:67:eb",
+      "bus": "0006:01:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP6p1s0f2np2",
+      "mac": "3c:8b:6e:5c:67:ec",
+      "bus": "0006:01:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP6p1s0f3np3",
+      "mac": "3c:8b:6e:5c:67:ed",
+      "bus": "0006:01:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP9p3s0f0np0",
+      "mac": "3c:8b:6e:5c:6c:fa",
+      "bus": "0009:03:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP9p3s0f1np1",
+      "mac": "3c:8b:6e:5c:6c:fb",
+      "bus": "0009:03:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP9p3s0f2np2",
+      "mac": "3c:8b:6e:5c:6c:fc",
+      "bus": "0009:03:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP9p3s0f3np3",
+      "mac": "3c:8b:6e:5c:6c:fd",
+      "bus": "0009:03:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP11p1s0f0np0",
+      "mac": "3c:8b:6e:5c:6c:ea",
+      "bus": "000b:01:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP11p1s0f1np1",
+      "mac": "3c:8b:6e:5c:6c:eb",
+      "bus": "000b:01:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP11p1s0f2np2",
+      "mac": "3c:8b:6e:5c:6c:ec",
+      "bus": "000b:01:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP11p1s0f3np3",
+      "mac": "3c:8b:6e:5c:6c:ed",
+      "bus": "000b:01:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP12p3s0f0np0",
+      "mac": "3c:8b:6e:5c:6c:da",
+      "bus": "000c:03:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP12p3s0f1np1",
+      "mac": "3c:8b:6e:5c:6c:db",
+      "bus": "000c:03:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP12p3s0f2np2",
+      "mac": "3c:8b:6e:5c:6c:dc",
+      "bus": "000c:03:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP12p3s0f3np3",
+      "mac": "3c:8b:6e:5c:6c:dd",
+      "bus": "000c:03:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP13p65s0f0np0",
+      "mac": "3c:8b:6e:39:b7:3e",
+      "bus": "000d:41:00.0",
+      "firmware": "82.48.1688 (MT_0000001875)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP13p65s0f1np1",
+      "mac": "3c:8b:6e:39:b7:3f",
+      "bus": "000d:41:00.1",
+      "firmware": "82.48.1688 (MT_0000001875)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP14p1s0f0np0",
+      "mac": "3c:8b:6e:5c:6c:ca",
+      "bus": "000e:01:00.0",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP14p1s0f1np1",
+      "mac": "3c:8b:6e:5c:6c:cb",
+      "bus": "000e:01:00.1",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP14p1s0f2np2",
+      "mac": "3c:8b:6e:5c:6c:cc",
+      "bus": "000e:01:00.2",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "enP14p1s0f3np3",
+      "mac": "3c:8b:6e:5c:6c:cd",
+      "bus": "000e:01:00.3",
+      "firmware": "82.48.1688 (MT_0000001658)",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: yes "
+    },
+    {
+      "interface": "virbr0",
+      "mac": "52:54:00:d4:8a:de",
+      "bus": "N/A",
+      "firmware": "N/A",
+      "part_number": "N/A",
+      "serial_number": "N/A",
+      "link_status": "Speed: Unknown! Duplex: Unknown! (255) Link detected: no "
+    }
+  ],
+  "power_and_fan": {
+    "power_supplies": [],
+    "fans": []
+  },
+  "sensors": "",
+  "logs": {
+    "dmesg_errors": "\"\"",
+    "bmc_sel_critical": "\"\""
+  }
+}

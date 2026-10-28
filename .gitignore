@@ -16,6 +16,10 @@ backend/uploads/
 # traveler Office PDF render cache
 backend/.cache/
 
+# L11 sanity run artifacts (keep golden/ in tree)
+backend/data/l11/runs/
+backend/data/l11/reports/
+
 # node
 node_modules/
 .next/
@@ -35,6 +39,9 @@ frontend/test-results/
 # local reference dump and uploads
 _ref_webgui/
 uploads/
+
+# local probe dumps and login captures
+.local/
 
 # os / editors
 .DS_Store

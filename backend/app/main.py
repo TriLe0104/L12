@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from . import migrations
 from .config import settings
 from .db import Base, SessionLocal, engine
-from .routers import auth, cluster, fabric, maxlps, meta, provision, purchase_orders, staff_tasks, uploads, users, workloads
+from .routers import agent, auth, cluster, fabric, maxlps, meta, provision, purchase_orders, staff_tasks, tests, uploads, users, workloads
 from .routers import settings as settings_router
 from .seed import seed
 from .storage import UPLOAD_DIR, object_storage_configured, serve_upload
@@ -30,6 +30,19 @@ async def lifespan(app: FastAPI):
             seed(db)
     backend = "s3" if object_storage_configured() else "local"
     print(f"uploads: backend={backend}")
+    try:
+        from . import bmc_health
+
+        bmc_health._ensure_watch()
+        print(f"bmc_health: probe_ip={settings.bmc_probe_ip or '-'}")
+    except Exception as exc:
+        print(f"bmc_health: watch not started ({exc})")
+    try:
+        from .provision import kick_background_fill
+
+        kick_background_fill()
+    except Exception as exc:
+        print(f"provision fill: not started ({exc})")
     yield
 
 
@@ -54,11 +67,13 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(agent.router)
 app.include_router(cluster.router)
 app.include_router(maxlps.router)
 app.include_router(fabric.router)
 app.include_router(provision.router)
 app.include_router(workloads.router)
+app.include_router(tests.router)
 app.include_router(purchase_orders.router)
 app.include_router(users.router)
 app.include_router(meta.router)

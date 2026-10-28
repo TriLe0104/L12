@@ -23,6 +23,9 @@ export function MaxLpsInventoryPanel({
   const [label, setLabel] = useState("");
   const [serial, setSerial] = useState("");
   const [hall, setHall] = useState("");
+  const [bmcIp, setBmcIp] = useState("");
+  const [bmcUser, setBmcUser] = useState("root");
+  const [bmcPassword, setBmcPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
@@ -37,7 +40,13 @@ export function MaxLpsInventoryPanel({
     setErr(null);
     try {
       const out = await api.syncMaxlpsInventory();
-      setSyncNote(`Synced ${out.created ?? 0} new · ${out.updated ?? 0} updated from cluster controller`);
+      const pxes = out.ok_pxes?.length ? ` from ${out.ok_pxes.length} PXE` : " from cluster controller";
+      setSyncNote(
+        `Synced ${out.created ?? 0} new · ${out.updated ?? 0} updated` +
+          ((out.removed ?? 0) > 0 ? ` · ${out.removed} removed` : "") +
+          pxes,
+      );
+      if (out.errors?.length) setErr(out.errors.join("; "));
       onChange();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Sync failed");
@@ -54,10 +63,20 @@ export function MaxLpsInventoryPanel({
         label: label.trim(),
         serial: serial.trim() || undefined,
         hall: hall.trim() || undefined,
+        node:
+          bmcIp.trim() || bmcPassword
+            ? {
+                bmc_ip: bmcIp.trim() || undefined,
+                bmc_user: bmcUser.trim() || "root",
+                bmc_password: bmcPassword || undefined,
+              }
+            : undefined,
       });
       setLabel("");
       setSerial("");
       setHall("");
+      setBmcIp("");
+      setBmcPassword("");
       setAdding(false);
       onChange();
     } catch (e) {
@@ -92,7 +111,7 @@ export function MaxLpsInventoryPanel({
       <p>
         {inventory.source === "inventory"
           ? `${inventory.count} rack${inventory.count === 1 ? "" : "s"} in Dynamic Power · ${inventory.layout.nodes_per_rack} nodes · ${inventory.layout.gpus_per_rack} GPU · ${inventory.layout.shelves_per_rack} PS`
-          : "Board still uses floor-plan simulation. Sync or add a rack to switch Dynamic Power to this inventory."}
+          : "No registered racks. Add a rack here or sync from Argus — dashboard stays empty until then."}
       </p>
       {syncNote ? <p>{syncNote}</p> : null}
       <div className="maxlps-inv-actions">
@@ -128,8 +147,20 @@ export function MaxLpsInventoryPanel({
             Hall
             <input value={hall} onChange={(e) => setHall(e.target.value)} placeholder="DH-01" />
           </label>
+          <label>
+            BMC IP
+            <input value={bmcIp} onChange={(e) => setBmcIp(e.target.value)} placeholder="10.43.143.98" />
+          </label>
+          <label>
+            BMC user
+            <input value={bmcUser} onChange={(e) => setBmcUser(e.target.value)} />
+          </label>
+          <label>
+            BMC password
+            <input type="password" value={bmcPassword} onChange={(e) => setBmcPassword(e.target.value)} autoComplete="off" />
+          </label>
           <button type="submit" disabled={busy || !label.trim()}>
-            Create NVL72
+            Add rack
           </button>
         </form>
       ) : null}
@@ -193,6 +224,10 @@ function RackFields({ rack, onChange }: { rack: MaxLpsInvRack; onChange: () => v
       <label>
         Notes
         <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </label>
+      <label>
+        Origin
+        <input value={rack.origin === "argus" ? "Argus" : "manual"} readOnly />
       </label>
       <button type="submit">Save rack</button>
     </form>

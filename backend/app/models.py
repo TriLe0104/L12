@@ -270,7 +270,35 @@ class ClusterSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(80), default="Firmus")
+    xai_api_key: Mapped[str | None] = mapped_column(String(400), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+
+class AgentDoc(Base):
+    """SOP / reference doc the operator cat can read in chat."""
+
+    __tablename__ = "agent_docs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(200))
+    filename: Mapped[str] = mapped_column(String(255))
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class AgentAttachment(Base):
+    """A file dropped on Mona in chat. Images go to Grok vision; text is extracted."""
+
+    __tablename__ = "agent_attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    mime: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
+    kind: Mapped[str] = mapped_column(String(20), default="file")  # image | text | binary
+    text: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String(400), default="")
+    created_at: Mapped[datetime] = mapped_column(default=_now)
 
 
 class DataHall(Base):
@@ -335,6 +363,7 @@ class Workload(Base):
     gpu_mem_gb_request: Mapped[int] = mapped_column(Integer, default=0)
     gpu_mem_gb_alloc: Mapped[int] = mapped_column(Integer, default=0)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    script_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -362,10 +391,25 @@ class InventoryNode(Base):
     os_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
     os_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
     os_password: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    pxe_server: Mapped[str | None] = mapped_column(String(120), nullable=True)
     provision_status: Mapped[str] = mapped_column(String(24), default="registered")
     sol_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     provision_started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+
+class PxeServer(Base):
+    """A lab PXE host. Argus sync reads http://host:8000 and tags that host's racks."""
+
+    __tablename__ = "pxe_servers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(120))
+    host: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(80), default="root")
+    password: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
@@ -399,6 +443,8 @@ class MaxLpsRack(Base):
     hall: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     model: Mapped[str] = mapped_column(String(80), default="GB300-NVL72")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin: Mapped[str] = mapped_column(String(16), default="manual")  # manual | argus
+    pxe_server: Mapped[str | None] = mapped_column(String(120), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     power_state: Mapped[str] = mapped_column(String(16), default="on")
     created_at: Mapped[datetime] = mapped_column(default=_now)
@@ -432,6 +478,9 @@ class MaxLpsNode(Base):
     bmc_password: Mapped[str | None] = mapped_column(String(160), nullable=True)
     os_mac: Mapped[str | None] = mapped_column(String(24), nullable=True)
     os_ip: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    os_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    os_password: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    loop_on: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
@@ -514,6 +563,17 @@ class MaxLpsRackWatt(Base):
     allocated_kw: Mapped[float] = mapped_column(Float, default=0.0)
     gpu_watts: Mapped[list | None] = mapped_column(JSON, nullable=True)
     shelf_watts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class HiddenRack(Base):
+    """Operator-removed rack. Argus / MaxLPS sync skips these serials and labels."""
+
+    __tablename__ = "hidden_racks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    serial: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True, index=True)
+    label: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
 
 
 class StaffTask(Base):

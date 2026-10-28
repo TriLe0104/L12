@@ -8,12 +8,16 @@ run the full register → discover → PXE → SOL path.
 from __future__ import annotations
 
 import hashlib
+import re
+import threading
+import time
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import DataHall, InventoryNode, Rack
+from .models import DataHall, HiddenRack, InventoryNode, PxeServer, Rack, _uuid
 from . import provision_argus
 from . import pxe_hop
 
@@ -154,6 +158,277 @@ def ensure_inventory(db: Session) -> list[InventoryNode]:
     return list(db.scalars(select(InventoryNode).order_by(InventoryNode.kind, InventoryNode.name)).all())
 
 
+def normalize_mac(raw: str | None) -> str | None:
+    hex_only = re.sub(r"[^0-9a-fA-F]", "", raw or "")
+    if len(hex_only) != 12:
+        return None
+    return ":".join(hex_only[i : i + 2] for i in range(0, 12, 2)).lower()
+
+
+def _placeholder_serial(mac: str | None, ip: str | None) -> str:
+    if mac:
+        return f"MAC-{mac.replace(':', '')[-12:].upper()}"
+    if ip:
+        return f"IP-{ip.replace('.', '-')}"
+    return f"UNK-{_uuid()[:8].upper()}"
+
+
+def _is_placeholder_serial(serial: str | None) -> bool:
+    s = (serial or "").strip().upper()
+    return s.startswith("MAC-") or s.startswith("IP-") or s.startswith("UNK-")
+
+
+def _unique_serial(db: Session, serial: str, skip_id: str | None = None) -> str:
+    base = (serial or "").strip() or _placeholder_serial(None, None)
+    candidate = base
+    n = 2
+    while True:
+        row = db.scalar(select(InventoryNode).where(InventoryNode.serial == candidate))
+        if row is None or (skip_id and row.id == skip_id):
+            return candidate
+        candidate = f"{base}-{n}"
+        n += 1
+        if n > 40:
+            return f"{base}-{_uuid()[:6]}"
+
+
+def _find_by_mac_or_ip(db: Session, mac: str | None, ip: str | None) -> InventoryNode | None:
+    if mac:
+        for n in db.scalars(select(InventoryNode)).all():
+            if normalize_mac(n.bmc_mac) == mac:
+                return n
+    if ip:
+        row = db.scalar(select(InventoryNode).where(InventoryNode.bmc_ip == ip))
+        if row is not None:
+            return row
+    return None
+
+
+def enrich_node(node: InventoryNode, *, arp: bool = True, redfish: bool = True) -> dict[str, Any]:
+    """ARP the PXE hop for BMC IP, then Redfish for serial / hostname / MACs."""
+    notes: list[str] = []
+    filled: dict[str, Any] = {}
+    connect_hint = f"Connect to PXE server {node.pxe_server}" if node.pxe_server else "Connect the PXE hop"
+
+    def _ready(addr: str = "") -> bool:
+        try:
+            pxe_hop.bind_target(addr or node.bmc_ip or node.os_ip or "", node.pxe_server)
+            return True
+        except pxe_hop.NeedsHop:
+            return False
+
+    if arp and not node.bmc_ip and node.bmc_mac:
+        if not _ready():
+            notes.append(f"{connect_hint} to ARP-scan this MAC")
+        else:
+            try:
+                found = pxe_hop.find_ip_for_mac(node.bmc_mac, node.pxe_server)
+                ip = found.get("ip")
+                if ip:
+                    node.bmc_ip = ip
+                    filled["bmc_ip"] = ip
+                    notes.append(f"ARP {ip}")
+                else:
+                    notes.append("No neighbor or DHCP lease for that MAC yet")
+            except pxe_hop.NeedsHop:
+                notes.append(f"{connect_hint} to ARP-scan this MAC")
+            except Exception as exc:
+                notes.append(f"ARP failed: {exc}")
+    if arp and node.bmc_ip and not node.bmc_mac:
+        if not _ready(node.bmc_ip):
+            notes.append(f"{connect_hint} to fill BMC MAC from this IP")
+        else:
+            try:
+                found = pxe_hop.find_mac_for_ip(node.bmc_ip, node.pxe_server)
+                mac = normalize_mac(found.get("mac"))
+                if mac:
+                    node.bmc_mac = mac
+                    node.pxe_mac = node.pxe_mac or mac
+                    filled["bmc_mac"] = mac
+                    notes.append(f"ARP MAC {mac}")
+                else:
+                    notes.append("No neighbor MAC for that IP yet")
+            except pxe_hop.NeedsHop:
+                notes.append(f"{connect_hint} to fill BMC MAC from this IP")
+            except Exception as exc:
+                notes.append(f"ARP MAC failed: {exc}")
+    if redfish and node.bmc_ip and (node.bmc_password or node.bmc_user):
+        if not _ready(node.bmc_ip):
+            notes.append(f"{connect_hint} to read serial from the BMC")
+        else:
+            try:
+                ident = pxe_hop.redfish_identity(node.bmc_ip, node.bmc_user or "ADMIN", node.bmc_password or "")
+            except pxe_hop.NeedsHop:
+                notes.append(f"{connect_hint} to read serial from the BMC")
+                ident = {}
+            except Exception as exc:
+                ident = {"error": str(exc)}
+            if ident.get("error") and not ident.get("serial"):
+                notes.append(f"Redfish: {ident['error']}")
+            serial = (ident.get("serial") or "").strip()
+            if serial and (_is_placeholder_serial(node.serial) or not node.serial):
+                filled["serial"] = serial
+            host = (ident.get("hostname") or "").strip()
+            if host and (_is_placeholder_serial(node.name) or not node.name or node.name == node.serial):
+                filled["name"] = host
+            mac = normalize_mac(ident.get("bmc_mac"))
+            if mac and not node.bmc_mac:
+                filled["bmc_mac"] = mac
+                notes.append(f"BMC MAC {mac}")
+            os_mac = normalize_mac(ident.get("os_mac"))
+            if os_mac and not node.os_mac:
+                filled["os_mac"] = os_mac
+            if ident.get("model"):
+                filled["model"] = ident["model"]
+            for key, val in filled.items():
+                if key == "model":
+                    continue
+                setattr(node, key, val)
+            if serial and filled.get("serial"):
+                notes.append(f"SN {serial}")
+            elif serial:
+                notes.append(f"BMC SN {serial} (kept {node.serial})")
+    node.last_seen_at = datetime.now(timezone.utc)
+    if node.bmc_ip and node.provision_status in ("registered",):
+        node.provision_status = "dhcp"
+    filled["notes"] = notes
+    return filled
+
+
+def apply_node_fields(
+    db: Session,
+    node: InventoryNode,
+    *,
+    bmc_mac: str | None = None,
+    bmc_user: str | None = None,
+    bmc_password: str | None = None,
+    bmc_ip: str | None = None,
+    os_ip: str | None = None,
+    os_username: str | None = None,
+    os_password: str | None = None,
+    pxe_server: str | None = None,
+    os_mac: str | None = None,
+    serial: str | None = None,
+    name: str | None = None,
+    kind: str | None = None,
+    hall_name: str | None = None,
+) -> None:
+    if bmc_mac is not None:
+        mac = normalize_mac(bmc_mac)
+        node.bmc_mac = mac
+        if mac:
+            node.pxe_mac = node.pxe_mac or mac
+    if bmc_ip is not None:
+        node.bmc_ip = (bmc_ip or "").strip() or None
+    if bmc_user is not None and str(bmc_user).strip():
+        node.bmc_user = str(bmc_user).strip()
+    elif not node.bmc_user:
+        node.bmc_user = "ADMIN"
+    if bmc_password is not None and str(bmc_password):
+        node.bmc_password = str(bmc_password)
+    if os_ip is not None:
+        node.os_ip = str(os_ip).strip() or None
+    if os_username is not None:
+        node.os_username = str(os_username).strip() or None
+    if os_password is not None:
+        node.os_password = str(os_password) or None
+    if pxe_server is not None:
+        node.pxe_server = str(pxe_server).strip() or None
+    if os_mac:
+        node.os_mac = normalize_mac(os_mac) or node.os_mac
+    if serial and str(serial).strip():
+        node.serial = _unique_serial(db, str(serial).strip(), skip_id=node.id)
+    if name and str(name).strip():
+        node.name = str(name).strip()
+    if kind and str(kind).strip():
+        node.kind = str(kind).strip()
+    if hall_name is not None:
+        rack = str(hall_name).strip()
+        node.hall_name = rack or (node.name or node.serial)
+    if node.source == "demo":
+        node.source = "manual"
+    if not node.hall_name:
+        node.hall_name = node.name or node.serial or "Unassigned"
+
+
+def commit_enriched(db: Session, node: InventoryNode) -> dict[str, Any]:
+    filled = enrich_node(node)
+    if filled.get("serial"):
+        node.serial = _unique_serial(db, filled["serial"], skip_id=node.id)
+        filled["serial"] = node.serial
+    if filled.get("name"):
+        node.name = filled["name"]
+    elif _is_placeholder_serial(node.name):
+        node.name = node.serial
+    db.commit()
+    db.refresh(node)
+    return filled
+
+
+def add_or_update_node(
+    db: Session,
+    *,
+    bmc_mac: str | None = None,
+    bmc_user: str | None = None,
+    bmc_password: str | None = None,
+    bmc_ip: str | None = None,
+    os_ip: str | None = None,
+    os_username: str | None = None,
+    os_password: str | None = None,
+    pxe_server: str | None = None,
+    os_mac: str | None = None,
+    serial: str | None = None,
+    name: str | None = None,
+    kind: str | None = None,
+    hall_name: str | None = None,
+) -> tuple[InventoryNode, dict[str, Any], bool]:
+    mac = normalize_mac(bmc_mac)
+    ip = (bmc_ip or "").strip() or None
+    if not mac and not ip:
+        raise ValueError("Need a BMC MAC or BMC IP")
+    node = _find_by_mac_or_ip(db, mac, ip)
+    created = node is None
+    if node is None:
+        sn = _unique_serial(db, (serial or "").strip() or _placeholder_serial(mac, ip))
+        node_name = (name or "").strip() or sn
+        rack = (hall_name or "").strip() or node_name
+        node = InventoryNode(
+            id=_uuid(),
+            serial=sn,
+            name=node_name,
+            kind=(kind or "compute").strip() or "compute",
+            source="manual",
+            hall_name=rack,
+            provision_status="registered",
+        )
+        db.add(node)
+    apply_node_fields(
+        db,
+        node,
+        bmc_mac=bmc_mac,
+        bmc_user=bmc_user,
+        bmc_password=bmc_password,
+        bmc_ip=bmc_ip,
+        os_ip=os_ip,
+        os_username=os_username,
+        os_password=os_password,
+        pxe_server=pxe_server,
+        os_mac=os_mac,
+        serial=serial if created else (serial if serial and _is_placeholder_serial(node.serial) else None),
+        name=name,
+        kind=kind,
+        hall_name=hall_name if hall_name is not None or created else None,
+    )
+    try:
+        from . import maxlps_inventory as inv
+
+        inv.ensure_rack_for_node(db, node)
+    except Exception:
+        pass
+    filled = commit_enriched(db, node)
+    return node, filled, created
+
+
 def register_serials(db: Session, serials: list[str]) -> list[InventoryNode]:
     ensure_inventory(db)
     racks = {serial_for_rack(r): r for r in db.scalars(select(Rack)).all()}
@@ -271,32 +546,153 @@ _SW_LINES = [
 ]
 
 
-def refresh_sol(node: InventoryNode) -> InventoryNode:
-    if getattr(node, "source", None) == "argus":
-        hop = pxe_hop.status()
-        header = _sol_header(node)
-        if not hop.get("connected"):
-            node.sol_log = (
-                header
-                + f"BMC {node.bmc_ip or 'unknown'} is on the PXE network.\n"
-                + f"Connect SSH to {hop.get('host')} as {hop.get('user')} to pull live SOL / open KVM.\n"
-            )
-            return node
-        if not node.bmc_ip:
-            node.sol_log = header + "No BMC IP on this node yet.\n"
-            return node
+_SOL_STUBS = (
+    "No BMC IP on this node yet.",
+    "Connect SSH to",
+    "PXE hop dropped",
+    "SOL capture failed",
+    "SOL idle",
+)
+
+
+def _sol_is_stub(log: str | None) -> bool:
+    """True only for an empty log or one of our own placeholders. A real console dump counts."""
+    text = (log or "").strip()
+    if not text:
+        return True
+    if "RedfishVersion" in text or "=== Redfish" in text:
+        return False
+    if "login: ubuntu" in text or "provision complete" in text:
+        return False
+    if any(marker in text for marker in _SOL_STUBS):
+        return True
+    return len(text) < 40
+
+
+def node_gaps(node: InventoryNode) -> list[str]:
+    """Fields the hop can fill. Demo rows stay on the scripted path."""
+    if (getattr(node, "source", None) or "demo") == "demo":
+        return []
+    gaps: list[str] = []
+    mac = (node.bmc_mac or "").strip()
+    ip = (node.bmc_ip or "").strip()
+    if mac and not ip:
+        gaps.append("ip")
+    if ip and not mac:
+        gaps.append("mac")
+    creds = bool((node.bmc_password or "").strip())
+    if ip and creds and (_is_placeholder_serial(node.serial) or not (node.serial or "").strip()):
+        gaps.append("identity")
+    if node.kind == "compute" and ip and creds and _sol_is_stub(node.sol_log):
+        gaps.append("sol")
+    return gaps
+
+
+def fill_node_gaps(db: Session, node: InventoryNode) -> list[str]:
+    """Fill only what is missing. Returns the gaps that were still open after the attempt."""
+    if not pxe_hop.status().get("connected"):
+        return node_gaps(node)
+    want = set(node_gaps(node))
+    if not want:
+        return []
+    worked = False
+    if want & {"ip", "mac", "identity"}:
+        enrich_node(node, arp=bool(want & {"ip", "mac"}), redfish="identity" in want)
+        worked = True
+        if "identity" not in want and "identity" in node_gaps(node):
+            enrich_node(node, arp=False, redfish=True)
+    if "sol" in node_gaps(node):
+        _capture_live_sol(node)
+        worked = True
+    if worked:
+        db.commit()
+        db.refresh(node)
+    return node_gaps(node)
+
+
+_FILL_LOCK = threading.Lock()
+_FILL_THREAD: threading.Thread | None = None
+_FILL_NEXT: dict[str, float] = {}
+_FILL_WAIT = 90.0
+
+
+def kick_background_fill() -> None:
+    """One pass over nodes that are missing BMC IP, MAC, serial, or SOL. No-op until the hop is up."""
+    global _FILL_THREAD
+    if not pxe_hop.status().get("connected"):
+        return
+    with _FILL_LOCK:
+        if _FILL_THREAD is not None and _FILL_THREAD.is_alive():
+            return
+        _FILL_THREAD = threading.Thread(target=_fill_loop, name="provision-fill", daemon=True)
+        _FILL_THREAD.start()
+
+
+def _fill_loop() -> None:
+    from .db import SessionLocal
+
+    while pxe_hop.status().get("connected"):
+        db = SessionLocal()
+        target_id = ""
         try:
-            burst = pxe_hop.sol_capture(
-                node.bmc_ip,
-                getattr(node, "bmc_user", None) or "ADMIN",
-                node.bmc_password or "",
-            )
-            node.sol_log = header + burst
-        except pxe_hop.NeedsHop:
-            node.sol_log = header + "PXE hop dropped. Re-enter jump-host credentials.\n"
-        except Exception as exc:
-            node.sol_log = header + f"SOL capture failed: {exc}\n"
+            now = time.time()
+            target = None
+            for node in db.scalars(select(InventoryNode)).all():
+                if not node_gaps(node):
+                    _FILL_NEXT.pop(node.id, None)
+                    continue
+                if _FILL_NEXT.get(node.id, 0) > now:
+                    continue
+                target = node
+                break
+            if target is None:
+                upcoming = [t for t in _FILL_NEXT.values() if t > now]
+                if not upcoming:
+                    return
+                time.sleep(min(30.0, max(2.0, min(upcoming) - now)))
+                continue
+            target_id = target.id
+            still = fill_node_gaps(db, target)
+            if still:
+                _FILL_NEXT[target_id] = time.time() + _FILL_WAIT
+            else:
+                _FILL_NEXT.pop(target_id, None)
+        except Exception:
+            db.rollback()
+            if target_id:
+                _FILL_NEXT[target_id] = time.time() + _FILL_WAIT
+        finally:
+            db.close()
+
+
+def _capture_live_sol(node: InventoryNode) -> InventoryNode:
+    header = _sol_header(node)
+    try:
+        pxe_hop.bind_target(node.bmc_ip or "", node.pxe_server)
+    except pxe_hop.NeedsHop:
+        which = node.pxe_server or "the PXE hop"
+        node.sol_log = header + f"BMC {node.bmc_ip or 'unknown'} is on the PXE network.\nPXE {which} is not connected.\n"
         return node
+    if not node.bmc_ip:
+        node.sol_log = header + "No BMC IP on this node yet.\n"
+        return node
+    try:
+        burst = pxe_hop.sol_capture(
+            node.bmc_ip,
+            getattr(node, "bmc_user", None) or "ADMIN",
+            node.bmc_password or "",
+        )
+        node.sol_log = header + burst
+    except pxe_hop.NeedsHop as exc:
+        node.sol_log = header + f"{exc}\n"
+    except Exception as exc:
+        node.sol_log = header + f"SOL capture failed: {exc}\n"
+    return node
+
+
+def refresh_sol(node: InventoryNode) -> InventoryNode:
+    if (getattr(node, "source", None) or "demo") != "demo":
+        return _capture_live_sol(node)
     if node.provision_status in ("registered", "dhcp", "ready", "failed"):
         if node.provision_status == "ready" and not node.sol_log:
             node.sol_log = _sol_header(node) + "login: ubuntu  (provision complete)\n"
@@ -418,6 +814,7 @@ def serialize(node: InventoryNode) -> dict:
         "os_ip": node.os_ip,
         "os_username": getattr(node, "os_username", None),
         "os_password": getattr(node, "os_password", None),
+        "pxe_server": getattr(node, "pxe_server", None),
         "source": getattr(node, "source", None) or "demo",
         "provision_status": node.provision_status,
         "sol_log": node.sol_log,
@@ -428,16 +825,55 @@ def serialize(node: InventoryNode) -> dict:
     }
 
 
-def load_nodes(db: Session) -> list[InventoryNode]:
+def _operator_inventory(db: Session) -> bool:
+    """True once a PXE is saved or a rack was removed. Demo campus rows are not inventory."""
+    if db.scalar(select(PxeServer.id).limit(1)) is not None:
+        return True
+    return db.scalar(select(HiddenRack.id).limit(1)) is not None
+
+
+def _drop_demo_inventory(db: Session) -> None:
+    from . import maxlps_inventory
+
+    dirty = False
+    for row in list(db.scalars(select(InventoryNode).where(InventoryNode.source == "demo")).all()):
+        db.delete(row)
+        dirty = True
+    if dirty:
+        db.commit()
+    maxlps_inventory.forget_bucket_hides(db)
+
+
+def _live_nodes(db: Session) -> list[InventoryNode]:
+    return list(
+        db.scalars(
+            select(InventoryNode)
+            .where(InventoryNode.source.in_(("argus", "manual", "provision")))
+            .order_by(InventoryNode.hall_name, InventoryNode.name)
+        ).all()
+    )
+
+
+def load_nodes(db: Session, *, sync: bool = True) -> list[InventoryNode]:
     try:
-        argus = provision_argus.sync_from_argus(db)
-        if argus:
-            return argus
+        if sync:
+            from . import maxlps_inventory
+
+            maxlps_inventory.sync_live_infra(db)
+        if _operator_inventory(db):
+            _drop_demo_inventory(db)
+        live = _live_nodes(db)
+        if live:
+            return live
     except Exception:
         db.rollback()
-        existing = list(
-            db.scalars(select(InventoryNode).where(InventoryNode.source == "argus").order_by(InventoryNode.name)).all()
-        )
+        existing = _live_nodes(db)
         if existing:
             return existing
+    if _operator_inventory(db):
+        try:
+            _drop_demo_inventory(db)
+        except Exception:
+            db.rollback()
+        return []
     return ensure_inventory(db)

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { Gb300PowerStencil, rackLimiterView } from "@/components/Gb300PowerStencil";
 import { api } from "@/lib/api";
 import type { PowerLimiter as PowerLimiterData, PowerRack, PowerShowcaseSlot } from "@/lib/cluster";
 import { formatKw } from "@/lib/cluster";
@@ -608,7 +609,7 @@ export function PowerLimiterPanel({
     }
   }
 
-  if (!data) return <section className="lps-row lps-pending">Loading power limiter…</section>;
+  if (!data) return <section className="lps-row lps-pending" data-mona="limiter">Loading power limiter…</section>;
 
   const extraN = data.dynamic.racks_extra ?? 0;
   const nStatic = data.racks_static_max ?? data.static.racks_enabled ?? 0;
@@ -633,7 +634,7 @@ export function PowerLimiterPanel({
   const dynSurplus = data.dynamic.surplus_kw ?? Math.max(0, envelope - dynPlace);
 
   return (
-    <section className="lps-row">
+    <section className="lps-row" data-mona="limiter">
       <div className="lps-toolbar">
         <div>
           <strong>Closed-loop power limiter</strong>
@@ -653,9 +654,6 @@ export function PowerLimiterPanel({
             onClick={() => setMode("dynamic")}
           >
             Dynamic Power
-          </button>
-          <button type="button" disabled={locked} onClick={() => setMode("dynamic", true)}>
-            Replay
           </button>
         </div>
       </div>
@@ -704,6 +702,15 @@ export function PowerLimiterPanel({
 
       <aside className="lps-loop">
         <h2>Control loop</h2>
+        <Gb300PowerStencil
+          mode="compact"
+          usedKw={rackLimiterView(data).usedKw}
+          maxKw={maxKw}
+          minKw={minKw}
+          thresholdPct={data.threshold_pct ?? data.stay_under_pct ?? 80}
+          envelopeKw={envelope}
+          label="GB300 rack"
+        />
         <PowerPolicyFields data={data} onChange={onChange} locked={locked} />
         <dl>
           <div>

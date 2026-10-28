@@ -15,7 +15,20 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import cluster_controller, gpu_power
-from .models import MaxLpsClusterWatt, MaxLpsGpu, MaxLpsNode, MaxLpsRack, MaxLpsRackWatt, MaxLpsShelf, _now, _uuid
+from .models import (
+    DataHall,
+    HiddenRack,
+    InventoryNode,
+    MaxLpsClusterWatt,
+    MaxLpsGpu,
+    MaxLpsNode,
+    MaxLpsRack,
+    MaxLpsRackWatt,
+    MaxLpsShelf,
+    Rack,
+    _now,
+    _uuid,
+)
 
 NODES = gpu_power.NODES_PER_RACK
 GPUS = gpu_power.GPUS_PER_NODE
@@ -26,11 +39,89 @@ _last_write = 0.0
 _last_sync = 0.0
 
 
+_BUCKETS = {"unassigned", "rack", "inventory", "all"}
+
+
 def _blank(v: str | None) -> str | None:
     if v is None:
         return None
     s = str(v).strip()
     return s or None
+
+
+def _norm(v: str | None) -> str:
+    return (v or "").strip().lower()
+
+
+def hidden_tokens(db: Session) -> set[str]:
+    out: set[str] = set()
+    for row in db.scalars(select(HiddenRack)).all():
+        for raw in (row.serial, row.label, (row.serial or "")[:36]):
+            token = _norm(raw)
+            if token and token not in _BUCKETS:
+                out.add(token)
+    return out
+
+
+def is_hidden(db: Session, *values: str | None) -> bool:
+    tokens = hidden_tokens(db)
+    if not tokens:
+        return False
+    for value in values:
+        token = _norm(value)
+        if token and (token in tokens or token[:36] in tokens):
+            return True
+    return False
+
+
+def remember_hidden(db: Session, *, serial: str | None, label: str | None) -> None:
+    serial = _blank(serial)
+    label = _blank(label)
+    if serial and _norm(serial) in _BUCKETS:
+        serial = None
+    if label and _norm(label) in _BUCKETS:
+        label = None
+    if not serial and not label:
+        return
+    existing = None
+    if serial:
+        existing = db.scalars(select(HiddenRack).where(HiddenRack.serial == serial)).first()
+    if existing is None and label:
+        existing = db.scalars(select(HiddenRack).where(HiddenRack.label == label)).first()
+    if existing is not None:
+        if serial and not existing.serial:
+            existing.serial = serial
+        if label and not existing.label:
+            existing.label = label
+        return
+    db.add(HiddenRack(id=_uuid(), serial=serial, label=label))
+
+
+def forget_bucket_hides(db: Session) -> None:
+    """Drop hide rows created by removing the synthetic Inventory / all bucket."""
+    changed = False
+    for row in list(db.scalars(select(HiddenRack)).all()):
+        serial = _norm(row.serial)
+        label = _norm(row.label)
+        if (not serial or serial in _BUCKETS) and (not label or label in _BUCKETS) and (serial or label):
+            db.delete(row)
+            changed = True
+    if changed:
+        db.commit()
+
+
+def reveal_hidden(db: Session, *, serial: str | None = None, label: str | None = None) -> None:
+    serial_n = _norm(serial)
+    label_n = _norm(label)
+    if not serial_n and not label_n:
+        return
+    for row in list(db.scalars(select(HiddenRack)).all()):
+        row_serial = _norm(row.serial)
+        row_label = _norm(row.label)
+        if serial_n and row_serial and (row_serial == serial_n or row_serial[:36] == serial_n[:36]):
+            db.delete(row)
+        elif label_n and row_label == label_n:
+            db.delete(row)
 
 
 def inventory_count(db: Session) -> int:
@@ -55,6 +146,23 @@ def rack_populated_nodes(rack: MaxLpsRack, live_gpus: int = 0, live_nodes: int =
     if not from_live and live_gpus:
         from_live = (int(live_gpus) + GPUS - 1) // GPUS
     return max(named, from_live)
+
+
+def live_overview_counts(racks: list[MaxLpsRack], live_by_rack: dict[str, dict] | None = None) -> dict[str, int]:
+    """Racks, nodes, and GPUs that returned watts. Inventory power_state is not alive."""
+    live_by_rack = live_by_rack or {}
+    racks_on = 0
+    nodes_on = 0
+    gpus_live = 0
+    for rack in racks:
+        live = live_by_rack.get(rack.id) or {}
+        nodes = int(live.get("nodes_live") or 0)
+        gpus = int(live.get("gpu_live") or 0)
+        nodes_on += nodes
+        gpus_live += gpus
+        if live.get("metered") or nodes or gpus:
+            racks_on += 1
+    return {"racks_on": racks_on, "nodes_on": nodes_on, "gpus_live": gpus_live}
 
 
 def populated_counts(
@@ -117,12 +225,16 @@ def dump_node(n: MaxLpsNode, *, secrets: bool) -> dict[str, Any]:
         "bmc_user": n.bmc_user or "ADMIN",
         "os_mac": n.os_mac,
         "os_ip": n.os_ip,
+        "os_username": n.os_username or "root",
         "gpu_count": GPUS,
+        "loop_on": bool(getattr(n, "loop_on", True)),
     }
     if secrets:
         out["bmc_password"] = n.bmc_password
+        out["os_password"] = n.os_password
     else:
         out["bmc_password_set"] = bool(n.bmc_password)
+        out["os_password_set"] = bool(n.os_password)
     return out
 
 
@@ -170,6 +282,8 @@ def dump_rack(rack: MaxLpsRack, *, secrets: bool = True) -> dict[str, Any]:
         "hall": rack.hall,
         "model": rack.model,
         "notes": rack.notes,
+        "origin": rack.origin or "manual",
+        "pxe_server": getattr(rack, "pxe_server", None),
         "enabled": rack.enabled,
         "power_state": rack.power_state,
         "created_at": rack.created_at.isoformat() if rack.created_at else None,
@@ -213,11 +327,14 @@ def create_rack(
     hall: str | None = None,
     notes: str | None = None,
     model: str | None = None,
+    origin: str = "manual",
+    node: dict[str, Any] | None = None,
 ) -> MaxLpsRack:
     label = (label or "").strip()
     if not label:
         raise ValueError("label is required")
     serial = _blank(serial)
+    reveal_hidden(db, serial=serial, label=label)
     if serial:
         exists = db.scalar(select(MaxLpsRack.id).where(MaxLpsRack.serial == serial))
         if exists:
@@ -225,6 +342,9 @@ def create_rack(
     clash = db.scalar(select(MaxLpsRack.id).where(MaxLpsRack.label == label))
     if clash:
         raise ValueError(f"rack label {label} already exists")
+    src = (origin or "manual").strip().lower()
+    if src not in ("manual", "argus"):
+        src = "manual"
     rack = MaxLpsRack(
         id=_uuid(),
         label=label,
@@ -232,6 +352,7 @@ def create_rack(
         hall=_blank(hall),
         notes=_blank(notes),
         model=(model or "GB300-NVL72").strip() or "GB300-NVL72",
+        origin=src,
         enabled=True,
         power_state="on",
     )
@@ -241,18 +362,283 @@ def create_rack(
     gpu_power.LOOP.force = True
     db.commit()
     db.refresh(rack)
-    return get_rack(db, rack.id) or rack
+    loaded = get_rack(db, rack.id) or rack
+    if node:
+        assign_node(db, loaded, node)
+        loaded = get_rack(db, rack.id) or loaded
+    try:
+        from .routers.cluster import _invalidate_power_cache
+
+        _invalidate_power_cache()
+    except Exception:
+        pass
+    return loaded
+
+
+def _identity_payload(node: InventoryNode) -> dict[str, Any]:
+    serial = (node.serial or "").strip()
+    if serial.upper().startswith(("MAC-", "IP-", "UNK-")):
+        serial = ""
+    return {
+        "bmc_ip": node.bmc_ip,
+        "bmc_mac": node.bmc_mac,
+        "bmc_user": node.bmc_user,
+        "bmc_password": node.bmc_password,
+        "os_ip": node.os_ip,
+        "os_mac": node.os_mac,
+        "os_username": node.os_username,
+        "os_password": node.os_password,
+        "hostname": node.name,
+        "serial": serial or None,
+    }
+
+
+def _slot_matches(slot: MaxLpsNode, node: InventoryNode) -> bool:
+    ip = (node.bmc_ip or "").strip()
+    mac = (node.bmc_mac or "").strip().lower()
+    if ip and (slot.bmc_ip or "").strip() == ip:
+        return True
+    if mac and (slot.bmc_mac or "").strip().lower() == mac:
+        return True
+    return False
+
+
+def _detach_identity(db: Session, node: InventoryNode, keep_id: str | None) -> None:
+    ip = (node.bmc_ip or "").strip()
+    mac = (node.bmc_mac or "").strip().lower()
+    if not ip and not mac:
+        return
+    for rack in load_racks(db):
+        if keep_id and rack.id == keep_id:
+            continue
+        changed = False
+        for slot in rack.nodes:
+            if not _slot_matches(slot, node):
+                continue
+            slot.bmc_ip = None
+            slot.bmc_mac = None
+            slot.hostname = None
+            changed = True
+        if changed:
+            rack.updated_at = _now()
+
+
+def ensure_rack_for_node(db: Session, node: InventoryNode) -> MaxLpsRack | None:
+    """Keep MaxLPS / Cluster on the same rack name as Provision."""
+    label = (node.hall_name or node.name or "").strip()
+    if not label or _norm(label) in _BUCKETS:
+        return None
+    reveal_hidden(db, label=label)
+    racks = load_racks(db)
+    rack = next((r for r in racks if _norm(r.label) == _norm(label)), None)
+    if rack is None and node.rack_id:
+        current = next((r for r in racks if r.id == node.rack_id), None)
+        if current is not None and (current.origin or "manual") == "manual":
+            others = [
+                n
+                for n in db.scalars(select(InventoryNode)).all()
+                if n.id != node.id
+                and (n.rack_id == current.id or _norm(n.hall_name) == _norm(current.label))
+            ]
+            if not others:
+                current.label = label
+                current.updated_at = _now()
+                rack = current
+    payload = _identity_payload(node)
+    if rack is None:
+        try:
+            rack = create_rack(db, label=label, origin="manual", node=payload if (node.bmc_ip or node.bmc_mac) else None)
+        except ValueError:
+            rack = next((r for r in load_racks(db) if _norm(r.label) == _norm(label)), None)
+            if rack is None:
+                return None
+    else:
+        match = next((s for s in rack.nodes if _slot_matches(s, node)), None)
+        if match is not None:
+            patch_node(db, match, payload)
+        elif node.bmc_ip or node.bmc_mac:
+            try:
+                assign_node(db, rack, payload)
+            except ValueError:
+                pass
+    _detach_identity(db, node, rack.id)
+    node.rack_id = rack.id
+    return rack
+
+
+def assign_node(db: Session, rack: MaxLpsRack, body: dict[str, Any]) -> MaxLpsNode:
+    """Fill a topology slot with BMC identity. Next empty slot if index omitted."""
+    nodes = sorted(rack.nodes, key=lambda n: int(n.index))
+    raw_idx = body.get("index")
+    if raw_idx is None or raw_idx == "":
+        target = next((n for n in nodes if not (n.bmc_ip or "").strip()), None)
+        if target is None:
+            raise ValueError("rack has no free node slots")
+    else:
+        idx = int(raw_idx)
+        target = next((n for n in nodes if int(n.index) == idx), None)
+        if target is None:
+            raise ValueError(f"node slot {idx} not found")
+    return patch_node(db, target, body)
+
+
+def _match_maxlps(db: Session, key: str) -> MaxLpsRack | None:
+    rack = get_rack(db, key)
+    if rack is not None:
+        return rack
+    needle = _norm(key)
+    if not needle:
+        return None
+    for row in load_racks(db):
+        serial = _norm(row.serial)
+        if (
+            _norm(row.label) == needle
+            or serial == needle
+            or serial[:36] == needle
+            or row.id.lower() == needle
+        ):
+            return row
+    return None
+
+
+def _inventory_for_rack(db: Session, *, rack: MaxLpsRack | None, key: str, name: str | None) -> list[InventoryNode]:
+    keys = {_norm(key)}
+    if name:
+        keys.add(_norm(name))
+    if rack:
+        keys.update({_norm(rack.id), _norm(rack.label), _norm(rack.serial), _norm(rack.serial)[:36]})
+    keys.discard("")
+    out: list[InventoryNode] = []
+    for node in db.scalars(select(InventoryNode)).all():
+        if _norm(node.rack_id) in keys or _norm(node.hall_name) in keys:
+            out.append(node)
+    return out
+
+
+_SEED_KEYS = {"demo-campus", "seeded", "seeded campus"}
+
+
+def _is_seed_rack(rack: Rack, hall_name: str) -> bool:
+    return (rack.notes or "") == "GB300" and (rack.name or "").startswith(f"{hall_name}-R")
+
+
+def seeded_halls(db: Session) -> list[DataHall]:
+    """Firmus placeholder halls (DH-01..DH-04). Operator halls are left alone."""
+    halls = list(db.scalars(select(DataHall).options(selectinload(DataHall.racks))).all())
+    out: list[DataHall] = []
+    for hall in halls:
+        name = (hall.name or "").strip()
+        racks = list(hall.racks)
+        if name.startswith("DH-") and racks and all(_is_seed_rack(rack, name) for rack in racks):
+            out.append(hall)
+    return out
+
+
+def seeded_provision_rack(db: Session) -> dict[str, Any] | None:
+    halls = seeded_halls(db)
+    if not halls:
+        return None
+    names = ", ".join(sorted(hall.name for hall in halls))
+    count = sum(len(list(hall.racks)) for hall in halls)
+    return {
+        "id": "demo-campus",
+        "serial": names,
+        "name": "Seeded campus",
+        "type": "placeholder",
+        "status": "placeholder",
+        "counts": {"nodes": count, "switches": 0, "shelves": 0},
+    }
+
+
+def _delete_seed_halls(db: Session, halls: list[DataHall]) -> int:
+    if not halls:
+        return 0
+    ids = [hall.id for hall in halls]
+    names = [hall.name for hall in halls]
+    count = int(
+        db.scalar(select(func.count()).select_from(Rack).where(Rack.hall_id.in_(ids))) or 0
+    )
+    db.execute(delete(InventoryNode).where(InventoryNode.hall_name.in_(names), InventoryNode.source == "demo"))
+    db.execute(delete(Rack).where(Rack.hall_id.in_(ids)))
+    db.execute(delete(DataHall).where(DataHall.id.in_(ids)))
+    db.expire_all()
+    return count
+
+
+def remove_seeded_campus(db: Session, key: str) -> dict[str, Any] | None:
+    """Delete seeded floor halls. Does not hide a name and does not touch Argus."""
+    needle = _norm(key)
+    halls = seeded_halls(db)
+    if not halls:
+        return None
+    if needle in _SEED_KEYS or needle in {"all", "inventory"}:
+        targets = halls
+    else:
+        targets = [hall for hall in halls if _norm(hall.name) == needle or hall.id.lower() == needle]
+        if not targets:
+            for hall in halls:
+                for rack in list(hall.racks):
+                    if rack.id.lower() == needle or _norm(rack.name) == needle:
+                        label = rack.name
+                        hall_id = hall.id
+                        db.execute(delete(Rack).where(Rack.id == rack.id))
+                        left = int(
+                            db.scalar(select(func.count()).select_from(Rack).where(Rack.hall_id == hall_id)) or 0
+                        )
+                        if left == 0:
+                            db.execute(delete(DataHall).where(DataHall.id == hall_id))
+                        db.commit()
+                        return {"ok": True, "id": key, "label": label, "nodes": 1, "hidden": False}
+            return None
+    labels = [hall.name for hall in targets]
+    count = _delete_seed_halls(db, targets)
+    db.commit()
+    return {"ok": True, "id": key, "label": ", ".join(labels), "nodes": count, "hidden": False}
+
+
+def remove_operator_rack(db: Session, key: str) -> dict[str, Any] | None:
+    """Delete a rack from MaxLPS + provision and keep Argus from putting it back."""
+    key = (key or "").strip()
+    if not key:
+        return None
+    seeded = remove_seeded_campus(db, key)
+    if seeded is not None:
+        return seeded
+    rack = _match_maxlps(db, key)
+    name = (rack.label if rack else key).strip() or key
+    serial = _blank(rack.serial if rack else None) or (None if _norm(key) in _BUCKETS else key)
+    hide = _norm(name) not in _BUCKETS
+    nodes = _inventory_for_rack(db, rack=rack, key=key, name=name)
+    for node in nodes:
+        db.delete(node)
+    if hide:
+        remember_hidden(db, serial=serial, label=name)
+        try:
+            from . import provision_argus
+
+            for tok in (serial, name, key, (serial or "")[:36], rack.id if rack else None):
+                if tok:
+                    provision_argus.RACK_META.pop(str(tok), None)
+                    provision_argus.RACK_META.pop(str(tok)[:36], None)
+        except Exception:
+            pass
+    rid = rack.id if rack else key
+    if rack is not None:
+        db.delete(rack)
+        gpu_power.LOOP.cached_out = None
+        gpu_power.LOOP.force = True
+        try:
+            from .routers.cluster import _invalidate_power_cache
+
+            _invalidate_power_cache()
+        except Exception:
+            pass
+    db.commit()
+    return {"ok": True, "id": rid, "label": name, "nodes": len(nodes), "hidden": hide}
 
 
 def delete_rack(db: Session, rack_id: str) -> bool:
-    rack = db.get(MaxLpsRack, rack_id)
-    if rack is None:
-        return False
-    db.delete(rack)
-    gpu_power.LOOP.cached_out = None
-    gpu_power.LOOP.force = True
-    db.commit()
-    return True
+    return remove_operator_rack(db, rack_id) is not None
 
 
 def patch_rack(db: Session, rack: MaxLpsRack, body: dict[str, Any]) -> MaxLpsRack:
@@ -284,9 +670,25 @@ def patch_rack(db: Session, rack: MaxLpsRack, body: dict[str, Any]) -> MaxLpsRac
 
 
 def patch_node(db: Session, node: MaxLpsNode, body: dict[str, Any]) -> MaxLpsNode:
-    for key in ("serial", "hostname", "bmc_mac", "bmc_ip", "bmc_user", "bmc_password", "os_mac", "os_ip"):
+    for key in (
+        "serial",
+        "hostname",
+        "bmc_mac",
+        "bmc_ip",
+        "bmc_user",
+        "bmc_password",
+        "os_mac",
+        "os_ip",
+        "os_username",
+        "os_password",
+    ):
         if key in body:
-            setattr(node, key, _blank(body.get(key)) if key != "bmc_user" else (_blank(body.get(key)) or "ADMIN"))
+            if key == "bmc_user":
+                setattr(node, key, _blank(body.get(key)) or "ADMIN")
+            elif key == "os_username":
+                setattr(node, key, _blank(body.get(key)) or "root")
+            else:
+                setattr(node, key, _blank(body.get(key)))
     node.updated_at = _now()
     db.commit()
     db.refresh(node)
@@ -526,6 +928,8 @@ def _apply_node(node: MaxLpsNode, src: dict[str, Any], rack: MaxLpsRack) -> None
     _set_if(node, "bmc_password", src.get("bmc_password"))
     _set_if(node, "os_mac", src.get("os_mac"))
     _set_if(node, "os_ip", src.get("os_ip"))
+    _set_if(node, "os_username", src.get("os_username") or src.get("os_user"))
+    _set_if(node, "os_password", src.get("os_password"))
     hw = src.get("hardware_data") if isinstance(src.get("hardware_data"), dict) else {}
     gpus_src = hw.get("gpus") if isinstance(hw, dict) else None
     if not isinstance(gpus_src, list):
@@ -546,6 +950,51 @@ def _apply_node(node: MaxLpsNode, src: dict[str, Any], rack: MaxLpsRack) -> None
         _set_if(gpu, "pci_addr", gsrc.get("pci_addr") or gsrc.get("PCI"))
 
 
+_SLOT_FIELDS = (
+    "serial",
+    "hostname",
+    "bmc_mac",
+    "bmc_ip",
+    "bmc_user",
+    "bmc_password",
+    "os_mac",
+    "os_ip",
+    "os_username",
+    "os_password",
+)
+_CRED_FIELDS = ("bmc_user", "bmc_password", "os_username", "os_password", "os_ip", "os_mac")
+
+
+def _clash_label(name: str, serial: str) -> str:
+    return f"{name}-{serial[-6:]}"
+
+
+def _release_duplicate_slot(nodes_by_i: dict[int, MaxLpsNode], src: dict[str, Any], idx: int) -> None:
+    """Move a machine off the wrong slot before Argus writes its real location."""
+    mac = (_blank(src.get("bmc_mac")) or "").lower()
+    ip = _blank(src.get("bmc_ip"))
+    serial = _blank(src.get("serial_number") or src.get("serial"))
+    if not mac and not ip and not serial:
+        return
+    target = nodes_by_i.get(idx)
+    for other_i, other in list(nodes_by_i.items()):
+        if other_i == idx:
+            continue
+        if not (
+            (mac and (_blank(other.bmc_mac) or "").lower() == mac)
+            or (serial and _blank(other.serial) == serial)
+            or (ip and _blank(other.bmc_ip) == ip)
+        ):
+            continue
+        if target is not None:
+            for field in _CRED_FIELDS:
+                incoming = _blank(getattr(other, field, None))
+                if incoming and not _blank(getattr(target, field, None)):
+                    setattr(target, field, incoming)
+        for field in _SLOT_FIELDS:
+            setattr(other, field, None)
+
+
 def _apply_shelf(shelf: MaxLpsShelf, src: dict[str, Any]) -> None:
     _set_if(shelf, "serial", src.get("serial_number") or src.get("serial"))
     _set_if(shelf, "ip", src.get("bmc_ip") or src.get("ip"))
@@ -555,21 +1004,105 @@ def _apply_shelf(shelf: MaxLpsShelf, src: dict[str, Any]) -> None:
     _set_if(shelf, "model", src.get("model"))
 
 
+def _richness(detail: dict[str, Any]) -> int:
+    score = 0
+    for key in ("nodes", "switches", "powershelves", "cdus"):
+        for entry in detail.get(key) or []:
+            if not isinstance(entry, dict):
+                continue
+            score += 1
+            if _blank(entry.get("bmc_ip")) or _blank(entry.get("serial_number") or entry.get("serial")):
+                score += 5
+    return score
+
+
+def collect_controller_racks(db: Session) -> dict[str, Any]:
+    """Read every PXE's Argus. One down host does not blank the others.
+
+    The same serial on two servers keeps the copy with more identity filled in,
+    and that server is the rack's PXE.
+    """
+    from . import cluster_controller, pxe_servers
+
+    best: dict[str, tuple[int, dict[str, Any]]] = {}
+    ok_pxes: set[str] = set()
+    errors: list[str] = []
+    sources = pxe_servers.controller_sources(db)
+    if not sources:
+        return {"racks": [], "ok_pxes": ok_pxes, "errors": ["cluster controller URL is not set"]}
+    for src in sources:
+        try:
+            rows = cluster_controller.list_racks(base=src.base)
+        except Exception as exc:
+            errors.append(f"{src.pxe_host}: {exc}")
+            continue
+        ok_pxes.add(src.pxe_host.lower())
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sn = _blank(row.get("serial_number") or row.get("serial"))
+            name = _blank(row.get("name"))
+            if not sn or not name:
+                continue
+            try:
+                detail = cluster_controller.get_rack(sn, name, base=src.base) or row
+            except Exception:
+                detail = row
+            if not isinstance(detail, dict):
+                detail = row
+            detail = dict(detail)
+            detail["pxe_server"] = src.pxe_host
+            score = _richness(detail)
+            prev = best.get(sn)
+            if prev is None or score > prev[0]:
+                best[sn] = (score, detail)
+    return {"racks": [item[1] for item in best.values()], "ok_pxes": ok_pxes, "errors": errors}
+
+
 def upsert_controller_rack(db: Session, detail: dict[str, Any]) -> str:
     serial = _blank(detail.get("serial_number") or detail.get("serial"))
     name = _blank(detail.get("name")) or serial or "rack"
     if not serial:
         raise ValueError("controller rack missing serial_number")
+    # A remove only clears L12. The next Argus sync puts the rack back.
+    if is_hidden(db, serial, name):
+        reveal_hidden(db, serial=serial, label=name)
+    pxe = _blank(detail.get("pxe_server"))
     rack = db.scalars(select(MaxLpsRack).where(MaxLpsRack.serial == serial)).first()
     created = "updated"
     if rack is None:
+        same_label = db.scalars(select(MaxLpsRack).where(MaxLpsRack.label == name)).first()
+        # A serial-less operator rack with this label is the same rack.
+        if same_label is not None and not _blank(same_label.serial):
+            same_label.serial = serial
+            rack = same_label
+    elif rack.label == _clash_label(name, serial):
+        # An earlier sync renamed around a serial-less rack. Fold that copy back.
+        same_label = db.scalars(select(MaxLpsRack).where(MaxLpsRack.label == name)).first()
+        if same_label is not None and same_label.id != rack.id and not _blank(same_label.serial):
+            db.execute(delete(MaxLpsRackWatt).where(MaxLpsRackWatt.rack_id == rack.id))
+            db.delete(rack)
+            db.flush()
+            same_label.serial = serial
+            rack = same_label
+    if rack is None:
         label = name
         if db.scalar(select(MaxLpsRack.id).where(MaxLpsRack.label == label)):
-            label = f"{name}-{serial[-6:]}"
+            label = _clash_label(name, serial)
         rack_type = _blank(detail.get("type")) or "GB300-NVL72"
         model = "GB300-NVL72" if str(rack_type).lower().startswith("gb300") else str(rack_type)
-        rack = create_rack(db, label=label, serial=serial, hall=None, notes=_blank(detail.get("status")), model=model)
+        rack = create_rack(
+            db,
+            label=label,
+            serial=serial,
+            hall=None,
+            notes=_blank(detail.get("status")),
+            model=model,
+            origin="argus",
+        )
         created = "created"
+        if pxe:
+            rack.pxe_server = pxe
     else:
         if name and rack.label != name and not db.scalar(
             select(MaxLpsRack.id).where(MaxLpsRack.label == name, MaxLpsRack.id != rack.id)
@@ -580,6 +1113,10 @@ def upsert_controller_rack(db: Session, detail: dict[str, Any]) -> str:
         rtype = _blank(detail.get("type"))
         if rtype:
             rack.model = "GB300-NVL72" if rtype.lower().startswith("gb300") else rtype
+        if (rack.origin or "manual").strip().lower() != "manual":
+            rack.origin = "argus"
+        if pxe:
+            rack.pxe_server = pxe
         rack.updated_at = _now()
         db.commit()
         loaded = get_rack(db, rack.id)
@@ -591,6 +1128,7 @@ def upsert_controller_rack(db: Session, detail: dict[str, Any]) -> str:
         idx = _slot(src.get("location_index"), NODES)
         if idx is None or idx not in nodes_by_i:
             continue
+        _release_duplicate_slot(nodes_by_i, src, idx)
         _apply_node(nodes_by_i[idx], src, rack)
     shelves_by_i = {s.index: s for s in rack.shelves}
     for src in detail.get("powershelves") or []:
@@ -604,26 +1142,81 @@ def upsert_controller_rack(db: Session, detail: dict[str, Any]) -> str:
     return created
 
 
-def sync_from_controller(db: Session) -> dict[str, Any]:
-    if not cluster_controller.enabled():
-        raise RuntimeError("cluster controller URL is not set")
-    summaries = cluster_controller.list_racks()
+def prune_controller_racks(
+    db: Session,
+    keep_serials: set[str],
+    *,
+    confirmed_pxes: set[str] | None = None,
+    drop_unassigned: bool = True,
+) -> list[str]:
+    """Remove MaxLPS racks whose serial is gone from Argus. Serial-less local racks stay.
+
+    A rack assigned to a PXE that did not answer this round stays. Unassigned
+    Argus racks are removed only when every configured PXE answered.
+    """
+    keep = {str(s).strip() for s in keep_serials if str(s).strip()}
+    confirmed = {str(p).strip().lower() for p in (confirmed_pxes or set()) if str(p).strip()}
+    removed: list[str] = []
+    for rack in list(db.scalars(select(MaxLpsRack)).all()):
+        sn = (rack.serial or "").strip()
+        origin = (getattr(rack, "origin", None) or "manual").strip().lower()
+        if origin != "argus" or not sn or sn in keep:
+            continue
+        if confirmed_pxes is not None:
+            assigned = (getattr(rack, "pxe_server", None) or "").strip().lower()
+            if assigned:
+                if assigned not in confirmed:
+                    continue
+            elif not drop_unassigned:
+                continue
+        removed.append(rack.label or sn)
+        db.delete(rack)
+    if removed:
+        db.commit()
+        gpu_power.LOOP.cached_out = None
+        gpu_power.LOOP.force = True
+        try:
+            from .routers.cluster import _invalidate_power_cache
+
+            _invalidate_power_cache()
+        except Exception:
+            pass
+    return removed
+
+
+def sync_from_controller(db: Session, bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    bundle = bundle or collect_controller_racks(db)
+    ok_pxes = {str(p).lower() for p in (bundle.get("ok_pxes") or set())}
+    errors = [str(item) for item in (bundle.get("errors") or [])]
+    if not ok_pxes:
+        raise RuntimeError("; ".join(errors) or "cluster controller URL is not set")
     created = updated = 0
     racks: list[str] = []
-    for row in summaries:
-        sn = row.get("serial_number") or row.get("serial")
-        name = row.get("name")
+    skipped: list[str] = []
+    keep: set[str] = set()
+    for detail in bundle.get("racks") or []:
+        if not isinstance(detail, dict):
+            continue
+        sn = detail.get("serial_number") or detail.get("serial")
+        name = detail.get("name")
         if not sn or not name:
             continue
-        detail = cluster_controller.get_rack(str(sn), str(name))
-        if not detail:
-            detail = row
         kind = upsert_controller_rack(db, detail)
+        if kind == "skipped":
+            skipped.append(str(name))
+            continue
         if kind == "created":
             created += 1
         else:
             updated += 1
         racks.append(str(sn))
+        keep.add(str(sn).strip())
+    removed = prune_controller_racks(
+        db,
+        keep,
+        confirmed_pxes=ok_pxes,
+        drop_unassigned=not errors,
+    )
     gpu_power.LOOP.cached_out = None
     gpu_power.LOOP.force = True
     try:
@@ -632,12 +1225,57 @@ def sync_from_controller(db: Session) -> dict[str, Any]:
         _invalidate_power_cache()
     except Exception:
         pass
-    return {"created": created, "updated": updated, "count": created + updated, "serials": racks}
+    return {
+        "created": created,
+        "updated": updated,
+        "removed": len(removed),
+        "removed_labels": removed,
+        "count": created + updated,
+        "serials": racks,
+        "skipped_hidden": skipped,
+        "ok_pxes": sorted(ok_pxes),
+        "errors": errors,
+    }
+
+
+def sync_live_infra(db: Session, force: bool = False) -> dict[str, Any] | None:
+    """Argus is the live source: MaxLPS racks, provision nodes, cluster floor."""
+    out: dict[str, Any] | None = None
+    bundle: dict[str, Any] | None = None
+    try:
+        if force:
+            bundle = collect_controller_racks(db)
+            out = sync_from_controller(db, bundle)
+        else:
+            out = maybe_sync(db)
+    except Exception as exc:
+        db.rollback()
+        out = {
+            "created": 0,
+            "updated": 0,
+            "removed": 0,
+            "serials": [],
+            "ok_pxes": [],
+            "errors": [str(exc)],
+        }
+    try:
+        from . import provision_argus
+
+        ran = bool(out and out.get("ok_pxes"))
+        provision_argus.sync_from_argus(db, force=force or ran, bundle=bundle if force else None)
+    except Exception as exc:
+        db.rollback()
+        if out is None:
+            out = {"created": 0, "updated": 0, "removed": 0, "serials": [], "ok_pxes": [], "errors": []}
+        out.setdefault("errors", []).append(str(exc))
+    return out
 
 
 def maybe_sync(db: Session) -> dict[str, Any] | None:
     global _last_sync
-    if not cluster_controller.enabled():
+    from . import pxe_servers
+
+    if not pxe_servers.controller_sources(db):
         return None
     now = time.time()
     from .config import settings

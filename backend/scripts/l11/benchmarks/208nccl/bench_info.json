@@ -1,0 +1,4 @@
+{
+    "benchmark_title": ["NCCL"],
+    "benchmark_paired_title": ["2-Node NCCL"]
+}

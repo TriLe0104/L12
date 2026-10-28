@@ -1,0 +1,13 @@
+# PDF Generation
+reportlab
+PyPDF2
+
+# Image Processing
+Pillow
+
+# Data Processing and Analysis
+pandas
+numpy
+
+# Plotting and Visualization
+matplotlib

@@ -1,11 +1,8 @@
 "use client";
 
+import { Gb300PowerStencil, rackLimiterView } from "@/components/Gb300PowerStencil";
 import type { ClusterDevice, ClusterRack, PowerRack } from "@/lib/cluster";
 import { GB300_ELEVATION, KIND_LABEL, POWER_LABEL, RUN_LABEL, STATUS_LABEL } from "@/lib/cluster";
-
-function occupant(devices: ClusterDevice[], u: number): ClusterDevice | null {
-  return devices.find((d) => u >= d.u_start && u < d.u_start + d.u_height) ?? null;
-}
 
 function Meter({ label, value }: { label: string; value: number }) {
   return (
@@ -52,12 +49,11 @@ export function RackPanel({
     rack.devices.length > 0
       ? rack.devices
       : GB300_ELEVATION.map((d) => ({ ...d, rack_id: rack.id }));
-  const units = [];
-  for (let u = rack.height_u; u >= 1; u--) units.push(u);
   const occupied = catalog.filter((d) => d.kind !== "empty");
   const issues = occupied.filter((d) => d.status !== "healthy");
   const off = rack.power_state === "off";
   const run = off ? "idle" : rack.run_status || "ready";
+  const limiter = rackLimiterView(null, power ?? null);
 
   return (
     <aside className="rack-panel" aria-label="Rack details" onPointerDown={(e) => e.stopPropagation()}>
@@ -166,23 +162,15 @@ export function RackPanel({
 
       {tab === "overview" ? (
         <div className="rack-elev">
-          <div className="rack-elev-frame" data-off={off}>
-            {units.map((u) => {
-              const d = occupant(catalog, u);
-              const showLabel = d && u === d.u_start + d.u_height - 1;
-              return (
-                <div
-                  key={u}
-                  className="rack-u"
-                  data-kind={d?.kind ?? "gap"}
-                  data-status={off ? "offline" : (d?.status ?? "empty")}
-                  title={d ? `${d.name} · U${d.u_start}` : `U${u} empty`}
-                >
-                  {showLabel ? d!.name.split("-").slice(-1)[0] : ""}
-                </div>
-              );
-            })}
-          </div>
+          <Gb300PowerStencil
+            mode="elev"
+            usedKw={power ? limiter.usedKw : rack.power_kw ?? 0}
+            maxKw={power ? limiter.maxKw : 135}
+            minKw={limiter.minKw}
+            denied={power?.denied}
+            off={off}
+            label={rack.name}
+          />
         </div>
       ) : (
         <div className="rack-details">

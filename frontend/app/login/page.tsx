@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AuthScreen } from "@/components/AuthScreen";
 import { useClawReveal } from "@/components/ClawReveal";
 import { LANDING, useAuth } from "@/lib/auth";
+import { bounceKvmIframe } from "@/lib/kvmFrame";
 import { useUiTheme } from "@/lib/ui-theme";
 
 export default function LoginPage() {
@@ -22,10 +23,18 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hold = useRef(false);
+  const kvmFrame = bounceKvmIframe();
 
   useEffect(() => {
+    bounceKvmIframe();
+  }, []);
+
+  useEffect(() => {
+    if (bounceKvmIframe()) return;
     if (!loading && user && !hold.current && !claw.active) router.replace(home);
   }, [loading, user, router, claw.active, home]);
+
+  if (kvmFrame) return null;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

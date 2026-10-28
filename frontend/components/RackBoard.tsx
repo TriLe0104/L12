@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { ClusterRegister } from "@/components/ClusterRegister";
+import { canEdit, useAuth } from "@/lib/auth";
 import type { ClusterRack, HallDetail } from "@/lib/cluster";
 import { formatRackKw, GB300_ELEVATION, POWER_LABEL, RUN_LABEL } from "@/lib/cluster";
 
@@ -38,7 +40,17 @@ const TRAYS = [
   { id: "t4", name: "GB300-T4", gpus: 18, u: "39–46" },
 ];
 
-export function RackBoard({ halls }: { halls: HallDetail[] }) {
+export function RackBoard({
+  halls,
+  clusterName,
+  onChange,
+}: {
+  halls: HallDetail[];
+  clusterName?: string;
+  onChange?: () => void;
+}) {
+  const { user } = useAuth();
+  const mayEdit = canEdit(user);
   const [open, setOpen] = useState<string | null>(null);
   const [hallFilter, setHallFilter] = useState("");
   const [q, setQ] = useState("");
@@ -58,6 +70,7 @@ export function RackBoard({ halls }: { halls: HallDetail[] }) {
 
   return (
     <section className="rack-board">
+      {mayEdit ? <ClusterRegister clusterName={clusterName} onDone={onChange} /> : null}
       <div className="cluster-toolbar" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="cluster-tools" style={{ marginLeft: 0 }}>
           <select className="field" value={hallFilter} onChange={(e) => setHallFilter(e.target.value)} aria-label="Hall filter">
@@ -75,7 +88,7 @@ export function RackBoard({ halls }: { halls: HallDetail[] }) {
         </div>
       </div>
       <div className="network-table-wrap rack-board-table">
-        <table className="network-table">
+        <table className="network-table" data-mona="racks">
           <thead>
             <tr>
               <th></th>
@@ -90,6 +103,13 @@ export function RackBoard({ halls }: { halls: HallDetail[] }) {
             </tr>
           </thead>
           <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="widget-empty">
+                  No registered racks. Add a rack (manual or Argus) above.
+                </td>
+              </tr>
+            ) : null}
             {rows.map(({ hall, hallIndex, rack, rackIndex }) => {
               const expanded = open === rack.id;
               const net = nodeIps(rack, hallIndex, rackIndex);
@@ -102,7 +122,10 @@ export function RackBoard({ halls }: { halls: HallDetail[] }) {
                   expanded={expanded}
                   net={net}
                   off={off}
+                  mayEdit={mayEdit}
                   onToggle={() => setOpen(expanded ? null : rack.id)}
+                  onEdit={() => window.dispatchEvent(new CustomEvent("l12-edit-rack", { detail: { id: rack.id } }))}
+                  onRemove={() => window.dispatchEvent(new CustomEvent("l12-remove-rack", { detail: { id: rack.id } }))}
                 />
               );
             })}
@@ -119,19 +142,31 @@ function RackRows({
   expanded,
   net,
   off,
+  mayEdit,
   onToggle,
+  onEdit,
+  onRemove,
 }: {
   rack: ClusterRack;
   hallName: string;
   expanded: boolean;
   net: { serial: string; bmc_ip: string | null; os_ip: string | null; bmc_mac: string };
   off: boolean;
+  mayEdit: boolean;
   onToggle: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
 }) {
   const devices = rack.devices.length ? rack.devices : GB300_ELEVATION;
   return (
     <>
-      <tr className="inv-row" data-sel={expanded ? "true" : "false"} onClick={onToggle}>
+      <tr
+        className="inv-row"
+        data-sel={expanded ? "true" : "false"}
+        data-mona="rack"
+        data-mona-rack={rack.name}
+        onClick={onToggle}
+      >
         <td className="rack-caret">{expanded ? "▾" : "▸"}</td>
         <td>
           <b>{rack.name}</b>
@@ -148,6 +183,31 @@ function RackRows({
         <tr className="rack-drop">
           <td colSpan={9}>
             <div className="node-drop">
+              {mayEdit ? (
+                <div className="rack-drop-actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    data-danger="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemove();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : null}
               <dl className="node-meta">
                 <div>
                   <dt>Serial</dt>

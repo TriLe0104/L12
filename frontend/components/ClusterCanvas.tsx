@@ -7,9 +7,10 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { ClusterRack, PowerRack, Telemetry } from "@/lib/cluster";
 
 const TILE = 1.15;
-const RACK_W = 0.62;
-const RACK_D = 1.02;
-const RACK_H = 2.05;
+const RACK_W = 0.72;
+const RACK_D = 1.08;
+const RACK_H = 2.42;
+const STENCIL_URL = "/racks/gb300-stencil-cutout.png?v=1";
 
 export type ZoomLevel = "rack" | "hall" | "cluster";
 
@@ -40,11 +41,109 @@ type Props = {
 
 const nameTexCache = new Map<string, THREE.CanvasTexture>();
 
+type FloorTheme = "meow" | "scc";
+
+const PALETTE = {
+  meow: {
+    bg: 0x070707,
+    fog: 0x070707,
+    fogNear: 70,
+    fogFar: 220,
+    hemiSky: 0x6a6a70,
+    hemiGround: 0x101010,
+    hemiInt: 1.05,
+    keyInt: 1.45,
+    fill: 0xe10600,
+    fillInt: 0.22,
+    exposure: 1.08,
+    label: "#f5f5f5",
+    floor: 0x0c0c0c,
+    gridMajor: 0x2a2a2a,
+    gridMinor: 0x161616,
+    hallEdge: 0xe10600,
+    accent: 0xe10600,
+    capEmissive: 0xe10600,
+    used: 0x2f9e4a,
+    usedEmissive: 0x145c28,
+    spare: 0x6a7074,
+    leaf: 0x2a2a2a,
+    spine: 0x1a1a1a,
+    down: 0x5a5a5a,
+    up: 0xe10600,
+    core: 0x140808,
+    leafEdge: 0x8a8a8a,
+    ring: 0xe10600,
+    ghost: 0xe10600,
+    usedHot: 0xe10600,
+    usedExtra: 0x4ade80,
+    usedOk: 0x2f9e4a,
+    capOff: 0x3a3a3a,
+    capHot: 0xe10600,
+    capExtra: 0x2f9e4a,
+    capSel: 0xff3b30,
+    capRun: 0xe10600,
+    capIdle: 0x9a1a14,
+    bodyOff: 0x121212,
+    bodyDeny: 0x141414,
+    bodySel: 0x333333,
+    body: 0x1c1c1c,
+  },
+  scc: {
+    bg: 0xeef2f7,
+    fog: 0xe8eef6,
+    fogNear: 90,
+    fogFar: 260,
+    hemiSky: 0xf8fafc,
+    hemiGround: 0xcbd5e1,
+    hemiInt: 1.22,
+    keyInt: 1.12,
+    fill: 0x1d4ed8,
+    fillInt: 0.32,
+    exposure: 1.0,
+    label: "#1e293b",
+    floor: 0xffffff,
+    gridMajor: 0x93c5fd,
+    gridMinor: 0xdbe3ee,
+    hallEdge: 0x1d4ed8,
+    accent: 0x1d4ed8,
+    capEmissive: 0x1d4ed8,
+    used: 0x16a34a,
+    usedEmissive: 0x166534,
+    spare: 0xcbd5e1,
+    leaf: 0x64748b,
+    spine: 0x1e3a8a,
+    down: 0x64748b,
+    up: 0x1d4ed8,
+    core: 0xdbeafe,
+    leafEdge: 0x94a3b8,
+    ring: 0x1d4ed8,
+    ghost: 0x1d4ed8,
+    usedHot: 0xdc2626,
+    usedExtra: 0x22c55e,
+    usedOk: 0x16a34a,
+    capOff: 0x94a3b8,
+    capHot: 0xdc2626,
+    capExtra: 0x16a34a,
+    capSel: 0x2563eb,
+    capRun: 0x1d4ed8,
+    capIdle: 0x3b82f6,
+    bodyOff: 0xcbd5e1,
+    bodyDeny: 0xe2e8f0,
+    bodySel: 0x1e3a8a,
+    body: 0x1e293b,
+  },
+} as const;
+
+type Palette = (typeof PALETTE)[FloorTheme];
+
+function readFloorTheme(): FloorTheme {
+  return document.documentElement.getAttribute("data-theme") === "scc" ? "scc" : "meow";
+}
+
 function shortRackName(name: string) {
   const m = name.match(/R\d+C\d+$/i);
   if (m) return m[0].toUpperCase();
-  const parts = name.split("-");
-  return parts[parts.length - 1] ?? name;
+  return name;
 }
 
 function tileToWorld(x: number, y: number, width: number, depth: number) {
@@ -66,7 +165,8 @@ function campusPitch(halls: CampusHall[]) {
   return Math.max(maxW, maxD) * TILE + 14;
 }
 
-function hallOrigin(index: number, pitch: number) {
+function hallOrigin(index: number, pitch: number, count = 2) {
+  if (count <= 1) return { x: 0, z: 0 };
   const col = index % 2;
   const row = Math.floor(index / 2);
   return { x: (col - 0.5) * pitch, z: (row - 0.5) * pitch };
@@ -78,19 +178,23 @@ function classify(distance: number, pitch: number): ZoomLevel {
   return "rack";
 }
 
-function labelTexture(text: string, size = 42) {
+function labelTexture(text: string, size = 42, fill = "#f5f5f5") {
+  const key = `${fill}|${size}|${text}`;
+  const hit = nameTexCache.get(key);
+  if (hit) return hit;
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 256;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, 1024, 256);
-  ctx.fillStyle = "#f5f5f5";
+  ctx.fillStyle = fill;
   ctx.font = `700 ${size}px Archivo, Segoe UI, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, 512, 128);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  nameTexCache.set(key, tex);
   return tex;
 }
 
@@ -103,23 +207,6 @@ type Entry = {
   barUsed: number;
   barSpare: number;
 };
-
-function capColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
-  if (rack.power_state === "off") return new THREE.Color(0x3a3a3a);
-  if (power?.denied) return new THREE.Color(0x3a3a3a);
-  if (power?.at_cap || power?.hot) return new THREE.Color(0xe10600);
-  if (power?.extra) return new THREE.Color(0x2f9e4a);
-  if (selected) return new THREE.Color(0xff3b30);
-  if (rack.run_status === "running") return new THREE.Color(0xe10600);
-  return new THREE.Color(0x9a1a14);
-}
-
-function bodyColor(rack: ClusterRack, selected: boolean, power?: PowerRack) {
-  if (rack.power_state === "off") return new THREE.Color(0x121212);
-  if (power?.denied) return new THREE.Color(0x141414);
-  if (selected) return new THREE.Color(0x333333);
-  return new THREE.Color(0x1c1c1c);
-}
 
 export function ClusterCanvas({
   halls,
@@ -174,11 +261,10 @@ export function ClusterCanvas({
   useEffect(() => {
     const sprite = clusterSpriteRef.current;
     if (!sprite) return;
-    const map = labelTexture((clusterName || "Cluster").toUpperCase(), 72);
-    const old = sprite.material.map;
+    const pal = PALETTE[readFloorTheme()];
+    const map = labelTexture((clusterName || "Cluster").toUpperCase(), 72, pal.label);
     sprite.material.map = map;
     sprite.material.needsUpdate = true;
-    old?.dispose();
   }, [clusterName]);
 
   useEffect(() => {
@@ -202,84 +288,80 @@ export function ClusterCanvas({
     const host = hostRef.current;
     if (!host) return;
 
+    let pal: Palette = PALETTE[readFloorTheme()];
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x070707);
-    scene.fog = new THREE.Fog(0x070707, 70, 220);
+    scene.background = new THREE.Color(pal.bg);
+    scene.fog = new THREE.Fog(pal.fog, pal.fogNear, pal.fogFar);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
-    camera.position.set(0, 58, 86);
+    camera.position.set(2.4, 3.6, 5.8);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = pal.exposure;
+    renderer.setClearColor(pal.bg);
     host.appendChild(renderer.domElement);
 
-    scene.add(new THREE.HemisphereLight(0x6a6a70, 0x101010, 1.05));
-    const key = new THREE.DirectionalLight(0xffffff, 1.45);
+    const hemi = new THREE.HemisphereLight(pal.hemiSky, pal.hemiGround, pal.hemiInt);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xffffff, pal.keyInt);
     key.position.set(18, 30, 16);
     scene.add(key);
-    scene.add(new THREE.DirectionalLight(0xe10600, 0.22).translateX(-20).translateY(8));
+    const fill = new THREE.DirectionalLight(pal.fill, pal.fillInt);
+    fill.position.set(-20, 8, 0);
+    scene.add(fill);
+    const face = new THREE.DirectionalLight(0xffffff, 0.95);
+    face.position.set(2.2, 4.4, 7.5);
+    scene.add(face);
 
     const floors = new THREE.Group();
     const labels = new THREE.Group();
     const rackNames = new THREE.Group();
+    const racks = new THREE.Group();
     const net = new THREE.Group();
-    const netDown = new THREE.Group();
-    const netUp = new THREE.Group();
-    net.add(netDown);
-    net.add(netUp);
     scene.add(floors);
     scene.add(labels);
     scene.add(rackNames);
+    scene.add(racks);
     scene.add(net);
 
-    const bodyGeo = new THREE.BoxGeometry(RACK_W, RACK_H, RACK_D);
-    const capGeo = new THREE.BoxGeometry(RACK_W * 0.98, 0.04, RACK_D * 0.98);
-    const barGeo = new THREE.BoxGeometry(RACK_W * 0.78, 1, RACK_D * 0.78);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      metalness: 0.45,
-      roughness: 0.4,
+    const chassisMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a0a,
+      metalness: 0.06,
+      roughness: 0.86,
+    });
+    const frontMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.38,
-      depthWrite: false,
+      alphaTest: 0.15,
+      depthWrite: true,
     });
-    const capMat = new THREE.MeshStandardMaterial({ metalness: 0.3, roughness: 0.4, emissive: 0xe10600, emissiveIntensity: 0.28 });
-    const usedMat = new THREE.MeshStandardMaterial({
-      color: 0x2f9e4a,
-      emissive: 0x145c28,
-      emissiveIntensity: 0.55,
-      metalness: 0.18,
-      roughness: 0.4,
+    const bodyGeo = new THREE.BoxGeometry(RACK_W * 0.9, RACK_H * 0.94, RACK_D);
+    const faceGeo = new THREE.PlaneGeometry(RACK_W, RACK_H);
+    new THREE.TextureLoader().load(STENCIL_URL, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      tex.premultiplyAlpha = false;
+      frontMat.map = tex;
+      frontMat.needsUpdate = true;
     });
-    const spareMat = new THREE.MeshStandardMaterial({
-      color: 0x6a7074,
-      metalness: 0.1,
-      roughness: 0.75,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
-    });
-    let bodyMesh: THREE.InstancedMesh | null = null;
-    let capMesh: THREE.InstancedMesh | null = null;
-    let usedMesh: THREE.InstancedMesh | null = null;
-    let spareMesh: THREE.InstancedMesh | null = null;
 
-    const dummy = new THREE.Object3D();
     let entries: Entry[] = [];
     let pitch = 28;
+    let framed = false;
 
     const ring = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(RACK_W + 0.08, RACK_H + 0.08, RACK_D + 0.08)),
-      new THREE.LineBasicMaterial({ color: 0xe10600 }),
+      new THREE.LineBasicMaterial({ color: pal.ring }),
     );
     ring.visible = false;
     scene.add(ring);
 
     const clusterSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: labelTexture((clusterNameRef.current || "Cluster").toUpperCase(), 72),
+        map: labelTexture((clusterNameRef.current || "Cluster").toUpperCase(), 72, pal.label),
         transparent: true,
         depthTest: false,
       }),
@@ -293,9 +375,9 @@ export function ClusterCanvas({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI / 2 - 0.06;
-    controls.minDistance = 6;
-    controls.maxDistance = 220;
-    controls.target.set(0, 0.6, 0);
+    controls.minDistance = 2.4;
+    controls.maxDistance = 80;
+    controls.target.set(0, 1.0, 0);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -304,24 +386,31 @@ export function ClusterCanvas({
     let fly: Fly | null = null;
 
     const worldOf = (entry: Entry) => {
-      const origin = hallOrigin(entry.hallIndex, pitch);
+      const origin = hallOrigin(entry.hallIndex, pitch, hallsRef.current.length);
       const local = tileToWorld(entry.rack.x, entry.rack.y, entry.width, entry.depth);
       return { x: origin.x + local.x, z: origin.z + local.z };
     };
 
-    const disposeInstanced = () => {
-      bodyMesh?.dispose();
-      capMesh?.dispose();
-      usedMesh?.dispose();
-      spareMesh?.dispose();
-      if (bodyMesh) scene.remove(bodyMesh);
-      if (capMesh) scene.remove(capMesh);
-      if (usedMesh) scene.remove(usedMesh);
-      if (spareMesh) scene.remove(spareMesh);
-      bodyMesh = null;
-      capMesh = null;
-      usedMesh = null;
-      spareMesh = null;
+    const disposeRacks = () => {
+      while (racks.children.length) {
+        racks.remove(racks.children[0]);
+      }
+    };
+
+    const frameRacks = () => {
+      if (!entries.length) {
+        camera.position.set(2.4, 3.6, 5.8);
+        controls.target.set(0, 1.0, 0);
+        return;
+      }
+      const p = worldOf(entries[0]);
+      if (entries.length === 1) {
+        camera.position.set(p.x + 2.15, 3.35, p.z + 5.05);
+        controls.target.set(p.x, RACK_H * 0.42, p.z);
+      } else {
+        camera.position.set(p.x + 1.4, 7.5, p.z + 11);
+        controls.target.set(p.x, 0.7, p.z);
+      }
     };
 
     const rebuild = () => {
@@ -345,29 +434,29 @@ export function ClusterCanvas({
       floors.clear();
       labels.clear();
       hs.forEach((hall, hallIndex) => {
-        const origin = hallOrigin(hallIndex, pitch);
+        const origin = hallOrigin(hallIndex, pitch, hs.length);
         const fw = hall.width_tiles * TILE;
         const fd = hall.depth_tiles * TILE;
         const floor = new THREE.Mesh(
           new THREE.PlaneGeometry(fw, fd),
-          new THREE.MeshStandardMaterial({ color: 0x0c0c0c, metalness: 0.12, roughness: 0.88 }),
+          new THREE.MeshStandardMaterial({ color: pal.floor, metalness: 0.08, roughness: 0.9 }),
         );
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(origin.x, 0, origin.z);
         floor.userData = { isFloor: true, hallId: hall.id };
         floors.add(floor);
-        const grid = new THREE.GridHelper(Math.max(fw, fd), Math.max(hall.width_tiles, hall.depth_tiles), 0x2a2a2a, 0x161616);
+        const grid = new THREE.GridHelper(Math.max(fw, fd), Math.max(hall.width_tiles, hall.depth_tiles), pal.gridMajor, pal.gridMinor);
         grid.position.set(origin.x, 0.01, origin.z);
         floors.add(grid);
         const edge = new THREE.LineSegments(
           new THREE.EdgesGeometry(new THREE.BoxGeometry(fw, 0.02, fd)),
-          new THREE.LineBasicMaterial({ color: 0xe10600, transparent: true, opacity: 0.55 }),
+          new THREE.LineBasicMaterial({ color: pal.hallEdge, transparent: true, opacity: 0.55 }),
         );
         edge.position.set(origin.x, 0.02, origin.z);
         floors.add(edge);
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(hall.name, 48), transparent: true, depthTest: false }));
-        sprite.position.set(origin.x, 6.2, origin.z);
-        sprite.scale.set(12, 3, 1);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(hall.name, 48, pal.label), transparent: true, depthTest: false }));
+        sprite.position.set(origin.x, 3.15, origin.z);
+        sprite.scale.set(5.4, 1.35, 1);
         sprite.userData = { isHallLabel: true, hallId: hall.id };
         labels.add(sprite);
       });
@@ -375,247 +464,91 @@ export function ClusterCanvas({
       rackNames.clear();
       entries.forEach((entry) => {
         const tag = shortRackName(entry.rack.name);
-        let tex = nameTexCache.get(tag);
-        if (!tex) {
-          tex = labelTexture(tag, 54);
-          nameTexCache.set(tag, tex);
-        }
+        const tex = labelTexture(tag, 54, pal.label);
         const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
         const pos = worldOf(entry);
-        spr.position.set(pos.x, RACK_H + 0.42, pos.z);
-        spr.scale.set(2.4, 0.62, 1);
-        spr.userData = { isRackName: true };
+        spr.position.set(pos.x, RACK_H + 0.48, pos.z);
+        const nameW = Math.min(5.2, Math.max(2.6, tag.length * 0.32));
+        spr.scale.set(nameW, 0.7, 1);
+        spr.userData = { isRackName: true, nameW };
         rackNames.add(spr);
       });
 
-      disposeInstanced();
-      const count = Math.max(entries.length, 1);
-      bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
-      capMesh = new THREE.InstancedMesh(capGeo, capMat, count);
-      usedMesh = new THREE.InstancedMesh(barGeo, usedMat, count);
-      spareMesh = new THREE.InstancedMesh(barGeo, spareMat, count);
-      bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      capMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      usedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      spareMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      if (count > 0) {
-        bodyMesh.frustumCulled = false;
-        capMesh.frustumCulled = false;
-        usedMesh.frustumCulled = false;
-        spareMesh.frustumCulled = false;
-      }
-      usedMesh.renderOrder = 1;
-      spareMesh.renderOrder = 1;
-      bodyMesh.renderOrder = 2;
-      scene.add(usedMesh);
-      scene.add(spareMesh);
-      scene.add(bodyMesh);
-      scene.add(capMesh);
-      buildNetwork(hs, pitch);
+      disposeRacks();
+      net.clear();
+      entries.forEach((entry, i) => {
+        const g = new THREE.Group();
+        g.userData = { isRack: true, entryIndex: i, rackId: entry.rack.id };
+        const body = new THREE.Mesh(bodyGeo, chassisMat);
+        const face = new THREE.Mesh(faceGeo, frontMat);
+        face.position.z = RACK_D / 2 + 0.004;
+        g.add(body);
+        g.add(face);
+        racks.add(g);
+      });
       paint();
-    };
-
-    const buildNetwork = (hs: CampusHall[], pitchNow: number) => {
-      for (let i = net.children.length - 1; i >= 0; i--) {
-        const ch = net.children[i];
-        if (ch === netDown || ch === netUp) continue;
-        net.remove(ch);
-      }
-      netDown.clear();
-      netUp.clear();
-
-      const leafMat = new THREE.MeshStandardMaterial({
-        color: 0x2a2a2a,
-        metalness: 0.6,
-        roughness: 0.35,
-        emissive: 0xe10600,
-        emissiveIntensity: 0.12,
-      });
-      const spineMat = new THREE.MeshStandardMaterial({
-        color: 0x1a1a1a,
-        metalness: 0.7,
-        roughness: 0.28,
-        emissive: 0xe10600,
-        emissiveIntensity: 0.35,
-      });
-      const downMat = new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.55 });
-      const upMat = new THREE.LineBasicMaterial({ color: 0xe10600, transparent: true, opacity: 0.35 });
-
-      const core = new THREE.Mesh(
-        new THREE.BoxGeometry(15.2, 0.16, 10.2),
-        new THREE.MeshStandardMaterial({
-          color: 0x140808,
-          metalness: 0.45,
-          roughness: 0.55,
-          emissive: 0xe10600,
-          emissiveIntensity: 0.1,
-        }),
-      );
-      core.position.set(0, 8.35, 0);
-      core.userData = { netId: "SP-01", netRole: "spine" };
-      net.add(core);
-      const corePick = new THREE.Mesh(
-        new THREE.SphereGeometry(7.5, 12, 12),
-        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
-      );
-      corePick.position.set(0, 9.2, 0);
-      corePick.userData = { netId: "SP-01", netRole: "spine" };
-      net.add(corePick);
-      const spinePos: THREE.Vector3[] = [];
-      for (let i = 0; i < 8; i++) {
-        const x = (i % 4 - 1.5) * 4.2;
-        const z = (Math.floor(i / 4) - 0.5) * 5.0;
-        const pos = new THREE.Vector3(x, 9.15, z);
-        spinePos.push(pos);
-        const box = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.0, 1.5), spineMat);
-        box.position.copy(pos);
-        box.userData = { netId: `SP-${String(i + 1).padStart(2, "0")}`, netRole: "spine" };
-        net.add(box);
-        const edge = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.BoxGeometry(2.76, 1.05, 1.56)),
-          new THREE.LineBasicMaterial({ color: 0xe10600 }),
-        );
-        edge.position.copy(pos);
-        edge.userData = { netId: `SP-${String(i + 1).padStart(2, "0")}`, netRole: "spine" };
-        net.add(edge);
-        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(`SP-${String(i + 1).padStart(2, "0")}`, 40), transparent: true, depthTest: false }));
-        spr.position.set(pos.x, pos.y + 1.15, pos.z);
-        spr.scale.set(7.2, 1.9, 1);
-        spr.userData = { isNetLabel: true };
-        net.add(spr);
-      }
-
-      const downPts: number[] = [];
-      const upPts: number[] = [];
-      hs.forEach((hall, hallIndex) => {
-        const origin = hallOrigin(hallIndex, pitchNow);
-        const rows = new Map<number, ClusterRack[]>();
-        for (const rack of hall.racks) {
-          const list = rows.get(rack.y) ?? [];
-          list.push(rack);
-          rows.set(rack.y, list);
-        }
-        const ys = [...rows.keys()].sort((a, b) => a - b);
-        ys.forEach((y, rowI) => {
-          const rowRacks = rows.get(y) ?? [];
-          const local = tileToWorld(hall.width_tiles - 0.15, y, hall.width_tiles, hall.depth_tiles);
-          const leafPos = new THREE.Vector3(origin.x + local.x + 1.1, 2.35, origin.z + local.z);
-          const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.38, 0.5), leafMat);
-          leaf.position.copy(leafPos);
-          leaf.userData = { netId: `${hall.name}-LF-R${String(rowI + 1).padStart(2, "0")}`, netRole: "leaf", hallId: hall.id };
-          net.add(leaf);
-          const leafEdge = new THREE.LineSegments(
-            new THREE.EdgesGeometry(new THREE.BoxGeometry(1.38, 0.41, 0.53)),
-            new THREE.LineBasicMaterial({ color: 0x8a8a8a }),
-          );
-          leafEdge.position.copy(leafPos);
-          leafEdge.userData = {
-            netId: `${hall.name}-LF-R${String(rowI + 1).padStart(2, "0")}`,
-            netRole: "leaf",
-            hallId: hall.id,
-          };
-          net.add(leafEdge);
-          for (const rack of rowRacks) {
-            const rp = tileToWorld(rack.x, rack.y, hall.width_tiles, hall.depth_tiles);
-            downPts.push(origin.x + rp.x, RACK_H + 0.05, origin.z + rp.z, leafPos.x, leafPos.y, leafPos.z);
-          }
-          for (const sp of spinePos) {
-            upPts.push(leafPos.x, leafPos.y, leafPos.z, sp.x, sp.y, sp.z);
-          }
-        });
-      });
-      if (downPts.length) {
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(downPts, 3));
-        netDown.add(new THREE.LineSegments(g, downMat));
-      }
-      if (upPts.length) {
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(upPts, 3));
-        netUp.add(new THREE.LineSegments(g, upMat));
+      if (!framed) {
+        frameRacks();
+        framed = true;
       }
     };
 
     const paint = () => {
-      if (!bodyMesh || !capMesh) return;
       const selected = new Set(selectedRef.current);
-      const power = powerRef.current ?? {};
       let ringOn = false;
       entries.forEach((entry, i) => {
+        const mesh = racks.children[i];
+        if (!mesh) return;
         const pos = worldOf(entry);
-        dummy.position.set(pos.x, RACK_H / 2, pos.z);
-        dummy.rotation.set(0, THREE.MathUtils.degToRad(entry.rack.rotation), 0);
-        dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix();
-        bodyMesh!.setMatrixAt(i, dummy.matrix);
-        dummy.position.y = RACK_H + 0.03;
-        dummy.updateMatrix();
-        capMesh!.setMatrixAt(i, dummy.matrix);
+        const yaw = THREE.MathUtils.degToRad(entry.rack.rotation);
+        mesh.position.set(pos.x, RACK_H / 2, pos.z);
+        mesh.rotation.set(0, yaw, 0);
+        mesh.userData.entryIndex = i;
         const isSel = selected.has(entry.rack.id);
-        const slice = power[entry.rack.id];
-        bodyMesh!.setColorAt(i, bodyColor(entry.rack, isSel, slice));
-        capMesh!.setColorAt(i, capColor(entry.rack, isSel, slice));
         if (isSel && selected.size === 1) {
           ring.position.set(pos.x, RACK_H / 2, pos.z);
-          ring.rotation.y = dummy.rotation.y;
+          ring.rotation.y = yaw;
           ring.visible = true;
           ringOn = true;
         }
       });
       if (!ringOn) ring.visible = false;
-      bodyMesh.instanceMatrix.needsUpdate = true;
-      capMesh.instanceMatrix.needsUpdate = true;
-      if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
-      if (capMesh.instanceColor) capMesh.instanceColor.needsUpdate = true;
     };
 
     const paintBars = () => {
-      if (!usedMesh || !spareMesh) return;
-      const power = powerRef.current ?? {};
-      const innerH = RACK_H * 0.96;
-      entries.forEach((entry, i) => {
-        const slice = power[entry.rack.id];
-        const hi = slice
-          ? slice.max_kw && slice.max_kw > 1
-            ? slice.max_kw
-            : slice.nameplate_kw > 1
-              ? slice.nameplate_kw
-              : slice.allocated_kw > 1
-                ? slice.allocated_kw
-                : 0
-          : 0;
-        const usedT = slice && hi > 0 ? Math.max(0, Math.min(1, slice.consumed_kw / hi)) : 0;
-        const spareT = 0;
-        entry.barUsed += (usedT - entry.barUsed) * 0.16;
-        entry.barSpare += (spareT - entry.barSpare) * 0.16;
-        const pos = worldOf(entry);
-        const yaw = THREE.MathUtils.degToRad(entry.rack.rotation);
-        const usedH = Math.max(0.001, entry.barUsed * innerH);
-        const spareH = Math.max(0.001, entry.barSpare * innerH);
-        const usedVis = !!(slice && slice.enabled && entry.barUsed > 0.012);
-        const spareVis = !!(slice && slice.enabled && entry.barSpare > 0.012);
-        dummy.rotation.set(0, yaw, 0);
-        dummy.scale.set(usedVis ? 1 : 0, usedH, usedVis ? 1 : 0);
-        dummy.position.set(pos.x, usedH / 2, pos.z);
-        dummy.updateMatrix();
-        usedMesh!.setMatrixAt(i, dummy.matrix);
-        dummy.scale.set(spareVis ? 1 : 0, spareH, spareVis ? 1 : 0);
-        dummy.position.set(pos.x, usedH + spareH / 2, pos.z);
-        dummy.updateMatrix();
-        spareMesh!.setMatrixAt(i, dummy.matrix);
-        const atCap = !!(slice?.at_cap || slice?.hot || entry.barUsed > 0.94);
-        if (atCap) usedMesh!.setColorAt(i, new THREE.Color(0xe10600));
-        else if (slice?.extra) usedMesh!.setColorAt(i, new THREE.Color(0x4ade80));
-        else usedMesh!.setColorAt(i, new THREE.Color(0x2f9e4a));
-      });
-      usedMesh.instanceMatrix.needsUpdate = true;
-      spareMesh.instanceMatrix.needsUpdate = true;
-      if (usedMesh.instanceColor) usedMesh.instanceColor.needsUpdate = true;
+      /* power fill lives on the stencil panel after a rack click */
+    };
+
+    const applyPalette = (next: Palette) => {
+      pal = next;
+      scene.background = new THREE.Color(pal.bg);
+      scene.fog = new THREE.Fog(pal.fog, pal.fogNear, pal.fogFar);
+      renderer.setClearColor(pal.bg);
+      renderer.toneMappingExposure = pal.exposure;
+      hemi.color.setHex(pal.hemiSky);
+      hemi.groundColor.setHex(pal.hemiGround);
+      hemi.intensity = pal.hemiInt;
+      key.intensity = pal.keyInt;
+      fill.color.setHex(pal.fill);
+      fill.intensity = pal.fillInt;
+      (ring.material as THREE.LineBasicMaterial).color.setHex(pal.ring);
+      (ghost.material as THREE.MeshBasicMaterial).color.setHex(pal.ghost);
+      const map = labelTexture((clusterNameRef.current || "Cluster").toUpperCase(), 72, pal.label);
+      clusterSprite.material.map = map;
+      clusterSprite.material.needsUpdate = true;
     };
 
     rebuildRef.current = rebuild;
     paintRef.current = paint;
     rebuild();
+
+    const themeWatch = new MutationObserver(() => {
+      const next = PALETTE[readFloorTheme()];
+      if (next === pal) return;
+      applyPalette(next);
+      rebuild();
+    });
+    themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     const setPointer = (event: PointerEvent) => {
       const rect = host.getBoundingClientRect();
@@ -643,18 +576,24 @@ export function ClusterCanvas({
     const hit = (event: PointerEvent) => {
       setPointer(event);
       raycaster.setFromCamera(pointer, camera);
+      const rackHits = raycaster.intersectObjects(racks.children, true);
+      for (const h of rackHits) {
+        let o: THREE.Object3D | null = h.object;
+        while (o) {
+          if (o.userData.isRack) {
+            const idx = Number(o.userData.entryIndex);
+            if (entries[idx]) return { kind: "rack" as const, entry: entries[idx], point: h.point };
+          }
+          o = o.parent;
+        }
+      }
       const netHits = raycaster.intersectObjects(net.children, true);
       for (const h of netHits) {
         const found = netFrom(h.object, h.point);
         if (found) return found;
       }
-      const objs: THREE.Object3D[] = [...floors.children, ...labels.children];
-      if (bodyMesh) objs.unshift(bodyMesh);
-      const hits = raycaster.intersectObjects(objs, false);
+      const hits = raycaster.intersectObjects([...floors.children, ...labels.children], false);
       for (const h of hits) {
-        if (h.object === bodyMesh && h.instanceId != null) {
-          return { kind: "rack" as const, entry: entries[h.instanceId], point: h.point };
-        }
         if (h.object.userData.isHallLabel && h.object.userData.hallId) {
           return { kind: "hall" as const, hallId: h.object.userData.hallId as string, point: h.point };
         }
@@ -670,7 +609,7 @@ export function ClusterCanvas({
       const idx = hs.findIndex((h) => h.id === hallId);
       if (idx < 0) return null;
       const hall = hs[idx];
-      const origin = hallOrigin(idx, pitch);
+      const origin = hallOrigin(idx, pitch, hs.length);
       const tile = worldToTile(point.x - origin.x, point.z - origin.z, hall.width_tiles, hall.depth_tiles);
       if (tile.x < 0 || tile.y < 0 || tile.x >= hall.width_tiles || tile.y >= hall.depth_tiles) return null;
       return tile;
@@ -685,26 +624,21 @@ export function ClusterCanvas({
       const hs = hallsRef.current;
       const idx = hs.findIndex((h) => h.id === hallId);
       if (idx < 0) return;
-      const origin = hallOrigin(idx, pitch);
+      const origin = hallOrigin(idx, pitch, hs.length);
+      const hall = hs[idx];
+      const close = hall.racks.length <= 2;
       fly = {
         t: 0,
         dur: 0.7,
         fromP: camera.position.clone(),
-        toP: new THREE.Vector3(origin.x, 18, origin.z + 22),
+        toP: new THREE.Vector3(origin.x + (close ? 2.1 : 1.2), close ? 3.5 : 8, origin.z + (close ? 5.1 : 12)),
         fromT: controls.target.clone(),
-        toT: new THREE.Vector3(origin.x, 0.4, origin.z),
+        toT: new THREE.Vector3(origin.x, close ? RACK_H * 0.42 : 0.6, origin.z),
       };
     };
     flyToHallRef.current = flyToHall;
     flyToClusterRef.current = () => {
-      fly = {
-        t: 0,
-        dur: 0.7,
-        fromP: camera.position.clone(),
-        toP: new THREE.Vector3(0, 58, 86),
-        fromT: controls.target.clone(),
-        toT: new THREE.Vector3(0, 0.6, 0),
-      };
+      frameRacks();
     };
 
     let dragIndex: number | null = null;
@@ -713,7 +647,7 @@ export function ClusterCanvas({
     let startY = 0;
     const ghost = new THREE.Mesh(
       new THREE.BoxGeometry(RACK_W, 0.04, RACK_D),
-      new THREE.MeshBasicMaterial({ color: 0xe10600, transparent: true, opacity: 0.45 }),
+      new THREE.MeshBasicMaterial({ color: pal.ghost, transparent: true, opacity: 0.45 }),
     );
     ghost.visible = false;
     scene.add(ghost);
@@ -742,7 +676,7 @@ export function ClusterCanvas({
           if (tile && !occupied(found.hallId).has(`${tile.x},${tile.y}`)) {
             const hs = hallsRef.current;
             const idx = hs.findIndex((h) => h.id === found.hallId);
-            const origin = hallOrigin(idx, pitch);
+            const origin = hallOrigin(idx, pitch, hs.length);
             const local = tileToWorld(tile.x, tile.y, hs[idx].width_tiles, hs[idx].depth_tiles);
             ghost.visible = true;
             ghost.position.set(origin.x + local.x, 0.03, origin.z + local.z);
@@ -759,23 +693,17 @@ export function ClusterCanvas({
         return;
       }
       if (!dragMoved && Math.hypot(event.clientX - startX, event.clientY - startY) > 5) dragMoved = true;
-      if (!dragMoved || !bodyMesh || !capMesh) return;
+      if (!dragMoved) return;
       const found = hit(event);
       const entry = entries[dragIndex];
-      if (found?.kind === "floor" && found.hallId === entry.hallId) {
+      const mesh = racks.children[dragIndex];
+      if (found?.kind === "floor" && found.hallId === entry.hallId && mesh) {
         const tile = tileOnHall(entry.hallId, found.point);
         if (!tile) return;
-        const origin = hallOrigin(entry.hallIndex, pitch);
+        const origin = hallOrigin(entry.hallIndex, pitch, hallsRef.current.length);
         const local = tileToWorld(tile.x, tile.y, entry.width, entry.depth);
-        dummy.position.set(origin.x + local.x, RACK_H / 2, origin.z + local.z);
-        dummy.rotation.set(0, THREE.MathUtils.degToRad(entry.rack.rotation), 0);
-        dummy.updateMatrix();
-        bodyMesh.setMatrixAt(dragIndex, dummy.matrix);
-        dummy.position.y = RACK_H + 0.03;
-        dummy.updateMatrix();
-        capMesh.setMatrixAt(dragIndex, dummy.matrix);
-        bodyMesh.instanceMatrix.needsUpdate = true;
-        capMesh.instanceMatrix.needsUpdate = true;
+        mesh.position.set(origin.x + local.x, RACK_H / 2, origin.z + local.z);
+        mesh.rotation.set(0, THREE.MathUtils.degToRad(entry.rack.rotation), 0);
       }
     };
 
@@ -859,24 +787,21 @@ export function ClusterCanvas({
       controls.update();
       const distance = controls.getDistance();
       const level = classify(distance, pitch);
-      clusterSprite.visible = level === "cluster";
+      clusterSprite.visible = level === "cluster" && hallsRef.current.length > 1;
       labels.visible = level !== "rack";
-      rackNames.visible = level !== "cluster";
-      const nameScale = level === "rack" ? 1 : 0.72;
-      rackNames.children.forEach((ch) => ch.scale.set(2.4 * nameScale, 0.62 * nameScale, 1));
-      netDown.visible = level !== "cluster";
-      netUp.visible = level !== "rack";
-      net.visible = true;
-      const labelScale = level === "cluster" ? 1.35 : 1;
-      net.children.forEach((ch) => {
-        if (ch.userData.isNetLabel) ch.scale.set(7.2 * labelScale, 1.9 * labelScale, 1);
+      rackNames.visible = true;
+      const nameScale = level === "rack" ? 1 : 0.78;
+      rackNames.children.forEach((ch) => {
+        const w = Number(ch.userData.nameW) || 3.2;
+        ch.scale.set(w * nameScale, 0.7 * nameScale, 1);
       });
+      net.visible = net.children.length > 0;
       const nearest = (() => {
         let bestId: string | null = null;
         let bestD = Infinity;
         const hallsNow = hallsRef.current;
         for (let i = 0; i < hallsNow.length; i++) {
-          const o = hallOrigin(i, pitch);
+          const o = hallOrigin(i, pitch, hallsNow.length);
           const d = Math.hypot(controls.target.x - o.x, controls.target.z - o.z);
           if (d < bestD) {
             bestD = d;
@@ -898,13 +823,19 @@ export function ClusterCanvas({
 
     return () => {
       cancelAnimationFrame(raf);
+      themeWatch.disconnect();
       ro.disconnect();
       host.removeEventListener("pointerdown", onDown);
       host.removeEventListener("pointermove", onMove);
       host.removeEventListener("pointerup", onUp);
       host.removeEventListener("pointerleave", onLeave);
       controls.dispose();
-      disposeInstanced();
+      disposeRacks();
+      bodyGeo.dispose();
+      faceGeo.dispose();
+      chassisMat.dispose();
+      frontMat.map?.dispose();
+      frontMat.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       rebuildRef.current = null;

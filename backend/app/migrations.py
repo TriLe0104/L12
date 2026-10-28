@@ -53,6 +53,22 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "source": "VARCHAR(24) NOT NULL DEFAULT 'demo'",
         "os_username": "VARCHAR(80)",
         "os_password": "VARCHAR(160)",
+        "pxe_server": "VARCHAR(120)",
+    },
+    "maxlps_racks": {
+        "origin": "VARCHAR(16) NOT NULL DEFAULT 'manual'",
+        "pxe_server": "VARCHAR(120)",
+    },
+    "maxlps_nodes": {
+        "os_username": "VARCHAR(80)",
+        "os_password": "VARCHAR(160)",
+        "loop_on": "BOOLEAN NOT NULL DEFAULT 1",
+    },
+    "workloads": {
+        "script_text": "TEXT",
+    },
+    "cluster_settings": {
+        "xai_api_key": "VARCHAR(200)",
     },
 }
 
@@ -63,6 +79,7 @@ WIDENED_COLUMNS: list[tuple[str, str, str]] = [
     ("purchase_orders", "thumbnail_url", "VARCHAR(1000)"),
     ("purchase_orders", "model_url", "VARCHAR(1000)"),
     ("inventory_nodes", "bmc_password", "VARCHAR(160)"),
+    ("cluster_settings", "xai_api_key", "VARCHAR(400)"),
 ]
 
 # Idempotent data repairs applied after the column work.

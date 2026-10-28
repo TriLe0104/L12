@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_DEFAULT_SQLITE = _BACKEND_DIR / "po_calendar.db"
 
 
 class Settings(BaseSettings):
@@ -9,7 +13,8 @@ class Settings(BaseSettings):
 
     # sqlite fallback keeps the prototype runnable without a Postgres server.
     # Docker compose overrides this with the postgres DSN.
-    database_url: str = "sqlite:///./po_calendar.db"
+    # Relative sqlite paths resolve against backend/, so cwd cannot open a second file.
+    database_url: str = f"sqlite:///{_DEFAULT_SQLITE.as_posix()}"
 
     jwt_secret: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"
@@ -37,6 +42,16 @@ class Settings(BaseSettings):
     cluster_pxe_host: str = "172.25.231.244"
     cluster_pxe_user: str = "root"
 
+    # Optional on-net BMC for Overview health (leak / thermal / PSU / fans).
+    # Inventory BMC credentials take precedence; this fills a lab probe node.
+    bmc_probe_ip: str | None = None
+    bmc_probe_user: str = "root"
+    bmc_probe_password: str | None = None
+
+    # SpaceXAI / xAI Grok — server-side only. Never expose to the browser.
+    xai_api_key: str | None = None
+    xai_model: str = "grok-4.20-0309-non-reasoning"
+
     # S3-compatible object storage (Cloudflare R2, AWS S3, MinIO, …). When all
     # of endpoint / bucket / keys are set, uploads survive container restarts.
     # Leave unset for local disk under backend/uploads/.
@@ -59,6 +74,12 @@ class Settings(BaseSettings):
             return value.replace("postgres://", "postgresql+psycopg://", 1)
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        if value.startswith("sqlite:"):
+            raw = value.split("sqlite:///", 1)[-1]
+            path = Path(raw)
+            if not path.is_absolute():
+                path = (_BACKEND_DIR / path).resolve()
+            return "sqlite:///" + path.as_posix()
         return value
 
     @property

@@ -70,7 +70,7 @@ export interface Campus {
   name: string;
   telemetry: Telemetry;
   halls: HallDetail[];
-  source?: "inventory" | "floor" | string;
+  source?: "inventory" | "floor" | "none" | string;
 }
 
 export interface ClusterOverview {
@@ -195,6 +195,24 @@ export interface MaxLpsGpu {
   workload_kind?: string;
   pid?: number;
   workload_id?: string | null;
+  in_loop?: boolean;
+}
+
+export interface LoopTargetNode {
+  id: string;
+  index: number;
+  hostname: string;
+  on: boolean;
+}
+
+export interface LoopTargetRack {
+  id: string;
+  label: string;
+  nodes: LoopTargetNode[];
+}
+
+export interface LoopTargets {
+  racks: LoopTargetRack[];
 }
 
 export interface MaxLpsShelf {
@@ -219,6 +237,7 @@ export interface MaxLpsShelf {
     id: string;
     index: number;
     kw: number;
+    down?: boolean;
     source?: string;
     psus?: { id: string; index: number; kw: number }[];
   }[];
@@ -307,6 +326,9 @@ export interface MaxLpsInvNode {
   bmc_password_set?: boolean;
   os_mac: string | null;
   os_ip: string | null;
+  os_username?: string | null;
+  os_password?: string | null;
+  os_password_set?: boolean;
   gpu_count: number;
 }
 
@@ -343,6 +365,8 @@ export interface MaxLpsInvRack {
   hall: string | null;
   model: string;
   notes: string | null;
+  origin?: "manual" | "argus" | string;
+  pxe_server?: string | null;
   enabled: boolean;
   power_state: string;
   created_at: string | null;
@@ -356,7 +380,7 @@ export interface MaxLpsInvRack {
 }
 
 export interface MaxLpsInventory {
-  source: "inventory" | "floor";
+  source: "inventory" | "floor" | "none";
   count: number;
   racks: MaxLpsInvRack[];
   layout: {
@@ -439,9 +463,116 @@ export interface FabricPort {
   hall_name?: string | null;
 }
 
+export type HealthLevel = "ok" | "warning" | "critical" | "unknown";
+
+export interface ClusterHealthCounts {
+  dry?: number;
+  warn?: number;
+  leak?: number;
+  unknown?: number;
+  on?: number;
+  off?: number;
+  ok?: number;
+  warning?: number;
+  critical?: number;
+  running?: number;
+  total?: number;
+  nodes?: number;
+}
+
+export interface ClusterHealthCard {
+  status: HealthLevel | string;
+  value?: string;
+  label?: string;
+  detail?: string;
+  ok?: number;
+  total?: number;
+  celsius?: number | null;
+  hottest?: string | null;
+  watts?: number | null;
+  pwm_pct?: number | null;
+  rpm_avg?: number | null;
+  gpus?: { index?: number; celsius?: number | null; label?: string }[];
+  counts?: ClusterHealthCounts;
+}
+
+export interface ClusterHealthNode {
+  bmc_ip?: string;
+  rack_id?: string;
+  node_index?: string | number;
+  status?: string;
+  product?: string;
+  vendor?: string;
+  serial?: string;
+  via?: string;
+  error?: string | null;
+  system?: { power_state?: string; model?: string; status?: string; serial?: string };
+  hgx?: {
+    model?: string | null;
+    status?: string;
+    inlet_c?: number | null;
+    exhaust_c?: number | null;
+    power_limit_w?: number | null;
+  };
+  thermal?: {
+    status?: string;
+    hottest_c?: number | null;
+    hottest?: string | null;
+    inlet_c?: number | null;
+    exhaust_c?: number | null;
+    temps?: { name?: string; label?: string; celsius?: number; context?: string | null }[];
+    gpu_temps?: { index?: number; label?: string; celsius?: number; name?: string }[];
+  };
+  leak?: {
+    status?: string;
+    ok?: number;
+    total?: number;
+    detectors?: { label?: string; detector_state?: string; status?: string }[];
+  };
+  fans?: {
+    status?: string;
+    pwm_pct?: number | null;
+    rpm_avg?: number | null;
+    rpm_min?: number | null;
+    count?: number;
+    running?: number;
+    items?: { name?: string; kind?: string; pct?: number; rpm?: number; status?: string }[];
+  };
+  power?: {
+    status?: string;
+    watts?: number | null;
+    pdb?: string;
+    pdb_model?: string;
+    psu_count?: number;
+  };
+  cbc?: {
+    status?: string;
+    ok?: number;
+    total?: number;
+    items?: { id?: string; health?: string; model?: string; power_state?: string }[];
+  };
+}
+
+export interface ClusterHealth {
+  source?: string | null;
+  via?: string | null;
+  error?: string | null;
+  poll_age_s?: number | null;
+  node_count?: number;
+  inventory_nodes?: number;
+  leak?: ClusterHealthCard;
+  temperature?: ClusterHealthCard;
+  system?: ClusterHealthCard;
+  power_shelf?: ClusterHealthCard;
+  psu?: ClusterHealthCard;
+  fans?: ClusterHealthCard;
+  nodes?: ClusterHealthNode[];
+}
+
 export interface ClusterMetrics {
   name: string;
-  source?: "inventory" | "floor" | string;
+  source?: "inventory" | "floor" | "none" | string;
+  health?: ClusterHealth;
   sensors?: {
     power?: boolean;
     gpu?: boolean;
@@ -449,6 +580,7 @@ export interface ClusterMetrics {
     mem?: boolean;
     fabric?: boolean;
     disk?: boolean;
+    health?: boolean;
   };
   now: {
     cpu_pct: number;
@@ -545,6 +677,7 @@ export interface InventoryNode {
   os_ip: string | null;
   os_username?: string | null;
   os_password?: string | null;
+  pxe_server?: string | null;
   source?: string;
   provision_status: string;
   sol_log: string | null;
@@ -566,13 +699,19 @@ export interface ProvisionRack {
 export interface ProvisionHop {
   connected: boolean;
   host: string;
-  user: string;
+  user: string | null;
+  hosts?: string[];
+  hops?: { host: string; user?: string | null; connected: boolean }[];
   tunnels?: Record<string, { port: number; bmc_ip: string }>;
 }
 
 export interface ProvisionSnapshot {
   source?: string;
   hop?: ProvisionHop;
+  sync_errors?: string[];
+  sync_note?: string;
+  skipped_hidden?: string[];
+  synced_pxes?: string[];
   racks?: ProvisionRack[];
   nodes: InventoryNode[];
   dhcp: { ip: string; mac: string; hostname: string; lease: string; mapped: string; kind: string; iface: string }[];

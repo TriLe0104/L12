@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { OverviewDash } from "@/components/OverviewDash";
 import { PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
@@ -27,8 +28,17 @@ const ClusterCanvas = dynamic(
 type Tab = "overview" | "racks" | "floor";
 
 export default function ClusterPage() {
+  return (
+    <Suspense fallback={<div className="cluster-app" />}>
+      <ClusterPageInner />
+    </Suspense>
+  );
+}
+
+function ClusterPageInner() {
   const { user } = useAuth();
   const mayEdit = canEdit(user);
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>("overview");
   const [overview, setOverview] = useState<ClusterOverview | null>(null);
   const [campus, setCampus] = useState<Campus | null>(null);
@@ -58,6 +68,11 @@ export default function ClusterPage() {
 
   const { data: power, setData: setPower, byId: powerByRack } = usePowerLimiter(tab === "floor" || tab === "racks");
   const inventoryCampus = campus?.source === "inventory";
+
+  useEffect(() => {
+    const q = (searchParams.get("tab") || "").toLowerCase();
+    if (q === "racks" || q === "floor" || q === "overview") setTab(q);
+  }, [searchParams]);
 
   const hall = halls.find((h) => h.id === hallId) ?? null;
   const selectedRacks = halls.flatMap((h) => h.racks).filter((r) => selectedIds.includes(r.id));
@@ -94,6 +109,19 @@ export default function ClusterPage() {
     return () => {
       cancelled = true;
     };
+  }, [loadHalls, loadOverview]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      loadOverview().catch(() => {
+        /* keep last overview */
+      });
+      loadHalls().catch(() => {
+        /* keep last campus */
+      });
+    };
+    window.addEventListener("l12-refresh", onRefresh);
+    return () => window.removeEventListener("l12-refresh", onRefresh);
   }, [loadHalls, loadOverview]);
 
   useEffect(() => {
@@ -356,6 +384,7 @@ export default function ClusterPage() {
               className="cluster-kicker cluster-kicker-input"
               value={clusterName}
               aria-label="Cluster name"
+              data-mona="cluster-name"
               title="Cluster name"
               onChange={(e) => setClusterName(e.target.value)}
               onBlur={async () => {
@@ -378,14 +407,15 @@ export default function ClusterPage() {
           ) : (
             <span className="cluster-kicker">{clusterName || campus?.name || overview?.name || "Firmus"}</span>
           )}
-          <button type="button" data-active={tab === "overview"} onClick={() => setTab("overview")}>
+          <button type="button" data-mona="tab-overview" data-active={tab === "overview"} onClick={() => setTab("overview")}>
             Overview
           </button>
-          <button type="button" data-active={tab === "racks"} onClick={() => setTab("racks")}>
+          <button type="button" data-mona="tab-racks" data-active={tab === "racks"} onClick={() => setTab("racks")}>
             Racks
           </button>
           <button
             type="button"
+            data-mona="tab-floor"
             data-active={tab === "floor"}
             onClick={() => {
               setTab("floor");
@@ -417,21 +447,9 @@ export default function ClusterPage() {
                   </option>
                 ))}
               </select>
-              {mayEdit && !inventoryCampus && (
-                <>
-                  <button type="button" className="btn" onClick={openHallDialog} disabled={busy}>
-                    New hall
-                  </button>
-                  <button type="button" className="btn" onClick={openRackDialog} disabled={busy || !hall} data-active={placeMode}>
-                    {placeMode ? "Click floor…" : "Add racks"}
-                  </button>
-                  {hall && (
-                    <button type="button" className="btn btn-danger" onClick={() => setDialog("delete-hall")} disabled={busy}>
-                      Delete hall
-                    </button>
-                  )}
-                </>
-              )}
+              {mayEdit && !inventoryCampus ? (
+                <span className="cluster-tools-hint">Add a rack on Racks — manual or Argus.</span>
+              ) : null}
             </>
           )}
         </div>
@@ -448,14 +466,16 @@ export default function ClusterPage() {
 
       {tab === "overview" && (
         <section className="cluster-overview">
-          <OverviewDash halls={halls} />
+          <OverviewDash />
         </section>
       )}
 
-      {tab === "racks" && <RackBoard halls={halls} />}
+      {tab === "racks" && (
+        <RackBoard halls={halls} clusterName={clusterName} onChange={() => void refreshAll()} />
+      )}
 
       {tab === "floor" && (
-        <section className="cluster-floor">
+        <section className="cluster-floor" data-mona="floor">
           <div className="cluster-floor-stage">
           {halls.length > 0 ? (
             <ClusterCanvas
@@ -500,30 +520,32 @@ export default function ClusterPage() {
             <div className="cluster-canvas cluster-canvas-pending">
               {inventoryCampus
                 ? "Register a rack in Dynamic Power to see it on the floor."
-                : mayEdit
-                  ? "Create a data hall to start laying out racks."
-                  : "No data halls yet."}
+                : "Register a rack (manual or Argus) to show the floor. Nothing is simulated."}
             </div>
           )}
           {power && (
             <aside className="lps-hud" aria-label="Power limiter">
               <div className="lps-hud-kicker">{power.mode === "dynamic" ? "Dynamic Power" : "Static"}</div>
-              <strong>{formatKw(power.active.consumed_kw)}</strong>
+              <strong>
+                {inventoryCampus && (power.active.consumed_kw ?? 0) > 0.05
+                  ? formatKw(power.active.consumed_kw)
+                  : "—"}
+              </strong>
               <span className="lps-hud-sub">
                 {formatKw(power.total_budget_kw ?? power.budget_kw)} × {Math.round(power.threshold_pct ?? power.stay_under_pct ?? 80)}% · static {power.racks_static_max ?? 0} · Dynamic Power {power.racks_lps_max ?? 0}{power.racks_lps_gain ? ` (+${power.racks_lps_gain})` : ""} · [{Math.round(power.min_rack_kw ?? 40)}–{Math.round(power.max_rack_kw ?? 300)}] kW
               </span>
               <dl>
                 <div>
                   <dt>Stranded</dt>
-                  <dd>{formatKw(power.active.stranded_kw)}</dd>
+                  <dd>{inventoryCampus ? formatKw(power.active.stranded_kw) : "—"}</dd>
                 </div>
                 <div>
                   <dt>Hot racks</dt>
-                  <dd>{power.active.racks_hot ?? 0}</dd>
+                  <dd>{inventoryCampus ? (power.active.racks_hot ?? 0) : "—"}</dd>
                 </div>
                 <div>
                   <dt>Headroom</dt>
-                  <dd>{formatKw(power.active.headroom_kw)}</dd>
+                  <dd>{inventoryCampus ? formatKw(power.active.headroom_kw) : "—"}</dd>
                 </div>
                 <div>
                   <dt>Tick</dt>
@@ -546,9 +568,6 @@ export default function ClusterPage() {
                 >
                   Dynamic Power
                 </button>
-                <button type="button" onClick={() => api.patchClusterPower({ mode: "dynamic", reset: true }).then(setPower)}>
-                  Replay
-                </button>
               </div>
             </aside>
           )}
@@ -561,54 +580,32 @@ export default function ClusterPage() {
                     ? hudHall?.name ?? "Data hall"
                     : hall?.name ?? "Rack"}
               </div>
-              <strong>{formatKw(hudTelemetry.power_kw)}</strong>
+              <strong>
+                {inventoryCampus && hudTelemetry.power_kw > 0 ? formatKw(hudTelemetry.power_kw) : "—"}
+              </strong>
               <span className="zoom-hud-sub">
-                {hudTelemetry.racks_on}/{hudTelemetry.racks_total} racks · {(hudTelemetry.racks_total * 18).toLocaleString()} nodes
+                {inventoryCampus
+                  ? `${hudTelemetry.racks_on}/${hudTelemetry.racks_total} racks · ${(hudTelemetry.racks_total * 18).toLocaleString()} nodes`
+                  : "No registered cluster"}
               </span>
               <dl>
                 <div>
                   <dt>GPU</dt>
-                  <dd>{Math.round(hudTelemetry.gpu_pct)}%</dd>
+                  <dd>{inventoryCampus ? `${Math.round(hudTelemetry.gpu_pct)}%` : "—"}</dd>
                 </div>
                 <div>
                   <dt>CPU</dt>
-                  <dd>{Math.round(hudTelemetry.cpu_pct)}%</dd>
+                  <dd>{inventoryCampus ? `${Math.round(hudTelemetry.cpu_pct)}%` : "—"}</dd>
                 </div>
                 <div>
                   <dt>Mem</dt>
-                  <dd>{Math.round(hudTelemetry.mem_pct)}%</dd>
+                  <dd>{inventoryCampus ? `${Math.round(hudTelemetry.mem_pct)}%` : "—"}</dd>
                 </div>
               </dl>
               <em className="zoom-hud-hint">
-                {zoom.level === "cluster"
-                  ? "Click a hall or a switch · 18 nodes · 4 GB300"
-                  : zoom.level === "hall"
-                    ? "Click a leaf/spine for ports · Ctrl+click racks"
-                    : "Click switches for traffic · Ctrl+click racks"}
+                {zoom.level === "cluster" ? "Click a hall or a rack" : "Click a rack for the GB300 stencil"}
               </em>
             </aside>
-          )}
-          {halls.length > 0 && (
-            <div className="net-legend-3d">
-              <span>
-                <i /> Spine
-              </span>
-              <span>
-                <i data-k="leaf" /> Leaf
-              </span>
-              <span>
-                <i data-k="up" /> Uplink 800G
-              </span>
-              <span>
-                <i data-k="dn" /> Downlink
-              </span>
-              <span>
-                <i data-k="used" /> Consumed
-              </span>
-              <span>
-                <i data-k="spare" /> Unused alloc
-              </span>
-            </div>
           )}
           {placeMode && (
             <div className="place-hint">

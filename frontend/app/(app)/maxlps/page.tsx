@@ -3,16 +3,47 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { PolicyField, PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
-import { ThemeDialog } from "@/components/ThemeDialog";
 import { api } from "@/lib/api";
-import { canEdit, useAuth } from "@/lib/auth";
-import type { MaxLpsGpu, MaxLpsShelf, MaxLpsView, ProvisionHop } from "@/lib/cluster";
+import type { LoopTargetRack, MaxLpsGpu, MaxLpsShelf, MaxLpsView, ProvisionHop } from "@/lib/cluster";
 import { formatKw, formatRackKw, formatW } from "@/lib/cluster";
 import { captureFlipTops, playEntrySwap } from "@/lib/flip";
 import "../cluster/cluster.css";
 import "./maxlps.css";
 
+const MIN_INTERVAL_MS = 1;
+const MAX_INTERVAL_MS = 300_000;
 const DEFAULT_INTERVAL_MS = 10_000;
+const TABLE_MIN_MS = 1;
+const TABLE_MAX_MS = 120_000;
+const TABLE_DEFAULT_MS = 5_000;
+const TABLE_KEY = "l12-ranking-ms";
+
+function clampTableMs(ms: number): number {
+  if (!Number.isFinite(ms)) return TABLE_DEFAULT_MS;
+  return Math.min(TABLE_MAX_MS, Math.max(TABLE_MIN_MS, Math.round(ms)));
+}
+
+function intervalMsFromS(seconds: number | undefined): number {
+  const ms = Math.round((seconds ?? DEFAULT_INTERVAL_MS / 1000) * 1000);
+  if (!Number.isFinite(ms)) return DEFAULT_INTERVAL_MS;
+  return Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, ms));
+}
+
+function formatInterval(ms: number): string {
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms)}ms`;
+}
+
+function gpuErrorText(err: string | null | undefined): string {
+  if (!err) return "";
+  if (err === "power-reading-empty") return "BMC answered and PowerWatts was empty";
+  if (err === "bmc-password-missing") return "BMC password missing";
+  if (err === "pxe-hop-down") return "rack PXE is not connected";
+  if (err === "no-gpu-metrics") return "BMC did not return GPU metrics";
+  if (err.startsWith("HTTP ")) return `BMC ${err}`;
+  return err;
+}
 const ROW_H = 34;
 const SWAP_MS = 880;
 const DELTA_PLAY_MS = 1250;
@@ -110,18 +141,10 @@ function barTone(gpu: MaxLpsGpu) {
 }
 
 export default function MaxLpsPage() {
-  const { user } = useAuth();
-  const mayEdit = canEdit(user);
   const { data: power, setData: setPower } = usePowerLimiter(true, 0);
   const [view, setView] = useState<MaxLpsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hop, setHop] = useState<ProvisionHop | null>(null);
-  const [hopOpen, setHopOpen] = useState(false);
-  const [hopHost, setHopHost] = useState("172.25.231.244");
-  const [hopUser, setHopUser] = useState("tril");
-  const [hopPass, setHopPass] = useState("");
-  const [hopBusy, setHopBusy] = useState(false);
-  const hopAsked = useRef(false);
   const [rackId, setRackId] = useState<string | null>(null);
   const [openRacks, setOpenRacks] = useState<Record<string, boolean>>({});
   const [gpuId, setGpuId] = useState<string | null>(null);
@@ -136,8 +159,14 @@ export default function MaxLpsPage() {
   const gpuIdRef = useRef<string | null>(null);
   gpuIdRef.current = gpuId;
   const loadGen = useRef(0);
+  const loadBusy = useRef(false);
   const [loopReset, setLoopReset] = useState(0);
-  const [loopSec, setLoopSec] = useState(DEFAULT_INTERVAL_MS / 1000);
+  const [loopMs, setLoopMs] = useState(DEFAULT_INTERVAL_MS);
+  const [tableMs, setTableMs] = useState(TABLE_DEFAULT_MS);
+  const [tableField, setTableField] = useState(String(TABLE_DEFAULT_MS));
+  const tableMsRef = useRef(TABLE_DEFAULT_MS);
+  const [ranking, setRanking] = useState<MaxLpsGpu[]>([]);
+  const [tableTick, setTableTick] = useState(0);
   const [deltas, setDeltas] = useState<Record<string, number | "new">>({});
   const [wattDelta, setWattDelta] = useState<Record<string, number>>({});
   const [usedDelta, setUsedDelta] = useState(0);
@@ -145,55 +174,60 @@ export default function MaxLpsPage() {
   const [viewH, setViewH] = useState(640);
   const listOuter = useRef<HTMLDivElement>(null);
   const prevUsed = useRef<number | null>(null);
-  const pollMs = 1000;
+  const pollMs = Math.min(1000, Math.max(MIN_INTERVAL_MS, loopMs));
   const loopStepRef = useRef<number | null>(null);
   const reshuffleRef = useRef(false);
   const [wattTick, setWattTick] = useState(0);
+  const metaRef = useRef<MaxLpsGpu[]>([]);
+  const rankSigRef = useRef("");
+  const [loopOff, setLoopOff] = useState<Set<string> | null>(null);
+  const onLoopTargets = useCallback((racks: LoopTargetRack[]) => {
+    const off = new Set<string>();
+    for (const rack of racks) {
+      for (const node of rack.nodes) {
+        if (!node.on) off.add(`${rack.id}:${node.index}`);
+      }
+    }
+    setLoopOff(off);
+  }, []);
 
   const load = useCallback(async () => {
+    if (loadBusy.current) return;
+    loadBusy.current = true;
     const gen = ++loadGen.current;
     try {
       const next = await api.maxlps({ top: 0, rack_id: rackId });
       if (gen !== loadGen.current) return;
-      const firstBoard = prevRank.current.size === 0;
-      const nextDelta: Record<string, number | "new"> = {};
-      const nextWatt: Record<string, number> = {};
-      const nextRanks = new Map<string, number>();
-      const nextWatts = new Map<string, number>();
-      for (const g of next.gpus) {
-        nextRanks.set(g.id, g.rank);
-        nextWatts.set(g.id, g.watts);
-        if (firstBoard) continue;
-        const was = prevRank.current.get(g.id);
-        const prevW = prevWatts.current.get(g.id);
-        const dw = prevW == null ? 0 : Math.round(g.watts - prevW);
-        if (Math.abs(dw) >= 4) nextWatt[g.id] = dw;
-        if (was == null) nextDelta[g.id] = "new";
-        else if (was !== g.rank) nextDelta[g.id] = was - g.rank;
-      }
-      prevRank.current = nextRanks;
-      prevWatts.current = nextWatts;
       const used = next.totals.used_kw ?? next.totals.shelf_kw ?? 0;
       const dUsed = prevUsed.current == null ? (next.totals.used_delta_kw ?? 0) : used - prevUsed.current;
       prevUsed.current = used;
-      setDeltas(nextDelta);
-      setWattDelta(nextWatt);
       setUsedDelta(dUsed);
       setView(next);
-      setLoopSec(Math.max(1, Math.round(next.algo?.interval_s ?? 10)));
-      setWattTick((n) => n + 1);
+      metaRef.current = next.gpus;
+      setLoopMs(intervalMsFromS(next.algo?.interval_s));
       const step = next.loop_step ?? next.tick ?? 0;
       if (loopStepRef.current == null || step !== loopStepRef.current) {
         loopStepRef.current = step;
-        if (sortKeyRef.current === "rank") reshuffleRef.current = true;
-        else frozenIds.current = null;
         setLoopReset((n) => n + 1);
       }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Dynamic Power failed");
+    } finally {
+      loadBusy.current = false;
     }
   }, [rackId]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(TABLE_KEY);
+    if (stored == null || stored === "") return;
+    const raw = Number(stored);
+    if (!Number.isFinite(raw)) return;
+    const ms = clampTableMs(raw);
+    tableMsRef.current = ms;
+    setTableMs(ms);
+    setTableField(String(ms));
+  }, []);
 
   useEffect(() => {
     void load();
@@ -201,48 +235,105 @@ export default function MaxLpsPage() {
     return () => window.clearInterval(id);
   }, [load, pollMs]);
 
+  const publishRanking = useCallback(
+    (rows: { id: string; watts: number; setpoint_w?: number | null; min_w?: number | null; max_w?: number | null }[]) => {
+      const meta = metaRef.current;
+      if (!meta.length || !rows.length) return;
+      const live = new Map(rows.map((g) => [g.id, g]));
+      const merged = meta.map((g) => {
+        const row = live.get(g.id);
+        return {
+          ...g,
+          watts: row ? row.watts : g.watts,
+          setpoint_w: row?.setpoint_w ?? g.setpoint_w,
+          min_w: row?.min_w ?? g.min_w,
+          max_w: row?.max_w ?? g.max_w,
+        };
+      });
+      merged.sort((a, b) => b.watts - a.watts || a.id.localeCompare(b.id));
+      for (let i = 0; i < merged.length; i++) merged[i] = { ...merged[i], rank: i + 1 };
+      const sig = merged.map((g) => `${g.id}:${g.watts}:${g.setpoint_w}:${g.in_loop === false ? 0 : 1}`).join("|");
+      if (sig === rankSigRef.current) return;
+      const firstBoard = prevRank.current.size === 0;
+      const nextDelta: Record<string, number | "new"> = {};
+      const nextWatt: Record<string, number> = {};
+      const nextRanks = new Map<string, number>();
+      const nextWatts = new Map<string, number>();
+      for (const g of merged) {
+        nextRanks.set(g.id, g.rank);
+        nextWatts.set(g.id, g.watts);
+        if (!firstBoard) {
+          const was = prevRank.current.get(g.id);
+          const prevW = prevWatts.current.get(g.id);
+          const dw = prevW == null ? 0 : Math.round(g.watts - prevW);
+          if (Math.abs(dw) >= 4) nextWatt[g.id] = dw;
+          if (was == null) nextDelta[g.id] = "new";
+          else if (was !== g.rank) nextDelta[g.id] = was - g.rank;
+        }
+      }
+      prevRank.current = nextRanks;
+      prevWatts.current = nextWatts;
+      rankSigRef.current = sig;
+      setDeltas(nextDelta);
+      setWattDelta(nextWatt);
+      if (sortKeyRef.current === "rank") reshuffleRef.current = true;
+      else frozenIds.current = null;
+      setRanking(merged);
+      setTableTick((n) => n + 1);
+      setWattTick((n) => n + 1);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let stop = false;
+    let timer = 0;
+    const tick = async () => {
+      if (stop) return;
+      const started = performance.now();
+      if (!metaRef.current.length) {
+        timer = window.setTimeout(tick, Math.min(50, Math.max(TABLE_MIN_MS, tableMsRef.current)));
+        return;
+      }
+      try {
+        const rank = await api.maxlpsRanking();
+        if (!stop) publishRanking(rank.gpus);
+      } catch {
+        /* keep the last board */
+      }
+      if (stop) return;
+      const wait = Math.max(0, tableMsRef.current - (performance.now() - started));
+      timer = window.setTimeout(tick, wait);
+    };
+    timer = window.setTimeout(tick, 0);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+  }, [publishRanking, tableMs]);
+
+  function commitTable(raw: string) {
+    const ms = clampTableMs(Number(raw));
+    tableMsRef.current = ms;
+    setTableMs(ms);
+    setTableField(String(ms));
+    window.localStorage.setItem(TABLE_KEY, String(ms));
+  }
+
   const refreshHop = useCallback(async () => {
     try {
       const next = await api.provisionHop();
       setHop(next);
-      if (next.host) setHopHost(next.host);
-      if (next.user) setHopUser(next.user);
-      if (!next.connected && mayEdit && !hopAsked.current) {
-        hopAsked.current = true;
-        setHopOpen(true);
-      }
     } catch {
       /* hop status is optional */
     }
-  }, [mayEdit]);
+  }, []);
 
   useEffect(() => {
     void refreshHop();
     const id = window.setInterval(() => void refreshHop(), 4000);
     return () => window.clearInterval(id);
   }, [refreshHop]);
-
-  async function connectHop() {
-    setHopBusy(true);
-    try {
-      const next = await api.provisionHopConnect({
-        host: hopHost,
-        username: hopUser,
-        password: hopPass || undefined,
-      });
-      setHop(next);
-      setHopPass("");
-      setHopOpen(false);
-      setError(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "PXE hop failed");
-    } finally {
-      setHopBusy(false);
-    }
-  }
-
-
 
   useEffect(() => {
     const el = listOuter.current;
@@ -312,7 +403,7 @@ export default function MaxLpsPage() {
   const gpuDelta = gpuFlash.delta;
 
   const sortedGpus = useMemo(() => {
-    const src = view?.gpus ?? [];
+    const src = ranking;
     const dir = sortDir === "asc" ? 1 : -1;
     const dlt = (id: string) => {
       const d = deltas[id];
@@ -400,9 +491,9 @@ export default function MaxLpsPage() {
     const rows = sortOnce(src.slice());
     frozenIds.current = rows.map((g) => g.id);
     return rows;
-  }, [view?.gpus, sortKey, sortDir, deltas]);
+  }, [ranking, sortKey, sortDir, deltas]);
 
-  const selectedGpu = (gpuId && sortedGpus.find((g) => g.id === gpuId)) || null;
+  const selectedGpu = (gpuId && (view?.gpus ?? []).find((g) => g.id === gpuId)) || null;
 
   const onSelectGpu = useCallback((g: MaxLpsGpu) => {
     if (g.id === gpuIdRef.current) {
@@ -426,9 +517,10 @@ export default function MaxLpsPage() {
   }
 
   const shuffle = sortKey === "rank";
+  const hopHosts = hop?.hosts?.length ? hop.hosts : hop?.connected && hop.host ? [hop.host] : [];
 
   return (
-    <div className="maxlps-page">
+    <div className="maxlps-page" data-mona="maxlps">
       <header className="maxlps-head">
         <div>
           <p className="maxlps-kicker">
@@ -442,43 +534,23 @@ export default function MaxLpsPage() {
           </p>
         </div>
         <div className="lps-modes">
-          <button
-            type="button"
+          <span
+            className="maxlps-pxe"
             data-active={hop?.connected ? "true" : undefined}
-            disabled={!mayEdit || hopBusy}
-            onClick={() => setHopOpen(true)}
-            title={hop?.connected ? `PXE hop ${hop.host}` : "Connect PXE hop for GPU Redfish"}
+            title={hopHosts.length ? `PXE ${hopHosts.join(", ")}` : "PXE servers saved in Provision"}
           >
-            {hop?.connected ? `Hop · ${hop.host}` : "Connect PXE hop"}
-          </button>
+            {hopHosts.length > 1 ? `PXE · ${hopHosts.length}` : hopHosts.length === 1 ? `PXE · ${hopHosts[0]}` : "PXE · Provision"}
+          </span>
           <button type="button" data-active={power?.mode === "static"} disabled={locked} onClick={() => setMode("static")}>
             Static
           </button>
           <button type="button" data-active={power?.mode === "dynamic"} disabled={locked} onClick={() => setMode("dynamic")}>
             Dynamic Power
           </button>
-          <button type="button" disabled={locked} onClick={() => setMode("dynamic", true)}>
-            Replay
-          </button>
         </div>
       </header>
 
       {error ? <p className="cluster-error">{error}</p> : null}
-      {!hop?.connected ? (
-        <p className="cluster-error maxlps-hop-ask">
-          GPU watts need BMC Redfish through the PXE hop.
-          {mayEdit ? (
-            <>
-              {" "}
-              <button type="button" className="maxlps-hop-link" onClick={() => setHopOpen(true)}>
-                Connect now
-              </button>
-            </>
-          ) : (
-            " Ask an editor to connect it."
-          )}
-        </p>
-      ) : null}
 
       <section className="maxlps-stats">
         <article data-lead="true">
@@ -495,9 +567,11 @@ export default function MaxLpsPage() {
           <small>
             {view?.totals?.shelf_source === "redfish"
               ? "BMC PowerShelf total_power_out"
-              : view?.totals?.shelf_source === "argus"
-                ? "Argus TotalPowerOut (fallback)"
-                : "No PSU readings"}
+              : view?.totals?.shelf_source === "down"
+                ? "Power shelves not responding"
+                : view?.totals?.shelf_source === "argus"
+                  ? "Argus TotalPowerOut (fallback)"
+                  : "No PSU readings"}
           </small>
         </article>
         <article>
@@ -520,9 +594,7 @@ export default function MaxLpsPage() {
                       ? "live"
                       : `${Math.round(view.totals.gpu_poll_age_s)}s ago`
                 }`
-              : view?.totals?.gpu_error === "pxe-hop-down"
-                ? "Connect the PXE hop for Redfish"
-                : "No BMC Redfish readings yet"}
+              : gpuErrorText(view?.totals?.gpu_error) || "No BMC Redfish readings yet"}
           </small>
         </article>
         <article data-free={rackHeadroomKw < 0 ? "over" : "ok"}>
@@ -571,11 +643,11 @@ export default function MaxLpsPage() {
                         ? " · live"
                         : ` · ${Math.round(view.totals.shelf_poll_age_s)}s ago`
                   }`
-                : view?.totals?.shelf_source === "argus"
-                  ? "Argus TotalPowerOut (fallback)"
-                  : hop?.connected
-                    ? "Empty until BMC PowerShelf sensors arrive"
-                    : "Connect the PXE hop for shelf Redfish"}
+                : view?.totals?.shelf_source === "down"
+                  ? "Power shelves not responding · 0 kW"
+                  : view?.totals?.shelf_source === "argus"
+                    ? "Argus TotalPowerOut (fallback)"
+                    : "Waiting for PowerShelf sensors through each rack's PXE"}
               {view?.totals?.shelf_source === "redfish" && view?.racks?.length ? ` · ${formatRackKw(rackUsedKw)} total` : ""}
             </p>
             {rackId ? (
@@ -610,22 +682,31 @@ export default function MaxLpsPage() {
                 : `Power ranking · ${(totals?.gpus_listed ?? 0).toLocaleString()} / ${(totals?.gpus_total || totals?.gpus_listed || 0).toLocaleString()} GPU`}
             </h2>
             <p>
-              {view?.totals?.gpu_source === "redfish"
-                ? `Redfish PowerWatts · ${view.totals.gpu_live ?? 0} GPU · ${
-                    view.totals.gpu_busy && (view.totals.gpu_poll_age_s ?? 99) < 1
-                      ? "polling"
-                      : view.totals.gpu_poll_age_s == null
-                        ? "waiting"
-                        : view.totals.gpu_poll_age_s < 1.5
-                          ? "live"
-                          : `${Math.round(view.totals.gpu_poll_age_s)}s ago`
-                  }`
-                : hop?.connected
-                  ? "Empty until BMC EnvironmentMetrics arrive"
-                  : "Connect the PXE hop for GPU Redfish"}
-              {view?.totals?.gpu_error ? ` · ${view.totals.gpu_error}` : ""}
+              {`Ranking every ${formatInterval(tableMs)}`}
+              {view?.totals?.gpu_error ? ` · ${gpuErrorText(view.totals.gpu_error)}` : ""}
               {" · green gain / red loss"}
             </p>
+            <label className="maxlps-table-ms">
+              Table
+              <input
+                type="number"
+                min={TABLE_MIN_MS}
+                max={TABLE_MAX_MS}
+                step={1}
+                value={tableField}
+                aria-label="Power ranking refresh in milliseconds"
+                title="How often this ranking list re-reads live watts and reorders, in milliseconds. 1 ms to 120 s. A read still running finishes before the next one starts. Redfish and cap updates keep using Frequency."
+                onChange={(e) => setTableField(e.target.value)}
+                onBlur={() => commitTable(tableField)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitTable(tableField);
+                  }
+                }}
+              />
+              <span className="lps-unit">ms</span>
+            </label>
           </header>
           <div className="maxlps-gpu-cols">
             {(
@@ -666,29 +747,24 @@ export default function MaxLpsPage() {
                 wattDelta={wattDelta}
                 selectedId={gpuId}
                 shuffle={shuffle}
-                tick={loopReset}
+                tick={tableTick}
                 wattTick={wattTick}
+                snap={tableMs < SWAP_MS}
+                loopOff={loopOff}
                 onSelect={onSelectGpu}
               />
             ) : (
               <div className="maxlps-gpu-empty">
-                <p>{hop?.connected ? "No GPU power readings yet" : "PXE hop is not connected"}</p>
+                <p>No GPU power readings yet</p>
                 <span>
-                  {hop?.connected
-                    ? "Dynamic Power only shows BMC EnvironmentMetrics. Wait for the next poll, or reopen hop if the jump dropped."
-                    : "GPU bars stay empty until this API can SSH to the PXE host and read Redfish on 10.10.x."}
+                  {`Polling each rack through the PXE saved in Provision${view?.totals?.gpu_error ? ` · ${gpuErrorText(view.totals.gpu_error)}` : ""}.`}
                 </span>
-                {!hop?.connected && mayEdit ? (
-                  <button type="button" className="btn btn-primary" onClick={() => setHopOpen(true)}>
-                    Connect PXE hop
-                  </button>
-                ) : null}
               </div>
             )}
           </div>
         </section>
 
-        <aside className="maxlps-loop">
+        <aside className="maxlps-loop" data-mona="limiter">
           {selectedGpu ? (
             <GpuInspector
               gpu={selectedGpu}
@@ -705,6 +781,7 @@ export default function MaxLpsPage() {
               {power?.mode === "static" ? (
                 <p className="lps-event">Dynamic Power off — caps restored to BMC AllowableMax. Redfish watts still update.</p>
               ) : null}
+              <RunOn onChange={onLoopTargets} />
               {power ? (
                 <PowerPolicyFields
                   data={power}
@@ -731,7 +808,7 @@ export default function MaxLpsPage() {
                 tick {power?.tick ?? view?.tick ?? 0}
                 {power?.last_event ? ` · ${power.last_event}` : ""}
                 {" · next in "}
-                <EtaClock seconds={loopSec} resetKey={loopReset} />
+                <EtaClock ms={loopMs} resetKey={loopReset} />
               </p>
               {selected ? (
                 <>
@@ -757,7 +834,7 @@ export default function MaxLpsPage() {
               ) : (
                 <p className="maxlps-hint">
                   {view?.algo
-                    ? `Click a GPU for process, curve, and per-GPU min/max · every ${view.algo.interval_s ?? 10}s`
+                    ? `Click a GPU for process, curve, and per-GPU min/max · every ${formatInterval(intervalMsFromS(view.algo.interval_s))}`
                     : "Click a GPU to inspect it."}
                 </p>
               )}
@@ -765,42 +842,6 @@ export default function MaxLpsPage() {
           )}
         </aside>
       </div>
-      {hopOpen ? (
-        <ThemeDialog
-          title="PXE jump host"
-          confirmLabel="Connect"
-          busy={hopBusy}
-          onClose={() => setHopOpen(false)}
-          onConfirm={() => void connectHop()}
-        >
-          <p className="widget-meta" style={{ margin: "0 0 0.6rem" }}>
-            Dynamic Power reads GPU watts from BMC Redfish on 10.10.x. SSH to the PXE host first. Password stays in this API process only.
-          </p>
-          <label>
-            PXE IP
-            <input
-              className="field"
-              value={hopHost}
-              onChange={(e) => setHopHost(e.target.value)}
-              placeholder="172.25.231.244"
-            />
-          </label>
-          <label>
-            Username
-            <input className="field" value={hopUser} onChange={(e) => setHopUser(e.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            Password
-            <input
-              className="field"
-              type="password"
-              value={hopPass}
-              onChange={(e) => setHopPass(e.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
-        </ThemeDialog>
-      ) : null}
     </div>
   );
 }
@@ -828,16 +869,18 @@ function logY(v: number, vmin: number, vmax: number, h: number, pad: number) {
   return h - pad - t * (h - pad * 2);
 }
 
-function EtaClock({ seconds, resetKey }: { seconds: number; resetKey: number }) {
-  const [eta, setEta] = useState(seconds);
+function EtaClock({ ms, resetKey }: { ms: number; resetKey: number }) {
+  const [left, setLeft] = useState(ms);
   useEffect(() => {
-    setEta(seconds);
-  }, [seconds, resetKey]);
+    setLeft(ms);
+  }, [ms, resetKey]);
   useEffect(() => {
-    const id = window.setInterval(() => setEta((s) => Math.max(0, s - 1)), 1000);
+    const step = ms >= 1000 && ms % 1000 === 0 ? 1000 : Math.min(100, ms);
+    const id = window.setInterval(() => setLeft((s) => Math.max(0, s - step)), step);
     return () => window.clearInterval(id);
-  }, [resetKey]);
-  return <span>{eta}s</span>;
+  }, [resetKey, ms]);
+  if (ms >= 1000 && ms % 1000 === 0) return <span>{Math.max(0, Math.round(left / 1000))}s</span>;
+  return <span>{formatInterval(Math.max(0, left))}</span>;
 }
 
 function MixBar({
@@ -1072,6 +1115,8 @@ function VirtualGpus({
   shuffle,
   tick,
   wattTick,
+  snap,
+  loopOff,
   onSelect,
 }: {
   gpus: MaxLpsGpu[];
@@ -1083,6 +1128,8 @@ function VirtualGpus({
   shuffle: boolean;
   tick: number;
   wattTick: number;
+  snap: boolean;
+  loopOff: Set<string> | null;
   onSelect: (gpu: MaxLpsGpu) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1139,17 +1186,17 @@ function VirtualGpus({
 
   useLayoutEffect(() => {
     const last = captureFlipTops(rootRef.current);
-    if (prevOrder.current && prevOrder.current !== orderKey && prevTops.current.size) {
+    if (!snap && prevOrder.current && prevOrder.current !== orderKey && prevTops.current.size) {
       playEntrySwap(rootRef.current, prevTops.current, { duration: SWAP_MS });
     }
     prevOrder.current = orderKey;
     prevTops.current = last;
-  }, [orderKey]);
+  }, [orderKey, snap]);
 
   useLayoutEffect(() => {
     const next = new Map<string, number>();
     for (let i = 0; i < gpus.length; i++) next.set(gpus[i].id, i);
-    if (shuffle) {
+    if (shuffle && !snap) {
       const keep = new Set<string>();
       for (const row of rows) {
         if (row.slide) keep.add(row.g.id);
@@ -1165,9 +1212,14 @@ function VirtualGpus({
     }
     prevPos.current = next;
     prevWindow.current = { start, end };
-  }, [gpus, shuffle, tick, start, end]);
+  }, [gpus, shuffle, tick, start, end, snap]);
   return (
-    <div ref={rootRef} className="maxlps-gpu-virt" style={{ height: Math.max(gpus.length * ROW_H, viewH) }}>
+    <div
+      ref={rootRef}
+      className="maxlps-gpu-virt"
+      data-snap={snap ? "true" : undefined}
+      style={{ height: Math.max(gpus.length * ROW_H, viewH) }}
+    >
       {slots.map((i) => {
         if (!gpus[i]) return null;
         const place = shuffle && i < 3 ? String(i + 1) : undefined;
@@ -1209,6 +1261,7 @@ function VirtualGpus({
             wattDelta={wattDelta[g.id] ?? 0}
             active={g.id === selectedId}
             tick={wattTick}
+            off={loopOff ? loopOff.has(`${g.rack_id}:${g.node}`) : g.in_loop === false}
             onSelect={onSelect}
           />
         </div>
@@ -1240,10 +1293,16 @@ function ShelfRow({
 }) {
   const shelves = rack.shelves ?? [];
   const scale = Math.max(maxKw, 1);
-  const pct = Math.min(100, (rack.shelf_kw / scale) * 100);
+  const allDown = shelves.length > 0 && shelves.every((s) => s.down);
+  const pct = allDown ? 0 : Math.min(100, (rack.shelf_kw / scale) * 100);
   const minPct = Math.min(100, (Math.max(0, minKw) / scale) * 100);
-  const band =
-    rack.shelf_kw > 0 && rack.shelf_kw < minKw - 0.05 ? "under" : rack.shelf_kw > maxKw + 0.05 ? "over" : "ok";
+  const band = allDown
+    ? "down"
+    : rack.shelf_kw > 0 && rack.shelf_kw < minKw - 0.05
+      ? "under"
+      : rack.shelf_kw > maxKw + 0.05
+        ? "over"
+        : "ok";
   const shelfCap = Math.max(...shelves.map((s) => s.kw), 0.1);
   return (
     <div className="maxlps-rack-block" data-open={open ? "true" : undefined}>
@@ -1269,7 +1328,12 @@ function ShelfRow({
           <span
             className="maxlps-shelf-bar"
             aria-hidden
-            title={`${formatRackKw(rack.shelf_kw)} · min ${formatKw(minKw)} · max ${formatKw(maxKw)}`}
+            data-band={band}
+            title={
+              allDown
+                ? "Power shelves not responding"
+                : `${formatRackKw(rack.shelf_kw)} · min ${formatKw(minKw)} · max ${formatKw(maxKw)}`
+            }
           >
             <i data-k="ps" data-band={band} style={{ width: `${pct}%` }} />
             {minPct > 2 && minPct < 98 ? <b data-k="min" style={{ left: `${minPct}%` }} /> : null}
@@ -1283,15 +1347,20 @@ function ShelfRow({
         <ul className="maxlps-ps-list">
           {shelves.map((s) => {
             const mods = s.psus ?? [];
+            const down = Boolean(s.down);
             return (
               <li key={s.id}>
-                <div className="maxlps-ps">
+                <div className="maxlps-ps" data-down={down ? "true" : undefined}>
                   <span />
                   <span className="maxlps-shelf-id">PS{s.index}</span>
-                  <span className="maxlps-shelf-bar" aria-hidden>
-                    <i data-k="ps" style={{ width: `${Math.min(100, (s.kw / shelfCap) * 100)}%` }} />
+                  <span className="maxlps-shelf-bar" data-band={down ? "down" : undefined} aria-hidden>
+                    <i
+                      data-k="ps"
+                      data-band={down ? "down" : undefined}
+                      style={{ width: down ? "0%" : `${Math.min(100, (s.kw / shelfCap) * 100)}%` }}
+                    />
                   </span>
-                  <span className="maxlps-shelf-kw">{formatShelfKw(s.kw)}</span>
+                  <span className="maxlps-shelf-kw">{formatShelfKw(down ? 0 : s.kw)}</span>
                 </div>
                 {mods.map((p) => (
                   <div key={p.id} className="maxlps-ps maxlps-ps-mod">
@@ -1308,6 +1377,143 @@ function ShelfRow({
           })}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+function RunOn({ onChange }: { onChange: (racks: LoopTargetRack[]) => void }) {
+  const [racks, setRacks] = useState<LoopTargetRack[]>([]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const writing = useRef(false);
+
+  const load = useCallback(async () => {
+    if (writing.current) return;
+    try {
+      const next = await api.loopTargets();
+      setRacks(next.racks);
+      onChange(next.racks);
+    } catch {
+      /* keep the last list */
+    }
+  }, [onChange]);
+
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  async function patch(
+    body: { racks?: { id: string; on: boolean }[]; nodes?: { id: string; on: boolean }[] },
+    optimistic: LoopTargetRack[],
+  ) {
+    setRacks(optimistic);
+    onChange(optimistic);
+    writing.current = true;
+    try {
+      const next = await api.patchLoopTargets(body);
+      setRacks(next.racks);
+      onChange(next.racks);
+    } catch {
+      writing.current = false;
+      try {
+        const next = await api.loopTargets();
+        setRacks(next.racks);
+        onChange(next.racks);
+      } catch {
+        /* leave the optimistic check */
+      }
+    } finally {
+      writing.current = false;
+    }
+  }
+
+  function toggleRack(rack: LoopTargetRack) {
+    const on = !rack.nodes.every((n) => n.on);
+    const optimistic = racks.map((r) =>
+      r.id === rack.id ? { ...r, nodes: r.nodes.map((n) => ({ ...n, on })) } : r,
+    );
+    void patch({ racks: [{ id: rack.id, on }] }, optimistic);
+  }
+
+  function toggleNode(rack: LoopTargetRack, nodeId: string) {
+    const node = rack.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const on = !node.on;
+    const optimistic = racks.map((r) =>
+      r.id === rack.id ? { ...r, nodes: r.nodes.map((n) => (n.id === nodeId ? { ...n, on } : n)) } : r,
+    );
+    void patch({ nodes: [{ id: nodeId, on }] }, optimistic);
+  }
+
+  const onCount = racks.reduce((sum, rack) => sum + rack.nodes.filter((n) => n.on).length, 0);
+  const nodeCount = racks.reduce((sum, rack) => sum + rack.nodes.length, 0);
+
+  return (
+    <div className="maxlps-run">
+      <div className="maxlps-run-head">
+        <span>Run on</span>
+        <span>
+          {onCount} / {nodeCount}
+        </span>
+      </div>
+      <p>Caps post only for checked nodes. Unchecked nodes still count in GPU power used and in the cap left to allocate, then return to their BMC max.</p>
+      <div className="maxlps-run-list" role="group" aria-label="Racks and nodes in the control loop">
+        {racks.length ? (
+          racks.map((rack) => {
+            const rackOn = rack.nodes.filter((n) => n.on).length;
+            const allOn = rack.nodes.length > 0 && rackOn === rack.nodes.length;
+            const mixed = rackOn > 0 && rackOn < rack.nodes.length;
+            const isOpen = !!open[rack.id];
+            return (
+              <div key={rack.id}>
+                <div className="maxlps-run-rack">
+                  <button
+                    type="button"
+                    className="maxlps-run-exp"
+                    aria-expanded={isOpen}
+                    aria-label={`${isOpen ? "Collapse" : "Expand"} ${rack.label}`}
+                    onClick={() => setOpen((s) => ({ ...s, [rack.id]: !isOpen }))}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </button>
+                  <input
+                    type="checkbox"
+                    checked={allOn}
+                    ref={(el) => {
+                      if (el) el.indeterminate = mixed;
+                    }}
+                    disabled={!rack.nodes.length}
+                    aria-label={`Run dynamic power on ${rack.label}`}
+                    onChange={() => toggleRack(rack)}
+                  />
+                  <span className="maxlps-run-name" title={rack.label}>
+                    {rack.label}
+                  </span>
+                  <span className="maxlps-run-count">
+                    {rackOn}/{rack.nodes.length}
+                  </span>
+                </div>
+                {isOpen
+                  ? rack.nodes.map((node) => (
+                      <label key={node.id} className="maxlps-run-node">
+                        <input
+                          type="checkbox"
+                          checked={node.on}
+                          aria-label={`Run dynamic power on ${node.hostname || `node ${node.index}`} in ${rack.label}`}
+                          onChange={() => toggleNode(rack, node.id)}
+                        />
+                        <span>{node.hostname || `Node ${node.index}`}</span>
+                      </label>
+                    ))
+                  : null}
+              </div>
+            );
+          })
+        ) : (
+          <p className="maxlps-run-empty">No racks in inventory.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1329,7 +1535,8 @@ function LoopFields({
   locked?: boolean;
   onChange: () => void;
 }) {
-  const [freq, setFreq] = useState(String(intervalS));
+  const intervalMs = intervalMsFromS(intervalS);
+  const [freq, setFreq] = useState(String(intervalMs));
   const [gpuPct, setGpuPct] = useState(String(Math.round(gpuPowerPct)));
   const [capPct, setCapPct] = useState(String(Math.round(desiredCapPct)));
   const [minW, setMinW] = useState(String(Math.round(gpuMinW)));
@@ -1339,7 +1546,7 @@ function LoopFields({
 
   useEffect(() => {
     if (editing.current) return;
-    if (String(intervalS) !== freq) setFreq(String(intervalS));
+    if (String(intervalMs) !== freq) setFreq(String(intervalMs));
     const g = String(Math.round(gpuPowerPct));
     if (g !== gpuPct) setGpuPct(g);
     const c = String(Math.round(desiredCapPct));
@@ -1349,21 +1556,24 @@ function LoopFields({
     const mx = String(Math.round(gpuMaxW));
     if (mx !== maxW) setMaxW(mx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalS, gpuPowerPct, desiredCapPct, gpuMinW, gpuMaxW]);
+  }, [intervalMs, gpuPowerPct, desiredCapPct, gpuMinW, gpuMaxW]);
 
   async function commit(nextFreq = freq, nextGpu = gpuPct, nextCap = capPct, nextMin = minW, nextMax = maxW) {
-    const interval_s = Number(nextFreq);
+    const interval_ms = Math.round(Number(nextFreq));
     const gpu_power_percent = Number(nextGpu);
     const desired_cap_percent = Number(nextCap);
     const gpu_min_w = Number(nextMin);
     const gpu_max_w = Number(nextMax);
-    if (![interval_s, gpu_power_percent, desired_cap_percent, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
-    if (interval_s < 1 || interval_s > 300) return;
+    if (![interval_ms, gpu_power_percent, desired_cap_percent, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
+    if (interval_ms < MIN_INTERVAL_MS || interval_ms > MAX_INTERVAL_MS) {
+      setFreq(String(intervalMs));
+      return;
+    }
     if (gpu_power_percent < 10 || gpu_power_percent > 100) return;
     if (desired_cap_percent < 10 || desired_cap_percent > 100) return;
     if (gpu_min_w < 50 || gpu_max_w > 2000 || gpu_min_w > gpu_max_w) return;
     if (
-      interval_s === intervalS &&
+      interval_ms === intervalMs &&
       gpu_power_percent === Math.round(gpuPowerPct) &&
       desired_cap_percent === Math.round(desiredCapPct) &&
       gpu_min_w === Math.round(gpuMinW) &&
@@ -1372,7 +1582,13 @@ function LoopFields({
       return;
     }
     try {
-      await api.patchClusterPower({ interval_s, gpu_power_percent, desired_cap_percent, gpu_min_w, gpu_max_w });
+      await api.patchClusterPower({
+        interval_s: interval_ms / 1000,
+        gpu_power_percent,
+        desired_cap_percent,
+        gpu_min_w,
+        gpu_max_w,
+      });
       onChange();
     } catch {
       /* keep local fields */
@@ -1412,11 +1628,19 @@ function LoopFields({
     >
       <PolicyField
         label="Frequency"
-        tip="How often posted GPU caps are recalculated. Draw still updates every second; each interval uses average watts from that window."
+        tip="How often live power is read, the GPU cap is calculated, and a new cap is sent, in milliseconds. 1 ms to 300 s. A read that is still running finishes before the next one starts. An unchanged cap is not sent again."
       >
         <span className="lps-policy-pct">
-          <input type="number" min={1} max={300} step={1} value={freq} aria-label="Control loop interval in seconds" {...bind(setFreq)} />
-          s
+          <input
+            type="number"
+            min={MIN_INTERVAL_MS}
+            max={MAX_INTERVAL_MS}
+            step={1}
+            value={freq}
+            aria-label="Control loop interval in milliseconds"
+            {...bind(setFreq)}
+          />
+          <span className="lps-unit">ms</span>
         </span>
       </PolicyField>
       <PolicyField
@@ -1481,6 +1705,7 @@ const GpuRow = memo(function GpuRow({
   wattDelta,
   active,
   tick,
+  off,
   onSelect,
 }: {
   gpu: MaxLpsGpu;
@@ -1488,6 +1713,7 @@ const GpuRow = memo(function GpuRow({
   wattDelta: number;
   active?: boolean;
   tick: number;
+  off?: boolean;
   onSelect: (gpu: MaxLpsGpu) => void;
 }) {
   const tone = barTone(gpu);
@@ -1520,7 +1746,8 @@ const GpuRow = memo(function GpuRow({
       className="maxlps-gpu"
       data-tone={tone}
       data-active={active ? "true" : undefined}
-      aria-label={`${rankLabel(gpu.rank)} ${gpu.serial || "gpu"} ${gpu.hostname || gpu.rack_label}`}
+      data-loop={off ? "off" : undefined}
+      aria-label={`${rankLabel(gpu.rank)} ${gpu.serial || "gpu"} ${gpu.hostname || gpu.rack_label}${off ? " not in the control loop" : ""}`}
       onClick={() => onSelect(gpu)}
     >
       <span className="maxlps-rank" aria-hidden />
@@ -1597,6 +1824,12 @@ function samplesOf(
   return [{ t: Date.now() / 1000, w: watts, cap }];
 }
 
+function capFailPctLabel(pct: number): string {
+  if (!Number.isFinite(pct) || pct <= 0) return "0%";
+  const clamped = Math.min(100, pct);
+  return `${Number.isInteger(clamped) ? clamped : clamped.toFixed(1)}%`;
+}
+
 function GpuInspector({
   gpu,
   curve,
@@ -1622,6 +1855,11 @@ function GpuInspector({
     workload?: string;
     workloadKind?: string;
     pid?: number;
+    capPosts: number;
+    capFails: number;
+    capFailPct: number;
+    capMs: number | null;
+    readMs: number | null;
   }>(() => ({
     watts: gpu.watts,
     cap: gpu.setpoint_w,
@@ -1632,9 +1870,15 @@ function GpuInspector({
     workload: gpu.workload,
     workloadKind: gpu.workload_kind,
     pid: gpu.pid,
+    capPosts: 0,
+    capFails: 0,
+    capFailPct: 0,
+    capMs: null,
+    readMs: null,
   }));
   const editing = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const pullBusy = useRef(false);
 
   useEffect(() => {
     setLive({
@@ -1647,12 +1891,19 @@ function GpuInspector({
       workload: gpu.workload,
       workloadKind: gpu.workload_kind,
       pid: gpu.pid,
+      capPosts: 0,
+      capFails: 0,
+      capFailPct: 0,
+      capMs: null,
+      readMs: null,
     });
   }, [gpu.id]);
 
   useEffect(() => {
     let stop = false;
     const pull = async () => {
+      if (pullBusy.current || stop) return;
+      pullBusy.current = true;
       try {
         const data = await api.maxlpsGpuCurve(gpu.id);
         if (stop) return;
@@ -1666,9 +1917,16 @@ function GpuInspector({
           workload: data.workload,
           workloadKind: data.workload_kind,
           pid: data.pid,
+          capPosts: data.cap_posts ?? 0,
+          capFails: data.cap_fails ?? 0,
+          capFailPct: data.cap_fail_pct ?? 0,
+          capMs: typeof data.cap_ms === "number" ? data.cap_ms : null,
+          readMs: typeof data.read_ms === "number" ? data.read_ms : null,
         });
       } catch {
         /* keep last window */
+      } finally {
+        pullBusy.current = false;
       }
     };
     void pull();
@@ -1739,6 +1997,37 @@ function GpuInspector({
               : ""}
           </dd>
         </div>
+        <div className="maxlps-inspect-span">
+          <dt>Cap posts</dt>
+          <dd data-fail={live.capFails > 0 ? "true" : undefined}>
+            {live.capPosts > 0 ? `${live.capFails} failed · ${capFailPctLabel(live.capFailPct)}` : "none yet"}
+          </dd>
+          <i
+            className="maxlps-cap-fail"
+            data-fail={live.capFails > 0 ? "true" : undefined}
+            aria-hidden
+          >
+            <b style={{ width: `${Math.max(0, Math.min(100, live.capFailPct))}%` }} />
+          </i>
+        </div>
+        <div>
+          <dt>PowerWatts</dt>
+          <dd
+            aria-label="Latest live power response in milliseconds"
+            title="How long the latest Redfish power read took to answer"
+          >
+            {formatResponseMs(live.readMs)}
+          </dd>
+        </div>
+        <div>
+          <dt>PowerLimitWatts</dt>
+          <dd
+            aria-label="Latest PowerLimitWatts response in milliseconds"
+            title="How long the latest PowerLimitWatts SetPoint call took to answer"
+          >
+            {formatResponseMs(live.capMs)}
+          </dd>
+        </div>
       </dl>
       <DetailCurve samples={pts} min={live.min} max={live.max} cap={live.cap} watts={live.watts} />
       <form
@@ -1786,6 +2075,13 @@ function GpuInspector({
       </form>
     </div>
   );
+}
+
+function formatResponseMs(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  const rounded = Math.round(ms);
+  if (rounded < 1) return "<1 ms";
+  return `${rounded} ms`;
 }
 
 function linY(v: number, lo: number, hi: number, h: number, pad: number) {

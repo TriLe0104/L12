@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 function apiOrigin() {
   return (process.env.API_PROXY || process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001").replace(

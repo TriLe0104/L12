@@ -20,13 +20,17 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-Frontend:
+Frontend (uses the portable Node at `%USERPROFILE%\.local\nodejs` — no admin / Program Files install):
 
 ```powershell
 cd frontend
+$env:Path = "$env:USERPROFILE\.local\nodejs;" + $env:Path
+$env:API_PROXY = "http://127.0.0.1:8000"
 npm install
 npm run dev      # http://localhost:3000
 ```
+
+Or from the repo root: `.\start-local.ps1` (starts API + UI).
 
 On a fresh database the seed creates the administrator
 `test@test` / `test`. Sign in with it, then create other accounts from **Users**.
@@ -64,7 +68,9 @@ docker compose -f docker-compose.dev.yml up --build
   Reads GPU watts (Redfish when a PXE hop is connected), writes non-persistent
   setpoints, and clears them on Replay. See `docs/maxlps-redfish-proposal.md`.
 - **Network** — InfiniBand / fabric map: switch ports, peers, and live traffic.
-- **Provision** — PXE hop, node bring-up, and in-browser KVM consoles.
+- **Provision** — multiple tab-session PXE SSH profiles with reachability status;
+  manually added nodes retain their PXE assignment, shown with rack and Argus
+  inventory details, alongside node bring-up and in-browser KVM consoles.
 - **Testing** — catalog of cluster workloads (MLPerf, NCCL, network) to run
   against the racks.
 - **Users and settings** — local accounts and roles; Meow / SCC Mode themes.
