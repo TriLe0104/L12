@@ -19,8 +19,9 @@ from sqlalchemy.engine import Engine
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "purchase_orders": {
         "priority": "VARCHAR(20) NOT NULL DEFAULT 'normal'",
-        # SQLite has no boolean type; `hardware` is a BOOLEAN column holding 0/1
-        "locked": "BOOLEAN NOT NULL DEFAULT 0",
+        # SQLite stores booleans as 0/1 and accepts TRUE/FALSE (3.23+).
+        # Postgres rejects DEFAULT 0/1 on a real boolean column.
+        "locked": "BOOLEAN NOT NULL DEFAULT false",
         # the 3D model slot, alongside `thumbnail_url` rather than replacing it.
         # Plain nullable columns, so no enum-name caveat applies to these three.
         "model_url": "VARCHAR(1000)",
@@ -62,7 +63,7 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "maxlps_nodes": {
         "os_username": "VARCHAR(80)",
         "os_password": "VARCHAR(160)",
-        "loop_on": "BOOLEAN NOT NULL DEFAULT 1",
+        "loop_on": "BOOLEAN NOT NULL DEFAULT true",
     },
     "workloads": {
         "script_text": "TEXT",
