@@ -845,7 +845,7 @@ export function P5Messenger() {
       const got = new Set(cur.map((l) => l.debriefId).filter((id): id is string => Boolean(id)));
       const add = extra.filter((job) => job.debrief_id && !got.has(job.debrief_id));
       if (!add.length) return cur;
-      let next = cur.map((l) => ({ ...l, choices: undefined }));
+      let next: Line[] = cur.map((l) => ({ ...l, choices: undefined }));
       for (const job of add) {
         const minion = job.minion || job.name;
         next = [

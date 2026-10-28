@@ -502,7 +502,14 @@ export default function TestingPage() {
         if (cap?.error) throw new Error(cap.error);
         const file = await api.goldenFile("bom");
         const text = typeof file.content === "string" ? file.content : JSON.stringify(file.content, null, 2);
-        setPreview({ title: file.filename || "bom_golden.json", url: "", text });
+        setPreview({
+          title: file.filename || "bom_golden.json",
+          url: "",
+          mime: "application/json",
+          filename: file.filename || "bom_golden.json",
+          kind: "json",
+          text,
+        });
         return;
       }
       throw new Error("Golden capture is still running. Check the BOM chip in a minute.");
