@@ -2841,9 +2841,12 @@ def _snapshot_locked(
 
 
 def live_rack_draw(rid: str) -> dict[str, Any]:
-    """PowerShelf + GPU Redfish for one inventory rack. Cache only — never blocks on Argus."""
+    """Shelf watts plus whatever the GPU cache already has. Never blocks on Argus.
+
+    Overview and the limiter snapshot call this. Starting the GPU watch here
+    would post PowerLimitWatts. Dynamic Power starts that watch itself.
+    """
     try:
-        _ensure_gpu_watch()
         _ensure_shelf_watch()
     except Exception:
         pass
