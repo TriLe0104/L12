@@ -74,9 +74,6 @@ class LoopState:
         self.gpu_meta: dict[str, tuple[float, float]] = {}
         self.usage_win: dict[str, deque[float]] = {}
         self.sample_t: dict[str, float] = {}
-        # Per-GPU cap hold. Rise snaps to the formula. Fall eases over CAP_RELEASE_TAU_S.
-        self.held_cap: dict[str, float] = {}
-        self.held_cap_t: dict[str, float] = {}
         self.cached_out: dict[str, Any] | None = None
         self.cached_key: tuple[Any, ...] | None = None
         self.cache_t = 0.0
@@ -156,8 +153,6 @@ def apply_loop(
         LOOP.last_caps = None
         LOOP.last_cap_by_id.clear()
         LOOP.last_posted.clear()
-        LOOP.held_cap.clear()
-        LOOP.held_cap_t.clear()
         LOOP.prev_usage.clear()
         LOOP.prev_usage_t.clear()
         LOOP.usage_win.clear()
@@ -343,8 +338,6 @@ def set_control(on: bool) -> None:
         LOOP.force = True
         LOOP.last_caps = None
         LOOP.last_posted.clear()
-        LOOP.held_cap.clear()
-        LOOP.held_cap_t.clear()
         LOOP.last_cap_by_id.clear()
         LOOP.cached_out = None
         return
@@ -352,8 +345,6 @@ def set_control(on: bool) -> None:
         return
     LOOP.control = False
     LOOP.force = False
-    LOOP.held_cap.clear()
-    LOOP.held_cap_t.clear()
     LOOP.cached_out = None
 
 
@@ -1037,104 +1028,6 @@ def _post_caps(
         scale = max_allowable_w / total_cap
         caps = [min(_cap_ceiling(lo, hi), max(lo, c * scale)) for c, (lo, hi) in zip(caps, bounds)]
     return caps, best_p
-
-
-# A falling GPU cap closes this much of the remaining gap each second.
-# 12 s reaches about two-thirds of the way down. A rise is one pass.
-CAP_RELEASE_TAU_S = 12.0
-
-
-def _raw_caps(
-    usages: list[float],
-    desired_p: float,
-    bounds: list[tuple[float, float]],
-) -> list[float]:
-    """Per-GPU formula only. cap = usage / target load, clamped to min and max.
-
-    The cluster budget is not applied here. A later fit scales the hold.
-    """
-    p = max(float(desired_p), 1e-6)
-    caps: list[float] = []
-    for u, (lo, hi) in zip(usages, bounds):
-        ceil = _cap_ceiling(lo, hi)
-        caps.append(min(ceil, max(float(lo), float(u) / p)))
-    return caps
-
-
-def _release_toward(held: float, raw: float, dt: float, tau: float = CAP_RELEASE_TAU_S) -> float:
-    """Snap up to raw. Ease down over tau seconds. dt is seconds since the last hold."""
-    if raw >= held or dt <= 0 or tau <= 0:
-        return raw
-    return raw + (held - raw) * math.exp(-dt / tau)
-
-
-def _fit_budget(
-    caps: list[float],
-    max_allowable_w: float,
-    bounds: list[tuple[float, float]],
-) -> list[float]:
-    """Scale every cap down on this pass when the sum exceeds the GPU budget."""
-    total = sum(caps)
-    if total > max_allowable_w and total > 0:
-        scale = max_allowable_w / total
-        return [
-            min(_cap_ceiling(lo, hi), max(lo, c * scale))
-            for c, (lo, hi) in zip(caps, bounds)
-        ]
-    return list(caps)
-
-
-def _follow_caps(gids: list[str], raws: list[float], now: float) -> list[float]:
-    """Fast attack, slow release. The first sample for a GPU takes raw."""
-    out: list[float] = []
-    for gid, raw in zip(gids, raws):
-        prev = LOOP.held_cap.get(gid)
-        t0 = LOOP.held_cap_t.get(gid)
-        if prev is None or t0 is None:
-            nxt = raw
-        else:
-            nxt = _release_toward(float(prev), raw, max(0.0, now - float(t0)))
-        LOOP.held_cap[gid] = nxt
-        LOOP.held_cap_t[gid] = now
-        out.append(nxt)
-    return out
-
-
-def _remember_held(gids: list[str], caps: list[float], now: float) -> None:
-    """Store the watts that were actually posted, including a budget scale-down."""
-    for gid, cap in zip(gids, caps):
-        LOOP.held_cap[gid] = float(cap)
-        LOOP.held_cap_t[gid] = now
-
-
-def _reported_best_p(usages: list[float], caps: list[float], desired_p: float) -> float:
-    """Target load, raised when the budget scale made usage/cap tighter."""
-    s = sum(usages)
-    c = sum(caps)
-    if s <= 1.0 or c <= 0:
-        return float(desired_p)
-    return max(float(desired_p), s / c)
-
-
-def _shaped_caps(
-    gids: list[str],
-    usages: list[float],
-    desired_p: float,
-    bounds: list[tuple[float, float]],
-    max_allowable_w: float,
-    now: float,
-) -> tuple[list[float], float]:
-    """Formula, then the hold, then an immediate budget fit.
-
-    The fit replaces the hold so the next pass does not ease back into an overrun.
-    """
-    if not usages:
-        return [], float(desired_p)
-    raws = _raw_caps(usages, desired_p, bounds)
-    followed = _follow_caps(gids, raws, now)
-    fitted = _fit_budget(followed, max_allowable_w, bounds)
-    _remember_held(gids, fitted, now)
-    return fitted, _reported_best_p(usages, fitted, desired_p)
 
 
 def _short(name: str) -> str:
@@ -2508,9 +2401,6 @@ def _snapshot_locked(
     release_ids = take_loop_release() if controlling else set()
     if not controlling:
         take_loop_release()
-    for gid in release_ids:
-        LOOP.held_cap.pop(gid, None)
-        LOOP.held_cap_t.pop(gid, None)
     release_patches: list[dict[str, Any]] = []
     if controlling and release_ids and not _CAP_BUSY:
         rel_creds = {ip: (user, pw) for _rid, _idx, ip, user, pw in _gpu_live_targets()}
@@ -2554,14 +2444,12 @@ def _snapshot_locked(
             LOOP.last_step = now
             LOOP.force = False
             LOOP.step_n += 1
-        gids = [r["id"] for r in controlled]
         avgs = [_window_avg(r["id"], float(r["watts"])) for r in controlled]
         bounds = [(float(r["bmc_lo"]), float(r["bmc_hi"])) for r in controlled]
         # Unselected nodes stay in the GPU sum. Cap left holds each of them
         # at its BMC max, then the checked nodes share what remains.
         share_left_w = max(0.0, max_allowable_w - _unselected_hold_w(live_rows, loop_keys))
-        # Rise in one pass. Ease down over CAP_RELEASE_TAU_S. Budget still cuts now.
-        new_caps, best_p = _shaped_caps(gids, avgs, desired_p, bounds, share_left_w, now)
+        new_caps, best_p = _post_caps(avgs, share_left_w, desired_p, bounds)
         LOOP.last_best_p = best_p
         LOOP.last_caps = new_caps
         LOOP.usage_win.clear()
