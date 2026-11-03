@@ -616,7 +616,142 @@ html[data-theme="scc"] .maxlps-loop .lps-field-hint {
 }
 
 html[data-theme="scc"] .maxlps-detail-curve {
-  background: #f1f5f9 !important;
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline {
+  stroke-width: 2;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="gpu"] {
+  stroke: #1d4ed8;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="gpuallow"] {
+  stroke: #b45309;
+  stroke-width: 1.6;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="cap"] {
+  stroke: #1e3a8a;
+  stroke-width: 1.6;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="allow"] {
+  stroke: #475569;
+  stroke-width: 1.4;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="oh"] {
+  stroke: #9a3412;
+}
+
+html[data-theme="scc"] .maxlps-spark polyline[data-k="shelf"] {
+  stroke: #15803d;
+  stroke-width: 2;
+}
+
+html[data-theme="scc"] .maxlps-spark-mini polyline {
+  stroke: #15803d;
+  stroke-width: 1.8;
+}
+
+html[data-theme="scc"] .maxlps-spark-mini line[data-k="min"] {
+  stroke: #b45309;
+}
+
+html[data-theme="scc"] .maxlps-spark-mini line[data-k="max"] {
+  stroke: #334155;
+}
+
+html[data-theme="scc"] .maxlps-spark-mini line[data-k="cap"] {
+  stroke: #1d4ed8;
+  stroke-width: 1.3;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve polyline[data-k="used"] {
+  stroke: #15803d;
+  stroke-width: 2.2;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve polyline[data-k="capline"],
+html[data-theme="scc"] .maxlps-detail-curve line[data-k="cap"] {
+  stroke: #1d4ed8;
+  stroke-width: 1.5;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve polygon[data-k="fill"] {
+  fill: rgba(22, 163, 74, 0.2);
+}
+
+html[data-theme="scc"] .maxlps-detail-curve line[data-k="min"] {
+  stroke: #b45309;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve line[data-k="max"] {
+  stroke: #334155;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve line[data-k="axis"] {
+  stroke: #94a3b8;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve circle[data-k="now"] {
+  fill: #15803d;
+  stroke: #ffffff;
+}
+
+html[data-theme="scc"] .maxlps-detail-curve text {
+  fill: #334155;
+}
+
+html[data-theme="scc"] .ramp-chart svg {
+  background: #f8fafc;
+  border: 1px solid #94a3b8;
+}
+
+html[data-theme="scc"] .ramp-chart line {
+  stroke: #64748b;
+  stroke-width: 1.2;
+}
+
+html[data-theme="scc"] .ramp-chart line[data-k="aim"] {
+  stroke: #0f172a;
+  stroke-width: 1.3;
+}
+
+html[data-theme="scc"] .ramp-chart path {
+  stroke-width: 2.4;
+}
+
+html[data-theme="scc"] .ramp-chart path[data-k="up"] {
+  stroke: #c2410c;
+}
+
+html[data-theme="scc"] .ramp-chart path[data-k="down"] {
+  stroke: #15803d;
+}
+
+html[data-theme="scc"] .ramp-chart text {
+  fill: #1e293b;
+  font-size: 9px;
+}
+
+html[data-theme="scc"] .ramp-row b {
+  color: #c2410c;
+}
+
+html[data-theme="scc"] .ramp-row[data-k="down"] b {
+  color: #15803d;
+}
+
+html[data-theme="scc"] .maxlps-loop .ramp-row input[type="range"] {
+  accent-color: #c2410c;
+}
+
+html[data-theme="scc"] .maxlps-loop .ramp-row[data-k="down"] input[type="range"] {
+  accent-color: #15803d;
 }
 
 html[data-theme="scc"] .maxlps-gpu-cols button {
