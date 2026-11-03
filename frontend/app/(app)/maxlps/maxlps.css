@@ -721,7 +721,11 @@
   background: var(--signal-wash);
 }
 
-.maxlps-shelf[data-hot="true"] .maxlps-shelf-id {
+.maxlps-shelf[data-shelves="up"] .maxlps-shelf-id {
+  color: var(--ink);
+}
+
+.maxlps-shelf[data-shelves="miss"] .maxlps-shelf-id {
   color: var(--stop);
 }
 
@@ -857,7 +861,6 @@
   border-color: var(--stop);
 }
 
-.maxlps-shelf[data-band="down"] .maxlps-shelf-id,
 .maxlps-shelf[data-band="down"] .maxlps-shelf-kw,
 .maxlps-ps[data-down="true"] .maxlps-shelf-id,
 .maxlps-ps[data-down="true"] .maxlps-shelf-kw {

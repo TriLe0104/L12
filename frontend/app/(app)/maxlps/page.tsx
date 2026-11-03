@@ -1333,6 +1333,7 @@ function ShelfRow({
         data-active={active ? "true" : undefined}
         data-hot={rack.hot ? "true" : undefined}
         data-band={band}
+        data-shelves={shelves.length > 0 && shelves.every((s) => !s.down) ? "up" : "miss"}
         data-off={rack.power_state === "off" || !rack.enabled ? "true" : undefined}
       >
         <button
