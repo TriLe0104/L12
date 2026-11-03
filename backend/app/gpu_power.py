@@ -1192,15 +1192,10 @@ def _shape_gpu_cap(
         fallen = _inverse_sigmoid_fall(float(origin), fall_to, now - float(started), LOOP.ramp_down)
         return min(float(origin), max(fall_to, fallen))
     if cap >= rise_to - 2.0:
-        LOOP.cap_ramp[gid] = ("up", now, rise_to, draw)
-        return rise_to
-    if ramp is None or ramp[0] != "up":
         LOOP.cap_ramp[gid] = ("up", now, cap, draw)
-        origin, started = cap, now
-    else:
-        _direction, started, origin, _anchor = ramp
-        LOOP.cap_ramp[gid] = ("up", started, origin, max(anchor, draw))
-    return _log_along(float(origin), rise_to, now - float(started), LOOP.ramp_up)
+        return min(rise_to, cap)
+    LOOP.cap_ramp[gid] = ("up", now, cap, max(anchor, draw))
+    return _log_rise(cap, rise_to, LOOP.ramp_up)
 
 
 def _reported_best_p(usages: list[float], caps: list[float], desired_p: float) -> float:
@@ -2586,7 +2581,12 @@ def _snapshot_locked(
         rec["watts"] = watts
         rec["bmc_lo"] = lo
         rec["bmc_hi"] = hi
-        rec["bmc_sp"] = float(live["setpoint_w"]) if live.get("setpoint_w") is not None else None
+        if live.get("cap_w") is not None:
+            rec["cap_w"] = float(live["cap_w"])
+        elif live.get("setpoint_w") is not None:
+            rec["cap_w"] = float(live["setpoint_w"])
+        if rec.get("cap_w") is not None:
+            rec["bmc_sp"] = float(rec["cap_w"])
         rec["hw_max"] = _release_cap_w(live)
         rec["path"] = live.get("path") or ""
         rec["bmc_ip"] = live.get("bmc_ip") or ""
@@ -2660,9 +2660,8 @@ def _snapshot_locked(
         bounds = [(float(r["bmc_lo"]), float(r["bmc_hi"])) for r in controlled]
         current: list[float] = []
         for rec in controlled:
-            prev = LOOP.last_cap_by_id.get(rec["id"])
-            if prev is None:
-                prev = LOOP.last_posted.get(rec["id"])
+            # The curve steps from the cap the BMC is holding, not the set cap.
+            prev = rec.get("cap_w")
             if prev is None and rec.get("bmc_sp") is not None:
                 prev = float(rec["bmc_sp"])
             if prev is None or float(prev) <= 0:
