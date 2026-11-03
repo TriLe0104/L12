@@ -39,7 +39,11 @@ def _h01(key: str) -> float:
 
 
 GPU_POWER_PERCENT = 0.75
-DESIRED_CAP_PERCENT = 0.80  # usage should sit at this fraction of the posted cap
+DESIRED_CAP_PERCENT = 0.80  # GPU load: draw sits at this fraction of the posted cap
+OPERATION_RANGE = 0.15  # points around GPU load where the cap stays put
+# Downward sigmoid is halfway at this many seconds, soft at both ends.
+_SIGMOID_TAU_S = 6.0
+_SIGMOID_K = 6.0
 DEFAULT_INTERVAL_S = 10.0
 # 1 ms. The page does not stack polls, so a shorter ask waits on the refresh in flight.
 MIN_INTERVAL_S = 0.001
@@ -58,6 +62,7 @@ class LoopState:
         self.interval_s = DEFAULT_INTERVAL_S
         self.gpu_power_percent = GPU_POWER_PERCENT
         self.desired_cap_percent = DESIRED_CAP_PERCENT
+        self.operation_range = OPERATION_RANGE
         self.gpu_min_w = DEFAULT_GPU_MIN_W
         self.gpu_max_w = DEFAULT_GPU_MAX_W
         self.last_step = 0.0
@@ -79,6 +84,8 @@ class LoopState:
         self.cache_t = 0.0
         self.hist_t = 0.0
         self.last_posted: dict[str, float] = {}
+        # gid -> (direction, started_at, origin_w) while draw is outside the operation range
+        self.cap_ramp: dict[str, tuple[str, float, float]] = {}
         self.cap_result: dict[str, dict[str, int]] = {}
         self.control = True
         # When on, PowerWatts and PowerLimitWatts run back to back.
@@ -94,6 +101,7 @@ def apply_loop(
     interval_s: float | None = None,
     gpu_power_percent: float | None = None,
     desired_cap_percent: float | None = None,
+    operation_range: float | None = None,
     gpu_min_w: float | None = None,
     gpu_max_w: float | None = None,
     continuous: bool | None = None,
@@ -130,6 +138,13 @@ def apply_loop(
             changed = True
             reset_caps = True
         LOOP.desired_cap_percent = v
+    if operation_range is not None:
+        raw = float(operation_range)
+        v = raw / 100.0 if raw > 1.0 else raw
+        v = max(0.0, min(0.40, v))
+        if abs(v - LOOP.operation_range) >= 0.0005:
+            changed = True
+        LOOP.operation_range = v
     if gpu_min_w is not None:
         v = max(50.0, min(GPU_TDP_W, float(gpu_min_w)))
         if abs(v - LOOP.gpu_min_w) >= 0.5:
@@ -153,6 +168,7 @@ def apply_loop(
         LOOP.last_caps = None
         LOOP.last_cap_by_id.clear()
         LOOP.last_posted.clear()
+        LOOP.cap_ramp.clear()
         LOOP.prev_usage.clear()
         LOOP.prev_usage_t.clear()
         LOOP.usage_win.clear()
@@ -338,6 +354,7 @@ def set_control(on: bool) -> None:
         LOOP.force = True
         LOOP.last_caps = None
         LOOP.last_posted.clear()
+        LOOP.cap_ramp.clear()
         LOOP.last_cap_by_id.clear()
         LOOP.cached_out = None
         return
@@ -345,6 +362,7 @@ def set_control(on: bool) -> None:
         return
     LOOP.control = False
     LOOP.force = False
+    LOOP.cap_ramp.clear()
     LOOP.cached_out = None
 
 
@@ -1028,6 +1046,129 @@ def _post_caps(
         scale = max_allowable_w / total_cap
         caps = [min(_cap_ceiling(lo, hi), max(lo, c * scale)) for c, (lo, hi) in zip(caps, bounds)]
     return caps, best_p
+
+
+def _op_band(load: float, span: float) -> tuple[float, float]:
+    """Inclusive draw/cap band around GPU load. Span is the operation range."""
+    center = min(0.95, max(0.05, float(load)))
+    half = min(0.40, max(0.0, float(span)))
+    return max(0.05, center - half), min(0.95, center + half)
+
+
+def _log_rise(cap: float, dest: float) -> float:
+    """Logarithmic step up. A wide gap takes a large step, then the step shrinks."""
+    gap = dest - cap
+    if gap <= 0:
+        return cap
+    frac = math.log1p(gap / max(cap, 1.0))
+    frac = frac / (1.0 + frac)
+    return cap + gap * frac
+
+
+def _inverse_sigmoid_fall(origin: float, dest: float, elapsed: float) -> float:
+    """Inverse sigmoid down. Soft at the start, steep in the middle, soft at the floor.
+
+    Halfway at _SIGMOID_TAU_S. elapsed is seconds since draw left the range.
+    """
+    if dest >= origin:
+        return dest
+    x = max(0.0, float(elapsed)) / _SIGMOID_TAU_S
+    s = 1.0 / (1.0 + math.exp(-_SIGMOID_K * (x - 1.0)))
+    s0 = 1.0 / (1.0 + math.exp(_SIGMOID_K))
+    sn = (s - s0) / (1.0 - s0)
+    sn = min(1.0, max(0.0, sn))
+    return origin + (dest - origin) * sn
+
+
+def _fit_budget(
+    caps: list[float],
+    max_allowable_w: float,
+    bounds: list[tuple[float, float]],
+) -> list[float]:
+    """Scale every cap down on this pass when the sum exceeds the GPU budget."""
+    total = sum(caps)
+    if total > max_allowable_w and total > 0:
+        scale = max_allowable_w / total
+        return [
+            min(_cap_ceiling(lo, hi), max(lo, c * scale))
+            for c, (lo, hi) in zip(caps, bounds)
+        ]
+    return list(caps)
+
+
+def _shape_gpu_cap(
+    gid: str,
+    draw: float,
+    cap: float,
+    load: float,
+    span: float,
+    lo: float,
+    hi: float,
+    now: float,
+) -> float:
+    """Hold the cap inside the operation range. Rise on a log curve, fall on an inverse sigmoid."""
+    ceiling = _cap_ceiling(lo, hi)
+    cap = min(ceiling, max(float(lo), float(cap)))
+    if cap <= 1.0:
+        nxt = min(ceiling, max(float(lo), float(draw) / max(load, 0.05)))
+        LOOP.cap_ramp.pop(gid, None)
+        return nxt
+    ratio = float(draw) / cap
+    low, high = _op_band(load, span)
+    if low <= ratio <= high:
+        LOOP.cap_ramp.pop(gid, None)
+        return cap
+    dest = min(ceiling, max(float(lo), float(draw) / max(load, 0.05)))
+    if ratio > high:
+        if dest <= cap:
+            LOOP.cap_ramp.pop(gid, None)
+            return cap
+        LOOP.cap_ramp[gid] = ("up", now, cap)
+        return min(ceiling, _log_rise(cap, dest))
+    if dest >= cap:
+        LOOP.cap_ramp.pop(gid, None)
+        return cap
+    ramp = LOOP.cap_ramp.get(gid)
+    if ramp is None or ramp[0] != "down":
+        LOOP.cap_ramp[gid] = ("down", now, cap)
+        origin, started = cap, now
+    else:
+        _direction, started, origin = ramp
+    fallen = _inverse_sigmoid_fall(float(origin), dest, now - float(started))
+    return min(float(origin), max(dest, fallen))
+
+
+def _reported_best_p(usages: list[float], caps: list[float], desired_p: float) -> float:
+    """GPU load, raised when the budget scale made draw/cap tighter."""
+    s = sum(usages)
+    c = sum(caps)
+    if s <= 1.0 or c <= 0:
+        return float(desired_p)
+    return max(float(desired_p), s / c)
+
+
+def _range_caps(
+    gids: list[str],
+    draws: list[float],
+    caps: list[float],
+    bounds: list[tuple[float, float]],
+    load: float,
+    span: float,
+    max_allowable_w: float,
+    now: float,
+) -> tuple[list[float], float]:
+    """Per-GPU curve, then an immediate budget fit."""
+    if not draws:
+        return [], float(load)
+    shaped = [
+        _shape_gpu_cap(gid, draw, cap, load, span, lo, hi, now)
+        for gid, draw, cap, (lo, hi) in zip(gids, draws, caps, bounds)
+    ]
+    fitted = _fit_budget(shaped, max_allowable_w, bounds)
+    for gid, before, after in zip(gids, shaped, fitted):
+        if after < before - 0.5:
+            LOOP.cap_ramp.pop(gid, None)
+    return fitted, _reported_best_p(draws, fitted, load)
 
 
 def _short(name: str) -> str:
@@ -2286,6 +2427,7 @@ def _snapshot_locked(
         len(rows),
         round(LOOP.gpu_power_percent, 4),
         round(LOOP.desired_cap_percent, 4),
+        round(LOOP.operation_range, 4),
         round(LOOP.gpu_min_w, 1),
         round(LOOP.gpu_max_w, 1),
         round(LOOP.interval_s, 3),
@@ -2401,6 +2543,8 @@ def _snapshot_locked(
     release_ids = take_loop_release() if controlling else set()
     if not controlling:
         take_loop_release()
+    for gid in release_ids:
+        LOOP.cap_ramp.pop(gid, None)
     release_patches: list[dict[str, Any]] = []
     if controlling and release_ids and not _CAP_BUSY:
         rel_creds = {ip: (user, pw) for _rid, _idx, ip, user, pw in _gpu_live_targets()}
@@ -2444,12 +2588,32 @@ def _snapshot_locked(
             LOOP.last_step = now
             LOOP.force = False
             LOOP.step_n += 1
-        avgs = [_window_avg(r["id"], float(r["watts"])) for r in controlled]
+        gids = [r["id"] for r in controlled]
+        draws = [float(r["watts"]) for r in controlled]
         bounds = [(float(r["bmc_lo"]), float(r["bmc_hi"])) for r in controlled]
+        current: list[float] = []
+        for rec in controlled:
+            prev = LOOP.last_cap_by_id.get(rec["id"])
+            if prev is None:
+                prev = LOOP.last_posted.get(rec["id"])
+            if prev is None and rec.get("bmc_sp") is not None:
+                prev = float(rec["bmc_sp"])
+            if prev is None or float(prev) <= 0:
+                prev = float(rec["watts"]) / max(desired_p, 0.05)
+            current.append(float(prev))
         # Unselected nodes stay in the GPU sum. Cap left holds each of them
         # at its BMC max, then the checked nodes share what remains.
         share_left_w = max(0.0, max_allowable_w - _unselected_hold_w(live_rows, loop_keys))
-        new_caps, best_p = _post_caps(avgs, share_left_w, desired_p, bounds)
+        new_caps, best_p = _range_caps(
+            gids,
+            draws,
+            current,
+            bounds,
+            desired_p,
+            LOOP.operation_range,
+            share_left_w,
+            now,
+        )
         LOOP.last_best_p = best_p
         LOOP.last_caps = new_caps
         LOOP.usage_win.clear()
@@ -2805,6 +2969,7 @@ def _snapshot_locked(
             "budget_grace": round(grace * 100.0, 1),
             "gpu_power_percent": round(gpu_frac * 100.0, 1),
             "desired_cap_percent": round(desired_p * 100.0, 1),
+            "operation_range": round(LOOP.operation_range * 100.0, 1),
             "gpu_min_w": round(LOOP.gpu_min_w, 1),
             "gpu_max_w": round(LOOP.gpu_max_w, 1),
             "max_allowable_w": round(max_allowable_w, 0),

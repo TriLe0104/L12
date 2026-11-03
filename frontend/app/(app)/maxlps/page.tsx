@@ -805,6 +805,7 @@ export default function MaxLpsPage() {
                 continuous={Boolean(view?.algo?.continuous)}
                 gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 desiredCapPct={view?.algo?.desired_cap_percent ?? 80}
+                operationRangePct={view?.algo?.operation_range ?? 15}
                 gpuMinW={view?.algo?.gpu_min_w ?? 200}
                 gpuMaxW={view?.algo?.gpu_max_w ?? 1200}
                 locked={locked}
@@ -1544,6 +1545,7 @@ function LoopFields({
   continuous,
   gpuPowerPct,
   desiredCapPct,
+  operationRangePct,
   gpuMinW,
   gpuMaxW,
   locked,
@@ -1553,6 +1555,7 @@ function LoopFields({
   continuous: boolean;
   gpuPowerPct: number;
   desiredCapPct: number;
+  operationRangePct: number;
   gpuMinW: number;
   gpuMaxW: number;
   locked?: boolean;
@@ -1562,6 +1565,7 @@ function LoopFields({
   const [freq, setFreq] = useState(String(intervalMs));
   const [gpuPct, setGpuPct] = useState(String(Math.round(gpuPowerPct)));
   const [capPct, setCapPct] = useState(String(Math.round(desiredCapPct)));
+  const [rangePct, setRangePct] = useState(String(Math.round(operationRangePct)));
   const [minW, setMinW] = useState(String(Math.round(gpuMinW)));
   const [maxW, setMaxW] = useState(String(Math.round(gpuMaxW)));
   const editing = useRef(false);
@@ -1574,31 +1578,39 @@ function LoopFields({
     if (g !== gpuPct) setGpuPct(g);
     const c = String(Math.round(desiredCapPct));
     if (c !== capPct) setCapPct(c);
+    const rg = String(Math.round(operationRangePct));
+    if (rg !== rangePct) setRangePct(rg);
     const mn = String(Math.round(gpuMinW));
     if (mn !== minW) setMinW(mn);
     const mx = String(Math.round(gpuMaxW));
     if (mx !== maxW) setMaxW(mx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, gpuPowerPct, desiredCapPct, gpuMinW, gpuMaxW]);
+  }, [intervalMs, gpuPowerPct, desiredCapPct, operationRangePct, gpuMinW, gpuMaxW]);
 
-  async function commit(nextFreq = freq, nextGpu = gpuPct, nextCap = capPct, nextMin = minW, nextMax = maxW) {
+  async function commit(nextFreq = freq, nextGpu = gpuPct, nextCap = capPct, nextRange = rangePct, nextMin = minW, nextMax = maxW) {
     const interval_ms = Math.round(Number(nextFreq));
     const gpu_power_percent = Number(nextGpu);
     const desired_cap_percent = Number(nextCap);
+    const operation_range = Math.round(Number(nextRange));
     const gpu_min_w = Number(nextMin);
     const gpu_max_w = Number(nextMax);
-    if (![interval_ms, gpu_power_percent, desired_cap_percent, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
+    if (![interval_ms, gpu_power_percent, desired_cap_percent, operation_range, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
     if (interval_ms < MIN_INTERVAL_MS || interval_ms > MAX_INTERVAL_MS) {
       setFreq(String(intervalMs));
       return;
     }
     if (gpu_power_percent < 10 || gpu_power_percent > 100) return;
     if (desired_cap_percent < 10 || desired_cap_percent > 100) return;
+    if (operation_range < 0 || operation_range > 40) {
+      setRangePct(String(Math.round(operationRangePct)));
+      return;
+    }
     if (gpu_min_w < 50 || gpu_max_w > 2000 || gpu_min_w > gpu_max_w) return;
     if (
       interval_ms === intervalMs &&
       gpu_power_percent === Math.round(gpuPowerPct) &&
       desired_cap_percent === Math.round(desiredCapPct) &&
+      operation_range === Math.round(operationRangePct) &&
       gpu_min_w === Math.round(gpuMinW) &&
       gpu_max_w === Math.round(gpuMaxW)
     ) {
@@ -1609,6 +1621,7 @@ function LoopFields({
         interval_s: interval_ms / 1000,
         gpu_power_percent,
         desired_cap_percent,
+        operation_range,
         gpu_min_w,
         gpu_max_w,
       });
@@ -1706,8 +1719,8 @@ function LoopFields({
         </span>
       </PolicyField>
       <PolicyField
-        label="Desired cap"
-        tip="Target load versus the posted cap. The cap stays above average draw and never reaches the GPU max you set."
+        label="GPU Load %"
+        tip="Percent of the posted cap the GPUs should hold. Outside the operation range, the cap moves toward GPU draw ÷ GPU load."
       >
         <span className="lps-policy-pct">
           <input
@@ -1716,8 +1729,25 @@ function LoopFields({
             max={100}
             step={1}
             value={capPct}
-            aria-label="Desired usage as a percent of posted GPU cap"
+            aria-label="GPU load as a percent of the posted cap"
             {...bind(setCapPct)}
+          />
+          %
+        </span>
+      </PolicyField>
+      <PolicyField
+        label="Operation Range"
+        tip="Points around GPU Load % where the cap stays put. 15 at 50% holds the cap from 35% to 65% of the cap. Above the range the cap rises on a log curve. Below the range the cap falls on an inverse sigmoid."
+      >
+        <span className="lps-policy-pct">
+          <input
+            type="number"
+            min={0}
+            max={40}
+            step={1}
+            value={rangePct}
+            aria-label="Operation range in percentage points around GPU load"
+            {...bind(setRangePct)}
           />
           %
         </span>

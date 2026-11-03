@@ -680,6 +680,7 @@ class PowerPatch(BaseModel):
     interval_s: float | None = Field(default=None, ge=0.001, le=300)
     gpu_power_percent: float | None = Field(default=None, ge=10, le=100)
     desired_cap_percent: float | None = Field(default=None, ge=10, le=100)
+    operation_range: float | None = Field(default=None, ge=0, le=40)
     gpu_min_w: float | None = Field(default=None, ge=50, le=2000)
     gpu_max_w: float | None = Field(default=None, ge=50, le=2000)
     continuous: bool | None = None
@@ -856,6 +857,7 @@ def patch_power_limiter(
         interval_s=payload.interval_s,
         gpu_power_percent=payload.gpu_power_percent,
         desired_cap_percent=payload.desired_cap_percent,
+        operation_range=None if payload.operation_range is None else payload.operation_range / 100.0,
         gpu_min_w=payload.gpu_min_w,
         gpu_max_w=payload.gpu_max_w,
         continuous=payload.continuous,
@@ -867,6 +869,7 @@ def patch_power_limiter(
         or payload.interval_s is not None
         or payload.gpu_power_percent is not None
         or payload.desired_cap_percent is not None
+        or payload.operation_range is not None
         or payload.gpu_min_w is not None
         or payload.gpu_max_w is not None
     ):

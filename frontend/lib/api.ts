@@ -679,6 +679,7 @@ export const api = {
     interval_s?: number;
     gpu_power_percent?: number;
     desired_cap_percent?: number;
+    operation_range?: number;
     gpu_min_w?: number;
     gpu_max_w?: number;
     continuous?: boolean;

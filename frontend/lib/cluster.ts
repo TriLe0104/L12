@@ -294,6 +294,7 @@ export interface MaxLpsView {
     budget_grace: number;
     gpu_power_percent: number;
     desired_cap_percent: number;
+    operation_range?: number;
     gpu_min_w?: number;
     gpu_max_w?: number;
     max_allowable_w: number;
