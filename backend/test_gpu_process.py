@@ -25,6 +25,8 @@ def test_smi_dump_picks_the_busiest_process() -> None:
     assert top["process"] == "nccl-tests"
     assert "all_reduce_perf" in top["workload"]
     assert top["workload"].endswith("+1")
+    assert [row["pid"] for row in top["processes"]] == [43211, 43210]
+    assert top["processes"][1]["process"] == "python3"
     other = gpu_power._proc_row(rows, ok=True, gpu_n=2)
     assert other["pid"] == 7
     assert other["process"] == "python"

@@ -1280,6 +1280,48 @@
   margin: 0.55rem 0 0;
 }
 
+.maxlps-procs {
+  margin-top: 0.2rem;
+  overflow: auto;
+  border: 1px solid var(--hair);
+  background: var(--panel);
+}
+
+.maxlps-procs[data-scroll="true"] {
+  max-height: 7.8rem;
+}
+
+.maxlps-procs table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.62rem;
+}
+
+.maxlps-procs th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  padding: 0.28rem 0.4rem;
+  text-align: left;
+  font-size: 0.46rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--steel);
+}
+
+.maxlps-procs td {
+  padding: 0.28rem 0.4rem;
+  border-top: 1px solid var(--hair);
+  font-variant-numeric: tabular-nums;
+}
+
+.maxlps-procs td:nth-child(3) {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .maxlps-detail dt {
   font-size: 0.48rem;
   letter-spacing: 0.1em;

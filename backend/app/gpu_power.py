@@ -612,8 +612,8 @@ _PROC_BUSY: set[str] = set()
 _PROC_CACHE: dict[str, tuple[float, dict[int, dict[str, Any]], bool]] = {}
 _OS_LOGIN_LOCK = threading.Lock()
 _OS_LOGIN: dict[str, tuple[float, dict[str, str] | None]] = {}
-_UNKNOWN_PROC = {"process": "—", "workload": "—", "workload_kind": "idle", "pid": 0}
-_IDLE_PROC = {"process": "idle", "workload": "—", "workload_kind": "idle", "pid": 0}
+_UNKNOWN_PROC = {"process": "—", "workload": "—", "workload_kind": "idle", "pid": 0, "processes": []}
+_IDLE_PROC = {"process": "idle", "workload": "—", "workload_kind": "idle", "pid": 0, "processes": []}
 
 # One shot on the node OS. The first nvidia-smi must succeed; an empty app
 # list is a real idle GPU, not a failed read.
@@ -701,16 +701,26 @@ def _procs_from_smi(raw: str) -> tuple[dict[int, dict[str, Any]], bool]:
     out: dict[int, dict[str, Any]] = {}
     for idx, bucket in grouped.items():
         bucket.sort(key=lambda row: row[0], reverse=True)
-        _mem, pid, base, cmd = bucket[0]
-        extra = len(bucket) - 1
-        workload = cmd or base or "—"
+        apps = [
+            {
+                "pid": pid,
+                "process": base or "—",
+                "workload": (cmd or base or "—")[:160],
+                "mem_mib": mem,
+            }
+            for mem, pid, base, cmd in bucket
+        ]
+        top = apps[0]
+        extra = len(apps) - 1
+        workload = top["workload"]
         if extra:
             workload = f"{workload} +{extra}"[:160]
         out[idx] = {
-            "process": base or "—",
+            "process": top["process"],
             "workload": workload,
-            "workload_kind": "idle",
-            "pid": pid,
+            "workload_kind": "job",
+            "pid": top["pid"],
+            "processes": apps,
         }
     return out, True
 
@@ -857,7 +867,7 @@ def _gpu_process(gpu_id: str) -> dict[str, Any]:
         ok = bool(hit and hit[2])
         tried = hit is not None
     if tried and not ok:
-        return {"process": "—", "workload": "OS did not answer", "workload_kind": "idle", "pid": 0}
+        return {"process": "—", "workload": "OS did not answer", "workload_kind": "idle", "pid": 0, "processes": []}
     return _proc_row(rows, ok=ok, gpu_n=gpu_n)
 
 

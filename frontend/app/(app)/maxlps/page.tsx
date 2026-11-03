@@ -2088,6 +2088,7 @@ function GpuInspector({
     workload?: string;
     workloadKind?: string;
     pid?: number;
+    processes: { pid: number; process: string; workload: string; mem_mib: number }[];
     capPosts: number;
     capFails: number;
     capFailPct: number;
@@ -2103,6 +2104,7 @@ function GpuInspector({
     workload: gpu.workload,
     workloadKind: gpu.workload_kind,
     pid: gpu.pid,
+    processes: [],
     capPosts: 0,
     capFails: 0,
     capFailPct: 0,
@@ -2124,6 +2126,7 @@ function GpuInspector({
       workload: gpu.workload,
       workloadKind: gpu.workload_kind,
       pid: gpu.pid,
+      processes: [],
       capPosts: 0,
       capFails: 0,
       capFailPct: 0,
@@ -2150,6 +2153,7 @@ function GpuInspector({
           workload: data.workload,
           workloadKind: data.workload_kind,
           pid: data.pid,
+          processes: data.processes ?? [],
           capPosts: data.cap_posts ?? 0,
           capFails: data.cap_fails ?? 0,
           capFailPct: data.cap_fail_pct ?? 0,
@@ -2213,22 +2217,36 @@ function GpuInspector({
         {off !== "hold" ? ` · ${off}` : ""} · cap {formatW(live.cap)}
       </p>
       <dl className="maxlps-detail">
-        <div>
-          <dt>Process</dt>
-          <dd>{live.process ?? gpu.process ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>PID</dt>
-          <dd>{live.pid || gpu.pid ? live.pid || gpu.pid : "—"}</dd>
-        </div>
         <div className="maxlps-inspect-span">
-          <dt>Workload</dt>
-          <dd title={live.workload && live.workload !== "—" ? live.workload : undefined}>
-            {live.workload ?? gpu.workload ?? "—"}
-            {(live.workloadKind ?? gpu.workload_kind) && (live.workloadKind ?? gpu.workload_kind) !== "idle"
-              ? ` · ${live.workloadKind ?? gpu.workload_kind}`
-              : ""}
-          </dd>
+          <dt>Processes</dt>
+          <div className="maxlps-procs" data-scroll={(live.processes?.length ?? 0) > 4 ? "true" : undefined}>
+            <table>
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>Process</th>
+                  <th>Workload</th>
+                  <th>MiB</th>
+                </tr>
+              </thead>
+              <tbody>
+                {live.processes?.length ? (
+                  live.processes.map((row) => (
+                    <tr key={row.pid}>
+                      <td>{row.pid || "—"}</td>
+                      <td>{row.process}</td>
+                      <td title={row.workload}>{row.workload}</td>
+                      <td>{row.mem_mib ? row.mem_mib.toLocaleString() : "—"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4}>{live.process ?? gpu.process ?? "idle"}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
         <div className="maxlps-inspect-span">
           <dt>Cap posts</dt>

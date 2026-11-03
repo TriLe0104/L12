@@ -595,6 +595,7 @@ export const api = {
       workload?: string;
       workload_kind?: string;
       pid?: number;
+      processes?: { pid: number; process: string; workload: string; mem_mib: number }[];
       curve: { t: number; w: number; cap: number; min?: number; max?: number }[];
       cap_posts?: number;
       cap_fails?: number;
