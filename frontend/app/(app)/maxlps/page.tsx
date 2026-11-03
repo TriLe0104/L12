@@ -1565,8 +1565,8 @@ function rampPath(values: number[], w: number, h: number, pad: number, yMin: num
     .join(" ");
 }
 
-function openFraction(upPct: number): number {
-  return Math.min(1, Math.max(0.05, upPct / 100));
+function approachSpread(scale: number, rangePct: number): number {
+  return Math.min(0.42, 0.16 * Math.max(0.25, scale) + Math.max(0, rangePct) / 500);
 }
 
 function riseSeries(scale: number, start: number, dest: number): number[] {
@@ -1628,22 +1628,21 @@ function RampChart({
   const w = 280;
   const h = 96;
   const pad = 10;
-  const open = openFraction(upPct);
-  const floor = Math.min(open * 0.9, Math.max(0.18, 0.45 - rangePct / 200));
-  const up = rampPath(riseSeries(upPct / 100, 0.12, open), w, h, pad, 0, 1);
-  const down = rampPath(fallSeries(downPct / 100, open, floor), w, h, pad, 0, 1);
-  const openY = pad + (1 - open) * (h - pad * 2);
+  const mid = 0.5;
+  const upScale = upPct / 100;
+  const downScale = downPct / 100;
+  const up = rampPath(riseSeries(upScale, mid - approachSpread(upScale, rangePct), mid), w, h, pad, 0, 1);
+  const down = rampPath(fallSeries(downScale, mid + approachSpread(downScale, rangePct), mid), w, h, pad, 0, 1);
+  const midY = pad + (1 - mid) * (h - pad * 2);
   return (
     <div className="ramp-chart">
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 36 seconds">
         <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} />
         <line x1={pad} y1={pad} x2={pad} y2={h - pad} />
-        <line x1={pad} y1={openY} x2={w - pad} y2={openY} data-k="aim" />
+        <line x1={pad} y1={midY} x2={w - pad} y2={midY} data-k="aim" />
         <path d={up} data-k="up" />
         <path d={down} data-k="down" />
-        <text x={w - pad} y={Math.max(pad + 8, openY - 3)} textAnchor="end">
-          {open >= 0.99 ? "GPU max" : `${Math.round(open * 100)}% of max`}
-        </text>
+        <text x={w - pad} y={Math.max(pad + 8, midY - 3)} textAnchor="end">current power</text>
         <text x={w - pad} y={h - 1} textAnchor="end">36 s</text>
       </svg>
       <label className="ramp-row">
