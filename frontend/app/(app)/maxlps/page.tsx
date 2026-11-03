@@ -1311,15 +1311,20 @@ function ShelfRow({
   const shelves = rack.shelves ?? [];
   const scale = Math.max(maxKw, 1);
   const allDown = shelves.length > 0 && shelves.every((s) => s.down);
+  const allUp = shelves.length > 0 && shelves.every((s) => !s.down);
   const pct = allDown ? 0 : Math.min(100, (rack.shelf_kw / scale) * 100);
   const minPct = Math.min(100, (Math.max(0, minKw) / scale) * 100);
+  // Every shelf up stays green. Under the rack minimum is gold only when a
+  // shelf is down. Over the max stays red.
   const band = allDown
     ? "down"
-    : rack.shelf_kw > 0 && rack.shelf_kw < minKw - 0.05
-      ? "under"
-      : rack.shelf_kw > maxKw + 0.05
-        ? "over"
-        : "ok";
+    : rack.shelf_kw > maxKw + 0.05
+      ? "over"
+      : allUp
+        ? "ok"
+        : rack.shelf_kw > 0 && rack.shelf_kw < minKw - 0.05
+          ? "under"
+          : "ok";
   const shelfCap = Math.max(...shelves.map((s) => s.kw), 0.1);
   return (
     <div className="maxlps-rack-block" data-open={open ? "true" : undefined}>
