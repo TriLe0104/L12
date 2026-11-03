@@ -599,7 +599,7 @@ export function PowerPolicyFields({
       </PolicyField>
       {gpuPowerPct == null ? null : (
         <PolicyField
-          label="GPU power"
+          label="GPU Power Budget"
           tip="Share of the power left after the racks that GPUs can use. GPU budget = (total power × threshold − live rack power) × GPU power."
         >
           <span className="lps-policy-pct">
@@ -609,7 +609,7 @@ export function PowerPolicyFields({
               max={100}
               step={1}
               value={gpuPct}
-              aria-label="GPU power percent of total power times threshold"
+              aria-label="GPU power budget as a percent of total power times threshold"
               {...bind(setGpuPct)}
             />
             %
