@@ -14,21 +14,26 @@ def test_band_is_gpu_load_plus_or_minus_the_operation_range() -> None:
     assert gpu_power._op_band(0.80, 0.15) == (0.65, 0.95)
 
 
-def test_idle_cap_opens_past_double_and_ramp_up_raises_it() -> None:
+def test_idle_cap_climbs_the_log_curve_toward_gpu_max() -> None:
     _reset()
-    # 50% load, 5 point range, 1× → settle at draw / 0.45, past 2×.
-    opened = gpu_power._shape_gpu_cap("g1", 230.0, 416.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
-    assert opened > 460.0
-    gpu_power.LOOP.ramp_up = 2.0
-    higher = gpu_power._shape_gpu_cap("g1", 230.0, opened, 0.50, 0.05, 50.0, 1400.0, 11.0)
-    assert higher > opened
+    first = gpu_power._shape_gpu_cap("g1", 230.0, 416.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
+    second = gpu_power._shape_gpu_cap("g1", 230.0, first, 0.50, 0.05, 50.0, 1400.0, 10.7)
+    third = gpu_power._shape_gpu_cap("g1", 230.0, second, 0.50, 0.05, 50.0, 1400.0, 11.4)
+    assert 416.0 < first < second < third < 1400.0
+    assert first - 416.0 > second - first
+    assert first > 700.0
 
 
-def test_cap_holds_once_it_reaches_the_open_target() -> None:
+def test_lower_ramp_up_stops_short_of_the_ceiling() -> None:
     _reset()
-    cap = gpu_power._shape_gpu_cap("g1", 500.0, 1000.0, 0.50, 0.0, 50.0, 1400.0, 10.0)
-    assert cap == 1000.0
-    assert "g1" not in gpu_power.LOOP.cap_ramp
+    gpu_power.LOOP.ramp_up = 0.5
+    cap = 416.0
+    t = 10.0
+    for _ in range(40):
+        cap = gpu_power._shape_gpu_cap("g1", 230.0, cap, 0.50, 0.05, 50.0, 1400.0, t)
+        t += 0.7
+    assert cap < 1100.0
+    assert cap > 800.0
 
 
 def test_ramp_scale_speeds_the_rise_and_the_fall() -> None:
@@ -65,14 +70,15 @@ def test_fall_is_an_inverse_sigmoid_and_starts_soft() -> None:
     assert late >= dest
 
 
-def test_a_dip_holds_then_softens_toward_gpu_load() -> None:
+def test_a_drop_in_draw_follows_the_sigmoid() -> None:
     _reset()
     bounds = (50.0, 1400.0)
-    held = gpu_power._shape_gpu_cap("g1", 200.0, 1000.0, 0.50, 0.15, *bounds, 100.0)
-    assert held == 1000.0
-    soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 100.7)
+    gpu_power._shape_gpu_cap("g1", 800.0, 1000.0, 0.50, 0.15, *bounds, 100.0)
+    held = gpu_power._shape_gpu_cap("g1", 200.0, 1000.0, 0.50, 0.15, *bounds, 101.0)
+    assert abs(held - 1000.0) < 1.0
+    soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 101.7)
     assert 1000.0 - soft < 2.0
-    mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 106.0)
+    mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 107.0)
     dest = 200.0 / 0.35
     assert abs(mid - (1000.0 + (dest - 1000.0) * 0.5)) < 8.0
 

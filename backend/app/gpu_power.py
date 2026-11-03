@@ -90,8 +90,8 @@ class LoopState:
         self.cache_t = 0.0
         self.hist_t = 0.0
         self.last_posted: dict[str, float] = {}
-        # gid -> (direction, started_at, origin_w) while draw is outside the operation range
-        self.cap_ramp: dict[str, tuple[str, float, float]] = {}
+        # gid -> (direction, started_at, origin_w, anchor_draw)
+        self.cap_ramp: dict[str, tuple[str, float, float, float]] = {}
         self.cap_result: dict[str, dict[str, int]] = {}
         self.control = True
         # When on, PowerWatts and PowerLimitWatts run back to back.
@@ -1126,16 +1126,36 @@ def _fit_budget(
     return list(caps)
 
 
-def _open_ratio(load: float, span: float, scale_up: float, scale_down: float) -> float:
-    """Draw/cap the loop settles on.
+# Same step the ramp chart draws. One log step each 0.7 s, replayed from the origin.
+_PASS_S = 0.7
 
-    The wide side of the operation range is already under GPU load, so 50% with
-    a 5 point range settles past 2× draw. Ramp up opens that further. Ramp down
-    pulls it back.
-    """
-    base = max(0.05, float(load) - max(0.0, float(span)))
-    ratio = base * _ramp_scale(scale_down) / _ramp_scale(scale_up)
-    return min(0.95, max(0.05, ratio))
+
+def _rise_target(draw: float, load: float, scale_up: float, lo: float, hi: float) -> float:
+    """Where the log climb ends. 1× reaches the GPU ceiling. Lower stops partway."""
+    ceiling = _cap_ceiling(lo, hi)
+    base = min(ceiling, max(float(lo), float(draw) / max(float(load), 0.05)))
+    frac = min(1.0, _ramp_scale(scale_up))
+    return min(ceiling, max(float(lo), base + (ceiling - base) * frac))
+
+
+def _fall_target(draw: float, load: float, span: float, lo: float, hi: float) -> float:
+    """Where the sigmoid settles after draw falls: the wide side of GPU load, past 2×."""
+    ceiling = _cap_ceiling(lo, hi)
+    ratio = max(0.05, float(load) - max(0.0, float(span)))
+    return min(ceiling, max(float(lo), float(draw) / ratio))
+
+
+def _log_along(origin: float, dest: float, elapsed: float, scale: float) -> float:
+    """Cap position on the log curve, replayed from the watts where the rise started."""
+    if dest <= origin:
+        return origin
+    passes = max(1, int(max(0.0, float(elapsed)) / _PASS_S + 1e-6) + 1)
+    cap = float(origin)
+    for _ in range(min(passes, 80)):
+        cap = _log_rise(cap, dest, scale)
+        if cap >= dest - 0.5:
+            return dest
+    return min(dest, cap)
 
 
 def _shape_gpu_cap(
@@ -1148,33 +1168,37 @@ def _shape_gpu_cap(
     hi: float,
     now: float,
 ) -> float:
-    """Settle on the scaled open cap. Rise on a log curve, fall on an inverse sigmoid."""
+    """Follow the ramp chart. Log up toward the GPU ceiling. Sigmoid down only after draw falls."""
     ceiling = _cap_ceiling(lo, hi)
     cap = min(ceiling, max(float(lo), float(cap)))
-    if cap <= 1.0 or float(draw) <= 0:
-        nxt = min(ceiling, max(float(lo), float(draw) / max(load, 0.05)))
+    draw = float(draw)
+    if cap <= 1.0 or draw <= 0:
+        nxt = min(ceiling, max(float(lo), draw / max(load, 0.05)))
         LOOP.cap_ramp.pop(gid, None)
         return nxt
-    dest = min(ceiling, max(float(lo), float(draw) / _open_ratio(load, span, LOOP.ramp_up, LOOP.ramp_down)))
-    if abs(cap - dest) <= max(2.0, dest * 0.02):
-        LOOP.cap_ramp.pop(gid, None)
-        return cap
-    if cap < dest:
-        # The log step alone is a few watts when the cap is already near the
-        # tight edge. Close at least half the gap, more when ramp up is higher,
-        # so the posted cap actually reaches the open target.
-        risen = _log_rise(cap, dest, LOOP.ramp_up)
-        floor = cap + (dest - cap) * min(1.0, 0.55 * _ramp_scale(LOOP.ramp_up))
-        LOOP.cap_ramp[gid] = ("up", now, cap)
-        return min(dest, max(risen, floor))
+    rise_to = _rise_target(draw, load, LOOP.ramp_up, lo, hi)
+    fall_to = _fall_target(draw, load, span, lo, hi)
     ramp = LOOP.cap_ramp.get(gid)
-    if ramp is None or ramp[0] != "down":
-        LOOP.cap_ramp[gid] = ("down", now, cap)
+    anchor = draw if ramp is None or len(ramp) < 4 else float(ramp[3])
+    dropped = draw < anchor * (1.0 - max(float(span), 0.08))
+    if dropped and cap > fall_to + 2.0:
+        if ramp is None or ramp[0] != "down":
+            LOOP.cap_ramp[gid] = ("down", now, cap, anchor)
+            origin, started = cap, now
+        else:
+            _direction, started, origin, _anchor = ramp
+        fallen = _inverse_sigmoid_fall(float(origin), fall_to, now - float(started), LOOP.ramp_down)
+        return min(float(origin), max(fall_to, fallen))
+    if cap >= rise_to - 2.0:
+        LOOP.cap_ramp[gid] = ("up", now, rise_to, draw)
+        return rise_to
+    if ramp is None or ramp[0] != "up":
+        LOOP.cap_ramp[gid] = ("up", now, cap, draw)
         origin, started = cap, now
     else:
-        _direction, started, origin = ramp
-    fallen = _inverse_sigmoid_fall(float(origin), dest, now - float(started), LOOP.ramp_down)
-    return min(float(origin), max(dest, fallen))
+        _direction, started, origin, _anchor = ramp
+        LOOP.cap_ramp[gid] = ("up", started, origin, max(anchor, draw))
+    return _log_along(float(origin), rise_to, now - float(started), LOOP.ramp_up)
 
 
 def _reported_best_p(usages: list[float], caps: list[float], desired_p: float) -> float:

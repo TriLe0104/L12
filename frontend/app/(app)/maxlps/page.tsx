@@ -1557,14 +1557,8 @@ function rampPath(values: number[], w: number, h: number, pad: number, yMin: num
     .join(" ");
 }
 
-function steadyMultiple(loadPct: number, rangePct: number, upPct: number, downPct: number): number {
-  const load = Math.max(0.05, loadPct / 100);
-  const span = Math.max(0, rangePct / 100);
-  const up = Math.max(0.25, upPct / 100);
-  const down = Math.max(0.25, downPct / 100);
-  const base = Math.max(0.05, load - span);
-  const ratio = Math.min(0.95, Math.max(0.05, (base * down) / up));
-  return 1 / ratio;
+function openFraction(upPct: number): number {
+  return Math.min(1, Math.max(0.05, upPct / 100));
 }
 
 function riseSeries(scale: number, start: number, dest: number): number[] {
@@ -1605,7 +1599,6 @@ function fallSeries(scale: number, start: number, dest: number): number[] {
 function RampChart({
   upPct,
   downPct,
-  loadPct,
   rangePct,
   locked,
   onUp,
@@ -1614,7 +1607,6 @@ function RampChart({
 }: {
   upPct: number;
   downPct: number;
-  loadPct: number;
   rangePct: number;
   locked?: boolean;
   onUp: (pct: number) => void;
@@ -1628,20 +1620,22 @@ function RampChart({
   const w = 280;
   const h = 96;
   const pad = 10;
-  const settle = steadyMultiple(loadPct, rangePct, upPct, downPct);
-  const yMax = Math.max(4, settle * 1.25);
-  const up = rampPath(riseSeries(upPct / 100, Math.min(2, settle), settle), w, h, pad, 1, yMax);
-  const down = rampPath(fallSeries(downPct / 100, Math.max(settle, yMax * 0.92), settle), w, h, pad, 1, yMax);
-  const settleY = pad + (1 - (settle - 1) / Math.max(0.2, yMax - 1)) * (h - pad * 2);
+  const open = openFraction(upPct);
+  const floor = Math.min(open * 0.9, Math.max(0.18, 0.45 - rangePct / 200));
+  const up = rampPath(riseSeries(upPct / 100, 0.12, open), w, h, pad, 0, 1);
+  const down = rampPath(fallSeries(downPct / 100, open, floor), w, h, pad, 0, 1);
+  const openY = pad + (1 - open) * (h - pad * 2);
   return (
     <div className="ramp-chart">
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 18 seconds">
         <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} />
         <line x1={pad} y1={pad} x2={pad} y2={h - pad} />
-        <line x1={pad} y1={settleY} x2={w - pad} y2={settleY} data-k="aim" />
+        <line x1={pad} y1={openY} x2={w - pad} y2={openY} data-k="aim" />
         <path d={up} data-k="up" />
         <path d={down} data-k="down" />
-        <text x={w - pad} y={Math.max(pad + 8, settleY - 3)} textAnchor="end">{`${settle.toFixed(1)}× idle`}</text>
+        <text x={w - pad} y={Math.max(pad + 8, openY - 3)} textAnchor="end">
+          {open >= 0.99 ? "GPU max" : `${Math.round(open * 100)}% of max`}
+        </text>
         <text x={w - pad} y={h - 1} textAnchor="end">18 s</text>
       </svg>
       <label className="ramp-row">
@@ -1914,7 +1908,6 @@ function LoopFields({
       <RampChart
         upPct={upPct}
         downPct={downPct}
-        loadPct={Number(capPct) || 50}
         rangePct={Number(rangePct) || 0}
         locked={locked}
         onUp={setUpPct}
