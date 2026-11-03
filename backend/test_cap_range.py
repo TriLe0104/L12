@@ -5,6 +5,8 @@ from app import gpu_power
 
 def _reset() -> None:
     gpu_power.LOOP.cap_ramp.clear()
+    gpu_power.LOOP.ramp_up = 1.0
+    gpu_power.LOOP.ramp_down = 1.0
 
 
 def test_band_is_gpu_load_plus_or_minus_the_operation_range() -> None:
@@ -12,13 +14,21 @@ def test_band_is_gpu_load_plus_or_minus_the_operation_range() -> None:
     assert gpu_power._op_band(0.80, 0.15) == (0.65, 0.95)
 
 
-def test_draw_inside_the_range_does_not_move_the_cap() -> None:
+def test_idle_cap_opens_past_double_and_ramp_up_raises_it() -> None:
     _reset()
-    cap = gpu_power._shape_gpu_cap("g1", 500.0, 1000.0, 0.50, 0.15, 50.0, 1400.0, 10.0)
+    # 50% load, 5 point range, 1× → settle at draw / 0.45, past 2×.
+    opened = gpu_power._shape_gpu_cap("g1", 230.0, 416.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
+    assert opened > 460.0
+    gpu_power.LOOP.ramp_up = 2.0
+    higher = gpu_power._shape_gpu_cap("g1", 230.0, opened, 0.50, 0.05, 50.0, 1400.0, 11.0)
+    assert higher > opened
+
+
+def test_cap_holds_once_it_reaches_the_open_target() -> None:
+    _reset()
+    cap = gpu_power._shape_gpu_cap("g1", 500.0, 1000.0, 0.50, 0.0, 50.0, 1400.0, 10.0)
     assert cap == 1000.0
     assert "g1" not in gpu_power.LOOP.cap_ramp
-    edge = gpu_power._shape_gpu_cap("g1", 650.0, 1000.0, 0.50, 0.15, 50.0, 1400.0, 11.0)
-    assert edge == 1000.0
 
 
 def test_ramp_scale_speeds_the_rise_and_the_fall() -> None:
@@ -63,7 +73,8 @@ def test_a_dip_holds_then_softens_toward_gpu_load() -> None:
     soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 100.7)
     assert 1000.0 - soft < 2.0
     mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 106.0)
-    assert abs(mid - 700.0) < 5.0
+    dest = 200.0 / 0.35
+    assert abs(mid - (1000.0 + (dest - 1000.0) * 0.5)) < 8.0
 
 
 def test_budget_still_cuts_on_this_pass() -> None:

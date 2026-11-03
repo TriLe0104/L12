@@ -1576,6 +1576,11 @@
   stroke-width: 1;
 }
 
+.ramp-chart line[data-k="aim"] {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-dasharray: 3 3;
+}
+
 .ramp-chart path {
   fill: none;
   stroke-width: 1.6;

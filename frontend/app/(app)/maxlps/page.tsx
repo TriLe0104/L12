@@ -1546,20 +1546,30 @@ const RAMP_MIN = 25;
 const RAMP_MAX = 400;
 const RAMP_SPAN_S = 18;
 
-function rampPath(values: number[], w: number, h: number, pad: number): string {
+function rampPath(values: number[], w: number, h: number, pad: number, yMin: number, yMax: number): string {
+  const span = Math.max(0.2, yMax - yMin);
   return values
     .map((v, i) => {
       const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
-      const y = pad + (1 - Math.min(1, Math.max(0, v))) * (h - pad * 2);
+      const y = pad + (1 - (v - yMin) / span) * (h - pad * 2);
       return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
 }
 
-function riseSeries(scale: number): number[] {
+function steadyMultiple(loadPct: number, rangePct: number, upPct: number, downPct: number): number {
+  const load = Math.max(0.05, loadPct / 100);
+  const span = Math.max(0, rangePct / 100);
+  const up = Math.max(0.25, upPct / 100);
+  const down = Math.max(0.25, downPct / 100);
+  const base = Math.max(0.05, load - span);
+  const ratio = Math.min(0.95, Math.max(0.05, (base * down) / up));
+  return 1 / ratio;
+}
+
+function riseSeries(scale: number, start: number, dest: number): number[] {
   const n = 48;
-  let cap = 400;
-  const dest = 1400;
+  let cap = start;
   let passes = 0;
   const out: number[] = [];
   for (let i = 0; i <= n; i++) {
@@ -1572,12 +1582,12 @@ function riseSeries(scale: number): number[] {
       cap += gap * frac;
       passes += 1;
     }
-    out.push((cap - 400) / (dest - 400));
+    out.push(cap);
   }
   return out;
 }
 
-function fallSeries(scale: number): number[] {
+function fallSeries(scale: number, start: number, dest: number): number[] {
   const n = 48;
   const tau = 6 / Math.max(0.25, scale);
   const k = 6;
@@ -1587,7 +1597,7 @@ function fallSeries(scale: number): number[] {
     const x = ((i / n) * RAMP_SPAN_S) / tau;
     const s = 1 / (1 + Math.exp(-k * (x - 1)));
     const sn = Math.min(1, Math.max(0, (s - s0) / (1 - s0)));
-    out.push(1 - sn);
+    out.push(start + (dest - start) * sn);
   }
   return out;
 }
@@ -1595,6 +1605,8 @@ function fallSeries(scale: number): number[] {
 function RampChart({
   upPct,
   downPct,
+  loadPct,
+  rangePct,
   locked,
   onUp,
   onDown,
@@ -1602,6 +1614,8 @@ function RampChart({
 }: {
   upPct: number;
   downPct: number;
+  loadPct: number;
+  rangePct: number;
   locked?: boolean;
   onUp: (pct: number) => void;
   onDown: (pct: number) => void;
@@ -1614,17 +1628,20 @@ function RampChart({
   const w = 280;
   const h = 96;
   const pad = 10;
-  const up = rampPath(riseSeries(upPct / 100), w, h, pad);
-  const down = rampPath(fallSeries(downPct / 100), w, h, pad);
+  const settle = steadyMultiple(loadPct, rangePct, upPct, downPct);
+  const yMax = Math.max(4, settle * 1.25);
+  const up = rampPath(riseSeries(upPct / 100, Math.min(2, settle), settle), w, h, pad, 1, yMax);
+  const down = rampPath(fallSeries(downPct / 100, Math.max(settle, yMax * 0.92), settle), w, h, pad, 1, yMax);
+  const settleY = pad + (1 - (settle - 1) / Math.max(0.2, yMax - 1)) * (h - pad * 2);
   return (
     <div className="ramp-chart">
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 18 seconds">
         <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} />
         <line x1={pad} y1={pad} x2={pad} y2={h - pad} />
+        <line x1={pad} y1={settleY} x2={w - pad} y2={settleY} data-k="aim" />
         <path d={up} data-k="up" />
         <path d={down} data-k="down" />
-        <text x={pad + 4} y={pad + 9}>up</text>
-        <text x={pad + 4} y={h - pad - 4}>down</text>
+        <text x={w - pad} y={Math.max(pad + 8, settleY - 3)} textAnchor="end">{`${settle.toFixed(1)}× idle`}</text>
         <text x={w - pad} y={h - 1} textAnchor="end">18 s</text>
       </svg>
       <label className="ramp-row">
@@ -1923,6 +1940,8 @@ function LoopFields({
       <RampChart
         upPct={upPct}
         downPct={downPct}
+        loadPct={Number(capPct) || 50}
+        rangePct={Number(rangePct) || 0}
         locked={locked}
         onUp={setUpPct}
         onDown={setDownPct}

@@ -1126,6 +1126,18 @@ def _fit_budget(
     return list(caps)
 
 
+def _open_ratio(load: float, span: float, scale_up: float, scale_down: float) -> float:
+    """Draw/cap the loop settles on.
+
+    The wide side of the operation range is already under GPU load, so 50% with
+    a 5 point range settles past 2× draw. Ramp up opens that further. Ramp down
+    pulls it back.
+    """
+    base = max(0.05, float(load) - max(0.0, float(span)))
+    ratio = base * _ramp_scale(scale_down) / _ramp_scale(scale_up)
+    return min(0.95, max(0.05, ratio))
+
+
 def _shape_gpu_cap(
     gid: str,
     draw: float,
@@ -1136,28 +1148,25 @@ def _shape_gpu_cap(
     hi: float,
     now: float,
 ) -> float:
-    """Hold the cap inside the operation range. Rise on a log curve, fall on an inverse sigmoid."""
+    """Settle on the scaled open cap. Rise on a log curve, fall on an inverse sigmoid."""
     ceiling = _cap_ceiling(lo, hi)
     cap = min(ceiling, max(float(lo), float(cap)))
-    if cap <= 1.0:
+    if cap <= 1.0 or float(draw) <= 0:
         nxt = min(ceiling, max(float(lo), float(draw) / max(load, 0.05)))
         LOOP.cap_ramp.pop(gid, None)
         return nxt
-    ratio = float(draw) / cap
-    low, high = _op_band(load, span)
-    if low <= ratio <= high:
+    dest = min(ceiling, max(float(lo), float(draw) / _open_ratio(load, span, LOOP.ramp_up, LOOP.ramp_down)))
+    if abs(cap - dest) <= max(2.0, dest * 0.02):
         LOOP.cap_ramp.pop(gid, None)
         return cap
-    dest = min(ceiling, max(float(lo), float(draw) / max(load, 0.05)))
-    if ratio > high:
-        if dest <= cap:
-            LOOP.cap_ramp.pop(gid, None)
-            return cap
+    if cap < dest:
+        # The log step alone is a few watts when the cap is already near the
+        # tight edge. Close at least half the gap, more when ramp up is higher,
+        # so the posted cap actually reaches the open target.
+        risen = _log_rise(cap, dest, LOOP.ramp_up)
+        floor = cap + (dest - cap) * min(1.0, 0.55 * _ramp_scale(LOOP.ramp_up))
         LOOP.cap_ramp[gid] = ("up", now, cap)
-        return min(ceiling, _log_rise(cap, dest, LOOP.ramp_up))
-    if dest >= cap:
-        LOOP.cap_ramp.pop(gid, None)
-        return cap
+        return min(dest, max(risen, floor))
     ramp = LOOP.cap_ramp.get(gid)
     if ramp is None or ramp[0] != "down":
         LOOP.cap_ramp[gid] = ("down", now, cap)
