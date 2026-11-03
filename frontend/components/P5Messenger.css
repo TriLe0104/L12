@@ -1717,33 +1717,151 @@ html[data-theme="scc"] .p5-choice[data-mutating="true"] {
 }
 
 html[data-theme="scc"] .p5-con-tab,
-html[data-theme="scc"] .p5-agent-tab {
+html[data-theme="scc"] .p5-agent-tab,
+html[data-theme="scc"] .p5-con-tab:hover,
+html[data-theme="scc"] .p5-agent-tab:hover,
+html[data-theme="scc"] .p5-dock[data-con="open"] .p5-con-tab,
+html[data-theme="scc"] .p5-dock[data-agents="open"] .p5-agent-tab {
   background: #0d3b7a;
   color: #fff;
   border-color: #0d3b7a;
+  box-shadow: -4px 5px 0 #1d4ed8;
+}
+
+html[data-theme="scc"] .p5-agent-tab[data-live="true"]::after {
+  background: #fbbf24;
+  border-color: #0d3b7a;
+  box-shadow: none;
 }
 
 html[data-theme="scc"] .p5-console-drawer,
-html[data-theme="scc"] .p5-agents-drawer {
-  background: #0b3270;
-  color: #e2e8f0;
-  border-color: #0d3b7a;
+html[data-theme="scc"] .p5-agents-drawer,
+html[data-theme="scc"] .p5-agents-drawer[data-chat="true"] {
+  background: #f4f7fb;
+  color: var(--ink);
+  border: 1px solid #0d3b7a;
 }
 
-html[data-theme="scc"] .p5-agents-drawer[data-chat="true"],
-html[data-theme="scc"] .p5-agent-thread {
-  background: #e10600;
+html[data-theme="scc"] .p5-console-drawer[data-open="true"],
+html[data-theme="scc"] .p5-agents-drawer[data-open="true"] {
+  outline-color: transparent;
+  box-shadow: -12px 14px 28px -18px rgba(13, 59, 122, 0.45);
+}
+
+html[data-theme="scc"] .p5-con-head {
+  background: linear-gradient(180deg, #0f4aa0 0%, #0b3270 100%);
+  color: #fff;
+  border-bottom: 0;
+}
+
+html[data-theme="scc"] .p5-con-head strong,
+html[data-theme="scc"] .p5-agent-who strong {
+  font-style: normal;
+  letter-spacing: 0.04em;
   color: #fff;
 }
 
+html[data-theme="scc"] .p5-con-head small,
+html[data-theme="scc"] .p5-agent-who small,
+html[data-theme="scc"] .p5-agent-who small[data-on="busy"],
+html[data-theme="scc"] .p5-agent-who small[data-on="false"] {
+  color: #c7ddff;
+}
+
+html[data-theme="scc"] .p5-con-compose {
+  border-top: 1px solid var(--rule);
+}
+
+html[data-theme="scc"] .p5-term {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+html[data-theme="scc"] .p5-term-line--cmd {
+  color: #1d4ed8;
+}
+
+html[data-theme="scc"] .p5-term-line--err,
+html[data-theme="scc"] .p5-term-wait {
+  color: #dc2626;
+}
+
+html[data-theme="scc"] .p5-agent-thread {
+  background: var(--paper);
+  color: var(--ink);
+}
+
 html[data-theme="scc"] .p5-agent {
-  background: #08285c;
-  border-color: #fff;
+  background: #fff;
+  border: 1px solid var(--rule);
+}
+
+html[data-theme="scc"] .p5-agent[data-status="running"] {
+  border-color: #b45309;
+}
+
+html[data-theme="scc"] .p5-agent[data-status="failed"] {
+  border-color: #dc2626;
+}
+
+html[data-theme="scc"] .p5-agent[data-status="done"] {
+  border-color: #15803d;
+}
+
+html[data-theme="scc"] .p5-agent-hit {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .p5-agent-hit:hover {
+  background: #eff6ff;
+}
+
+html[data-theme="scc"] .p5-agent-hit strong {
+  color: var(--ink);
+  font-style: normal;
+}
+
+html[data-theme="scc"] .p5-agent-hit em {
+  color: #b45309;
+}
+
+html[data-theme="scc"] .p5-agent[data-status="failed"] .p5-agent-hit em {
+  color: #dc2626;
+}
+
+html[data-theme="scc"] .p5-agent[data-status="done"] .p5-agent-hit em {
+  color: #15803d;
 }
 
 html[data-theme="scc"] .p5-agent-hit span,
 html[data-theme="scc"] .p5-agent-empty {
-  color: #c7d7f5;
+  color: var(--steel);
+}
+
+html[data-theme="scc"] .p5-agent-log {
+  background: #f8fafc;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .p5-agent-stop {
+  background: #0d3b7a;
+  border: 0;
+  border-radius: 6px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
+html[data-theme="scc"] .p5-agent-back {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.55);
+  color: #fff;
+}
+
+html[data-theme="scc"] .p5-agent-chat-head .p5-agent-stop {
+  background: #fff;
+  color: #0d3b7a;
 }
 
 html[data-theme="scc"] .mona-spot {
