@@ -140,6 +140,13 @@ class _Rack:
         self.id = rack_id
 
 
+def test_health_nodes_reporting_skips_unknown():
+    from app.bmc_health import nodes_reporting
+
+    assert nodes_reporting({"nodes": [{"status": "ok"}, {"status": "warning"}, {"status": "unknown"}, {"status": "critical"}]}) == 3
+    assert nodes_reporting({}) == 0
+
+
 def test_overview_counts_live_telemetry_not_power_state():
     racks = [_Rack("a"), _Rack("b"), _Rack("c")]
     counts = live_overview_counts(

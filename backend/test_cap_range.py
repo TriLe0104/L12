@@ -21,6 +21,19 @@ def test_draw_inside_the_range_does_not_move_the_cap() -> None:
     assert edge == 1000.0
 
 
+def test_ramp_scale_speeds_the_rise_and_the_fall() -> None:
+    slow = gpu_power._log_rise(400.0, 1400.0, 0.5)
+    base = gpu_power._log_rise(400.0, 1400.0, 1.0)
+    fast = gpu_power._log_rise(400.0, 1400.0, 2.0)
+    assert 400.0 < slow < base < fast <= 1400.0
+    origin, dest = 1000.0, 400.0
+    half = gpu_power._inverse_sigmoid_fall(origin, dest, gpu_power._SIGMOID_TAU_S, 1.0)
+    twice = gpu_power._inverse_sigmoid_fall(origin, dest, gpu_power._SIGMOID_TAU_S / 2, 2.0)
+    assert abs(half - twice) < 1e-6
+    assert gpu_power._ramp_scale(100) == 1.0
+    assert gpu_power._ramp_scale(0.1) == gpu_power.RAMP_SCALE_MIN
+
+
 def test_rise_is_logarithmic_and_the_first_step_is_the_largest() -> None:
     first = gpu_power._log_rise(400.0, 1400.0)
     second = gpu_power._log_rise(first, 1400.0)

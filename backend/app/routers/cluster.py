@@ -468,8 +468,9 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> 
             }
             for i in range(48)
         ]
-    nodes_on = alive["nodes_on"]
     health = bmc_health.snapshot()
+    # Same nodes the list marks OK, warning, or critical. GPU watts until that poll has a row.
+    nodes_on = bmc_health.nodes_reporting(health) if health.get("nodes") else alive["nodes_on"]
     return {
         "name": cluster_name(db),
         "source": "inventory",
@@ -681,6 +682,8 @@ class PowerPatch(BaseModel):
     gpu_power_percent: float | None = Field(default=None, ge=10, le=100)
     desired_cap_percent: float | None = Field(default=None, ge=10, le=100)
     operation_range: float | None = Field(default=None, ge=0, le=40)
+    ramp_up: float | None = Field(default=None, ge=25, le=400)
+    ramp_down: float | None = Field(default=None, ge=25, le=400)
     gpu_min_w: float | None = Field(default=None, ge=50, le=2000)
     gpu_max_w: float | None = Field(default=None, ge=50, le=2000)
     continuous: bool | None = None
@@ -858,6 +861,8 @@ def patch_power_limiter(
         gpu_power_percent=payload.gpu_power_percent,
         desired_cap_percent=payload.desired_cap_percent,
         operation_range=None if payload.operation_range is None else payload.operation_range / 100.0,
+        ramp_up=None if payload.ramp_up is None else payload.ramp_up / 100.0,
+        ramp_down=None if payload.ramp_down is None else payload.ramp_down / 100.0,
         gpu_min_w=payload.gpu_min_w,
         gpu_max_w=payload.gpu_max_w,
         continuous=payload.continuous,
@@ -870,6 +875,8 @@ def patch_power_limiter(
         or payload.gpu_power_percent is not None
         or payload.desired_cap_percent is not None
         or payload.operation_range is not None
+        or payload.ramp_up is not None
+        or payload.ramp_down is not None
         or payload.gpu_min_w is not None
         or payload.gpu_max_w is not None
     ):

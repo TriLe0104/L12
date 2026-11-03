@@ -806,6 +806,8 @@ export default function MaxLpsPage() {
                 gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 desiredCapPct={view?.algo?.desired_cap_percent ?? 80}
                 operationRangePct={view?.algo?.operation_range ?? 15}
+                rampUpPct={view?.algo?.ramp_up ?? 100}
+                rampDownPct={view?.algo?.ramp_down ?? 100}
                 gpuMinW={view?.algo?.gpu_min_w ?? 200}
                 gpuMaxW={view?.algo?.gpu_max_w ?? 1200}
                 locked={locked}
@@ -1540,12 +1542,143 @@ function RunOn({
   );
 }
 
+const RAMP_MIN = 25;
+const RAMP_MAX = 400;
+const RAMP_SPAN_S = 18;
+
+function rampPath(values: number[], w: number, h: number, pad: number): string {
+  return values
+    .map((v, i) => {
+      const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
+      const y = pad + (1 - Math.min(1, Math.max(0, v))) * (h - pad * 2);
+      return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function riseSeries(scale: number): number[] {
+  const n = 48;
+  let cap = 400;
+  const dest = 1400;
+  let passes = 0;
+  const out: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const due = Math.floor(((i / n) * RAMP_SPAN_S) / 0.7);
+    while (passes < due && cap < dest) {
+      const gap = dest - cap;
+      let frac = Math.log1p(gap / Math.max(cap, 1));
+      frac = frac / (1 + frac);
+      frac = Math.min(1, Math.max(0, frac * scale));
+      cap += gap * frac;
+      passes += 1;
+    }
+    out.push((cap - 400) / (dest - 400));
+  }
+  return out;
+}
+
+function fallSeries(scale: number): number[] {
+  const n = 48;
+  const tau = 6 / Math.max(0.25, scale);
+  const k = 6;
+  const s0 = 1 / (1 + Math.exp(k));
+  const out: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const x = ((i / n) * RAMP_SPAN_S) / tau;
+    const s = 1 / (1 + Math.exp(-k * (x - 1)));
+    const sn = Math.min(1, Math.max(0, (s - s0) / (1 - s0)));
+    out.push(1 - sn);
+  }
+  return out;
+}
+
+function RampChart({
+  upPct,
+  downPct,
+  locked,
+  onUp,
+  onDown,
+  onCommit,
+}: {
+  upPct: number;
+  downPct: number;
+  locked?: boolean;
+  onUp: (pct: number) => void;
+  onDown: (pct: number) => void;
+  onCommit: (up: number, down: number) => void;
+}) {
+  const upNow = useRef(upPct);
+  const downNow = useRef(downPct);
+  upNow.current = upPct;
+  downNow.current = downPct;
+  const w = 280;
+  const h = 96;
+  const pad = 10;
+  const up = rampPath(riseSeries(upPct / 100), w, h, pad);
+  const down = rampPath(fallSeries(downPct / 100), w, h, pad);
+  return (
+    <div className="ramp-chart">
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 18 seconds">
+        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} />
+        <line x1={pad} y1={pad} x2={pad} y2={h - pad} />
+        <path d={up} data-k="up" />
+        <path d={down} data-k="down" />
+        <text x={pad + 4} y={pad + 9}>up</text>
+        <text x={pad + 4} y={h - pad - 4}>down</text>
+        <text x={w - pad} y={h - 1} textAnchor="end">18 s</text>
+      </svg>
+      <label className="ramp-row">
+        Ramp up
+        <input
+          type="range"
+          min={RAMP_MIN}
+          max={RAMP_MAX}
+          step={5}
+          value={upPct}
+          disabled={locked}
+          aria-label="Ramp up scale"
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            upNow.current = v;
+            onUp(v);
+          }}
+          onPointerUp={() => onCommit(upNow.current, downNow.current)}
+          onKeyUp={() => onCommit(upNow.current, downNow.current)}
+        />
+        <b>{(upPct / 100).toFixed(2)}×</b>
+      </label>
+      <label className="ramp-row" data-k="down">
+        Ramp down
+        <input
+          type="range"
+          min={RAMP_MIN}
+          max={RAMP_MAX}
+          step={5}
+          value={downPct}
+          disabled={locked}
+          aria-label="Ramp down scale"
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            downNow.current = v;
+            onDown(v);
+          }}
+          onPointerUp={() => onCommit(upNow.current, downNow.current)}
+          onKeyUp={() => onCommit(upNow.current, downNow.current)}
+        />
+        <b>{(downPct / 100).toFixed(2)}×</b>
+      </label>
+    </div>
+  );
+}
+
 function LoopFields({
   intervalS,
   continuous,
   gpuPowerPct,
   desiredCapPct,
   operationRangePct,
+  rampUpPct,
+  rampDownPct,
   gpuMinW,
   gpuMaxW,
   locked,
@@ -1556,6 +1689,8 @@ function LoopFields({
   gpuPowerPct: number;
   desiredCapPct: number;
   operationRangePct: number;
+  rampUpPct: number;
+  rampDownPct: number;
   gpuMinW: number;
   gpuMaxW: number;
   locked?: boolean;
@@ -1566,6 +1701,8 @@ function LoopFields({
   const [gpuPct, setGpuPct] = useState(String(Math.round(gpuPowerPct)));
   const [capPct, setCapPct] = useState(String(Math.round(desiredCapPct)));
   const [rangePct, setRangePct] = useState(String(Math.round(operationRangePct)));
+  const [upPct, setUpPct] = useState(Math.round(rampUpPct));
+  const [downPct, setDownPct] = useState(Math.round(rampDownPct));
   const [minW, setMinW] = useState(String(Math.round(gpuMinW)));
   const [maxW, setMaxW] = useState(String(Math.round(gpuMaxW)));
   const editing = useRef(false);
@@ -1580,12 +1717,25 @@ function LoopFields({
     if (c !== capPct) setCapPct(c);
     const rg = String(Math.round(operationRangePct));
     if (rg !== rangePct) setRangePct(rg);
+    if (Math.round(rampUpPct) !== upPct) setUpPct(Math.round(rampUpPct));
+    if (Math.round(rampDownPct) !== downPct) setDownPct(Math.round(rampDownPct));
     const mn = String(Math.round(gpuMinW));
     if (mn !== minW) setMinW(mn);
     const mx = String(Math.round(gpuMaxW));
     if (mx !== maxW) setMaxW(mx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, gpuPowerPct, desiredCapPct, operationRangePct, gpuMinW, gpuMaxW]);
+  }, [intervalMs, gpuPowerPct, desiredCapPct, operationRangePct, rampUpPct, rampDownPct, gpuMinW, gpuMaxW]);
+
+  function commitRamps(nextUp = upPct, nextDown = downPct) {
+    if (locked) return;
+    const ramp_up = Math.min(RAMP_MAX, Math.max(RAMP_MIN, Math.round(nextUp)));
+    const ramp_down = Math.min(RAMP_MAX, Math.max(RAMP_MIN, Math.round(nextDown)));
+    if (ramp_up === Math.round(rampUpPct) && ramp_down === Math.round(rampDownPct)) return;
+    void api
+      .patchClusterPower({ ramp_up, ramp_down })
+      .then(() => onChange())
+      .catch(() => undefined);
+  }
 
   async function commit(nextFreq = freq, nextGpu = gpuPct, nextCap = capPct, nextRange = rangePct, nextMin = minW, nextMax = maxW) {
     const interval_ms = Math.round(Number(nextFreq));
@@ -1770,6 +1920,14 @@ function LoopFields({
           W
         </span>
       </PolicyField>
+      <RampChart
+        upPct={upPct}
+        downPct={downPct}
+        locked={locked}
+        onUp={setUpPct}
+        onDown={setDownPct}
+        onCommit={commitRamps}
+      />
     </form>
   );
 }

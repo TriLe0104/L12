@@ -500,6 +500,16 @@ function NodePanel({
   );
 }
 
+function healthNodesUp(inv: MaxLpsInvRack[], health: ClusterHealth | null): number | null {
+  if (!health?.nodes?.length) return null;
+  let n = 0;
+  for (const row of populatedNodes(inv, health)) {
+    const st = liveForIp(health, row.bmcIp)?.status;
+    if (st === "ok" || st === "warning" || st === "critical") n += 1;
+  }
+  return n;
+}
+
 function liveForIp(health: ClusterHealth | null, ip?: string | null) {
   const bmc = (ip || "").trim();
   if (!bmc) return undefined;
@@ -1343,7 +1353,7 @@ export function OverviewDash() {
   const racksOn = data.size.racks_on ?? 0;
   const gpusPerNode = data.size.gpus_per_node ?? 4;
   const compute = data.size.compute_nodes ?? 0;
-  const computeOn = data.size.compute_on ?? 0;
+  const computeOn = healthNodesUp(inv, health) ?? data.size.compute_on ?? 0;
   const livePowerKw = registered ? (data.now.power_kw ?? 0) : 0;
   const powerLive = registered && (Boolean(sensors.power) || livePowerKw > 0);
   const gpuLive = registered ? data.gpu_used : 0;

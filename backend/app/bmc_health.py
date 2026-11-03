@@ -897,6 +897,15 @@ def _public_node(n: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def nodes_reporting(snap: dict[str, Any] | None) -> int:
+    """BMCs that answered with a health status. Unknown and missing nodes do not count."""
+    n = 0
+    for node in (snap or {}).get("nodes") or []:
+        if str(node.get("status") or "") in {"ok", "warning", "critical"}:
+            n += 1
+    return n
+
+
 def snapshot() -> dict[str, Any]:
     _ensure_watch()
     with _LOCK:

@@ -41,6 +41,10 @@ def _h01(key: str) -> float:
 GPU_POWER_PERCENT = 0.75
 DESIRED_CAP_PERCENT = 0.80  # GPU load: draw sits at this fraction of the posted cap
 OPERATION_RANGE = 0.15  # points around GPU load where the cap stays put
+# 1.0 is the default curve. 4.0 is the fastest, 0.25 the slowest.
+RAMP_SCALE = 1.0
+RAMP_SCALE_MIN = 0.25
+RAMP_SCALE_MAX = 4.0
 # Downward sigmoid is halfway at this many seconds, soft at both ends.
 _SIGMOID_TAU_S = 6.0
 _SIGMOID_K = 6.0
@@ -63,6 +67,8 @@ class LoopState:
         self.gpu_power_percent = GPU_POWER_PERCENT
         self.desired_cap_percent = DESIRED_CAP_PERCENT
         self.operation_range = OPERATION_RANGE
+        self.ramp_up = RAMP_SCALE
+        self.ramp_down = RAMP_SCALE
         self.gpu_min_w = DEFAULT_GPU_MIN_W
         self.gpu_max_w = DEFAULT_GPU_MAX_W
         self.last_step = 0.0
@@ -102,6 +108,8 @@ def apply_loop(
     gpu_power_percent: float | None = None,
     desired_cap_percent: float | None = None,
     operation_range: float | None = None,
+    ramp_up: float | None = None,
+    ramp_down: float | None = None,
     gpu_min_w: float | None = None,
     gpu_max_w: float | None = None,
     continuous: bool | None = None,
@@ -145,6 +153,16 @@ def apply_loop(
         if abs(v - LOOP.operation_range) >= 0.0005:
             changed = True
         LOOP.operation_range = v
+    if ramp_up is not None:
+        v = _ramp_scale(ramp_up)
+        if abs(v - LOOP.ramp_up) >= 0.005:
+            changed = True
+        LOOP.ramp_up = v
+    if ramp_down is not None:
+        v = _ramp_scale(ramp_down)
+        if abs(v - LOOP.ramp_down) >= 0.005:
+            changed = True
+        LOOP.ramp_down = v
     if gpu_min_w is not None:
         v = max(50.0, min(GPU_TDP_W, float(gpu_min_w)))
         if abs(v - LOOP.gpu_min_w) >= 0.5:
@@ -1048,6 +1066,14 @@ def _post_caps(
     return caps, best_p
 
 
+def _ramp_scale(raw: float) -> float:
+    """1.0 is the default curve. Values above the max are percents (100 = 1×)."""
+    v = float(raw)
+    if v > RAMP_SCALE_MAX:
+        v = v / 100.0
+    return max(RAMP_SCALE_MIN, min(RAMP_SCALE_MAX, v))
+
+
 def _op_band(load: float, span: float) -> tuple[float, float]:
     """Inclusive draw/cap band around GPU load. Span is the operation range."""
     center = min(0.95, max(0.05, float(load)))
@@ -1055,24 +1081,28 @@ def _op_band(load: float, span: float) -> tuple[float, float]:
     return max(0.05, center - half), min(0.95, center + half)
 
 
-def _log_rise(cap: float, dest: float) -> float:
-    """Logarithmic step up. A wide gap takes a large step, then the step shrinks."""
+def _log_rise(cap: float, dest: float, scale: float = RAMP_SCALE) -> float:
+    """Logarithmic step up. A wide gap takes a large step, then the step shrinks.
+
+    scale 1 is the default. Higher closes more of the gap on this pass.
+    """
     gap = dest - cap
     if gap <= 0:
         return cap
     frac = math.log1p(gap / max(cap, 1.0))
     frac = frac / (1.0 + frac)
+    frac = min(1.0, max(0.0, frac * _ramp_scale(scale)))
     return cap + gap * frac
 
 
-def _inverse_sigmoid_fall(origin: float, dest: float, elapsed: float) -> float:
+def _inverse_sigmoid_fall(origin: float, dest: float, elapsed: float, scale: float = RAMP_SCALE) -> float:
     """Inverse sigmoid down. Soft at the start, steep in the middle, soft at the floor.
 
-    Halfway at _SIGMOID_TAU_S. elapsed is seconds since draw left the range.
+    Halfway at _SIGMOID_TAU_S / scale. elapsed is seconds since draw left the range.
     """
     if dest >= origin:
         return dest
-    x = max(0.0, float(elapsed)) / _SIGMOID_TAU_S
+    x = max(0.0, float(elapsed)) / (_SIGMOID_TAU_S / _ramp_scale(scale))
     s = 1.0 / (1.0 + math.exp(-_SIGMOID_K * (x - 1.0)))
     s0 = 1.0 / (1.0 + math.exp(_SIGMOID_K))
     sn = (s - s0) / (1.0 - s0)
@@ -1124,7 +1154,7 @@ def _shape_gpu_cap(
             LOOP.cap_ramp.pop(gid, None)
             return cap
         LOOP.cap_ramp[gid] = ("up", now, cap)
-        return min(ceiling, _log_rise(cap, dest))
+        return min(ceiling, _log_rise(cap, dest, LOOP.ramp_up))
     if dest >= cap:
         LOOP.cap_ramp.pop(gid, None)
         return cap
@@ -1134,7 +1164,7 @@ def _shape_gpu_cap(
         origin, started = cap, now
     else:
         _direction, started, origin = ramp
-    fallen = _inverse_sigmoid_fall(float(origin), dest, now - float(started))
+    fallen = _inverse_sigmoid_fall(float(origin), dest, now - float(started), LOOP.ramp_down)
     return min(float(origin), max(dest, fallen))
 
 
@@ -2428,6 +2458,8 @@ def _snapshot_locked(
         round(LOOP.gpu_power_percent, 4),
         round(LOOP.desired_cap_percent, 4),
         round(LOOP.operation_range, 4),
+        round(LOOP.ramp_up, 3),
+        round(LOOP.ramp_down, 3),
         round(LOOP.gpu_min_w, 1),
         round(LOOP.gpu_max_w, 1),
         round(LOOP.interval_s, 3),
@@ -2970,6 +3002,8 @@ def _snapshot_locked(
             "gpu_power_percent": round(gpu_frac * 100.0, 1),
             "desired_cap_percent": round(desired_p * 100.0, 1),
             "operation_range": round(LOOP.operation_range * 100.0, 1),
+            "ramp_up": round(LOOP.ramp_up * 100.0, 1),
+            "ramp_down": round(LOOP.ramp_down * 100.0, 1),
             "gpu_min_w": round(LOOP.gpu_min_w, 1),
             "gpu_max_w": round(LOOP.gpu_max_w, 1),
             "max_allowable_w": round(max_allowable_w, 0),
