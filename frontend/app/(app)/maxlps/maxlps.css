@@ -1302,6 +1302,8 @@
 .maxlps-loop {
   overflow: auto;
   z-index: 4;
+  container-type: inline-size;
+  container-name: loop;
 }
 
 .maxlps-run {
@@ -1309,7 +1311,10 @@
   flex-direction: column;
   gap: 0.18rem;
   margin: 0.28rem 0 0.1rem;
-  min-height: 0;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: min-content;
 }
 
 .maxlps-run-head {
@@ -1330,9 +1335,14 @@
 }
 
 .maxlps-run p {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   margin: 0;
   color: var(--steel);
-  font-size: 0.62rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.55rem, 3.1cqi, 0.68rem);
   line-height: 1.35;
 }
 
@@ -1403,17 +1413,24 @@
 }
 
 .maxlps-loop .lps-policy {
-  margin-top: 0.12rem;
+  margin-top: 0.35rem;
   overflow: visible;
   padding-bottom: 0;
   gap: 0.22rem 0.38rem;
   flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  background: var(--panel);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .maxlps-loop .lps-policy input {
   height: 1.68rem;
-  font-size: 0.95rem;
+  font-size: clamp(0.68rem, 3.8cqi, 0.95rem);
   min-width: 0;
+  max-width: 100%;
 }
 
 .maxlps-loop .lps-policy-pct {
@@ -1428,11 +1445,35 @@
 }
 
 .maxlps-loop .lps-field,
-.maxlps-loop .lps-policy label {
-  font-size: 0.5rem;
+.maxlps-loop .lps-policy label,
+.maxlps-loop h2,
+.maxlps-loop .maxlps-run-head {
+  font-size: clamp(0.42rem, 2.6cqi, 0.56rem);
+  letter-spacing: 0.04em;
   gap: 0.08rem;
   overflow: visible;
   min-width: 0;
+  max-width: 100%;
+}
+
+.maxlps-loop .lps-field-name {
+  display: block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.maxlps-loop .lps-field-hint {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.5rem, 2.8cqi, 0.68rem);
+}
+
+@container loop (max-width: 16.5rem) {
+  .maxlps-loop .lps-policy {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .maxlps-loop .lps-event,
