@@ -1555,7 +1555,7 @@ const RISE_GAIN = 1.6;
 const FALL_TAU_S = 30;
 
 function rampPath(values: number[], w: number, h: number, pad: number, yMin: number, yMax: number): string {
-  const span = Math.max(0.2, yMax - yMin);
+  const span = Math.max(0.08, yMax - yMin);
   return values
     .map((v, i) => {
       const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
@@ -1631,9 +1631,16 @@ function RampChart({
   const mid = 0.5;
   const upScale = upPct / 100;
   const downScale = downPct / 100;
-  const up = rampPath(riseSeries(upScale, mid - approachSpread(upScale, rangePct), mid), w, h, pad, 0, 1);
-  const down = rampPath(fallSeries(downScale, mid + approachSpread(downScale, rangePct), mid), w, h, pad, 0, 1);
-  const midY = pad + (1 - mid) * (h - pad * 2);
+  const upSeries = riseSeries(upScale, mid - approachSpread(upScale, rangePct), mid);
+  const downSeries = fallSeries(downScale, mid + approachSpread(downScale, rangePct), mid);
+  const lo = Math.min(mid, ...upSeries, ...downSeries);
+  const hi = Math.max(mid, ...upSeries, ...downSeries);
+  const yPad = Math.max(0.03, (hi - lo) * 0.12);
+  const yMin = lo - yPad;
+  const yMax = hi + yPad;
+  const up = rampPath(upSeries, w, h, pad, yMin, yMax);
+  const down = rampPath(downSeries, w, h, pad, yMin, yMax);
+  const midY = pad + (1 - (mid - yMin) / Math.max(0.05, yMax - yMin)) * (h - pad * 2);
   return (
     <div className="ramp-chart">
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 36 seconds">
