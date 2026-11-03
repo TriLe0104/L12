@@ -357,11 +357,14 @@ export function PowerPolicyFields({
   onChange,
   locked,
   compact,
+  gpuPowerPct,
 }: {
   data: PowerLimiterData;
   onChange?: (next: PowerLimiterData) => void;
   locked?: boolean;
   compact?: boolean;
+  /** When set, the budget block also edits the GPU share of total × threshold. */
+  gpuPowerPct?: number;
 }) {
   const totalKw = data.total_budget_kw ?? data.default_budget_kw ?? 0;
   const [budgetMw, setBudgetMw] = useState(mwText(totalKw));
@@ -369,6 +372,7 @@ export function PowerPolicyFields({
   const [minKw, setMinKw] = useState(String(Math.round(data.min_rack_kw ?? 40)));
   const [rackKw, setRackKw] = useState(String(Math.round(data.max_rack_kw ?? 135)));
   const [nRacks, setNRacks] = useState(String(data.racks_wanted ?? data.racks_pool ?? ""));
+  const [gpuPct, setGpuPct] = useState(gpuPowerPct == null ? "" : String(Math.round(gpuPowerPct)));
   const editing = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
 
@@ -384,6 +388,10 @@ export function PowerPolicyFields({
     if (nextMax !== rackKw) setRackKw(nextMax);
     const nextN = String(data.racks_wanted ?? data.racks_pool ?? "");
     if (nextN && nextN !== nRacks) setNRacks(nextN);
+    if (gpuPowerPct != null) {
+      const nextGpu = String(Math.round(gpuPowerPct));
+      if (nextGpu !== gpuPct) setGpuPct(nextGpu);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     data.total_budget_kw,
@@ -394,6 +402,7 @@ export function PowerPolicyFields({
     data.max_rack_kw,
     data.racks_wanted,
     data.racks_pool,
+    gpuPowerPct,
   ]);
 
   async function commit(
@@ -402,6 +411,7 @@ export function PowerPolicyFields({
     nextMin = minKw,
     nextMax = rackKw,
     nextN = nRacks,
+    nextGpu = gpuPct,
   ) {
     const total_budget_kw = Math.min(10_000_000, Math.max(100, Number(nextMw) * 1000));
     const stay_under_pct = Number(nextPct);
@@ -417,12 +427,15 @@ export function PowerPolicyFields({
     if (![total_budget_kw, stay_under_pct, min_rack_kw, max_rack_kw].every(Number.isFinite)) return;
     if (stay_under_pct < 10 || stay_under_pct > 100) return;
     if (min_rack_kw < 8 || max_rack_kw < 20 || max_rack_kw > 2000 || min_rack_kw > max_rack_kw) return;
+    const gpu_power_percent = gpuPowerPct == null ? null : Number(nextGpu);
+    if (gpu_power_percent != null && (gpu_power_percent < 10 || gpu_power_percent > 100)) return;
     const sameBudget = Math.abs(total_budget_kw - (data.total_budget_kw ?? data.default_budget_kw ?? 0)) < 50;
     const samePct = stay_under_pct === (data.threshold_pct ?? data.stay_under_pct);
     const sameMin = min_rack_kw === data.min_rack_kw;
     const sameMax = max_rack_kw === data.max_rack_kw;
     const sameN = Number.isFinite(rack_count) && rack_count === (data.racks_wanted ?? data.racks_pool);
-    if (sameBudget && samePct && sameMin && sameMax && sameN) return;
+    const sameGpu = gpu_power_percent == null || gpu_power_percent === Math.round(gpuPowerPct ?? 0);
+    if (sameBudget && samePct && sameMin && sameMax && sameN && sameGpu) return;
     try {
       const res = await api.patchClusterPower({
         total_budget_kw,
@@ -430,6 +443,7 @@ export function PowerPolicyFields({
         min_rack_kw,
         max_rack_kw,
         ...(Number.isFinite(rack_count) ? { rack_count } : {}),
+        ...(gpu_power_percent != null ? { gpu_power_percent } : {}),
       });
       onChange?.(res);
     } catch {
@@ -583,6 +597,25 @@ export function PowerPolicyFields({
           </small>
         </span>
       </PolicyField>
+      {gpuPowerPct == null ? null : (
+        <PolicyField
+          label="GPU power"
+          tip="Share of the power left after the racks that GPUs can use. GPU budget = (total power × threshold − live rack power) × GPU power."
+        >
+          <span className="lps-policy-pct">
+            <input
+              type="number"
+              min={10}
+              max={100}
+              step={1}
+              value={gpuPct}
+              aria-label="GPU power percent of total power times threshold"
+              {...bind(setGpuPct)}
+            />
+            %
+          </span>
+        </PolicyField>
+      )}
     </form>
   );
 }

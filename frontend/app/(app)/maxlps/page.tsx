@@ -796,6 +796,7 @@ export default function MaxLpsPage() {
                   }}
                   locked={locked}
                   compact
+                  gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 />
               ) : (
                 <p>Loading limiter…</p>
@@ -803,7 +804,6 @@ export default function MaxLpsPage() {
               <LoopFields
                 intervalS={view?.algo?.interval_s ?? 10}
                 continuous={Boolean(view?.algo?.continuous)}
-                gpuPowerPct={view?.algo?.gpu_power_percent ?? 75}
                 desiredCapPct={view?.algo?.desired_cap_percent ?? 80}
                 operationRangePct={view?.algo?.operation_range ?? 15}
                 rampUpPct={view?.algo?.ramp_up ?? 100}
@@ -1691,7 +1691,6 @@ function RampChart({
 function LoopFields({
   intervalS,
   continuous,
-  gpuPowerPct,
   desiredCapPct,
   operationRangePct,
   rampUpPct,
@@ -1703,7 +1702,6 @@ function LoopFields({
 }: {
   intervalS: number;
   continuous: boolean;
-  gpuPowerPct: number;
   desiredCapPct: number;
   operationRangePct: number;
   rampUpPct: number;
@@ -1715,7 +1713,6 @@ function LoopFields({
 }) {
   const intervalMs = intervalMsFromS(intervalS);
   const [freq, setFreq] = useState(String(intervalMs));
-  const [gpuPct, setGpuPct] = useState(String(Math.round(gpuPowerPct)));
   const [capPct, setCapPct] = useState(String(Math.round(desiredCapPct)));
   const [rangePct, setRangePct] = useState(String(Math.round(operationRangePct)));
   const [upPct, setUpPct] = useState(Math.round(rampUpPct));
@@ -1728,8 +1725,6 @@ function LoopFields({
   useEffect(() => {
     if (editing.current) return;
     if (String(intervalMs) !== freq) setFreq(String(intervalMs));
-    const g = String(Math.round(gpuPowerPct));
-    if (g !== gpuPct) setGpuPct(g);
     const c = String(Math.round(desiredCapPct));
     if (c !== capPct) setCapPct(c);
     const rg = String(Math.round(operationRangePct));
@@ -1741,7 +1736,7 @@ function LoopFields({
     const mx = String(Math.round(gpuMaxW));
     if (mx !== maxW) setMaxW(mx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, gpuPowerPct, desiredCapPct, operationRangePct, rampUpPct, rampDownPct, gpuMinW, gpuMaxW]);
+  }, [intervalMs, desiredCapPct, operationRangePct, rampUpPct, rampDownPct, gpuMinW, gpuMaxW]);
 
   function commitRamps(nextUp = upPct, nextDown = downPct) {
     if (locked) return;
@@ -1754,19 +1749,17 @@ function LoopFields({
       .catch(() => undefined);
   }
 
-  async function commit(nextFreq = freq, nextGpu = gpuPct, nextCap = capPct, nextRange = rangePct, nextMin = minW, nextMax = maxW) {
+  async function commit(nextFreq = freq, nextCap = capPct, nextRange = rangePct, nextMin = minW, nextMax = maxW) {
     const interval_ms = Math.round(Number(nextFreq));
-    const gpu_power_percent = Number(nextGpu);
     const desired_cap_percent = Number(nextCap);
     const operation_range = Math.round(Number(nextRange));
     const gpu_min_w = Number(nextMin);
     const gpu_max_w = Number(nextMax);
-    if (![interval_ms, gpu_power_percent, desired_cap_percent, operation_range, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
+    if (![interval_ms, desired_cap_percent, operation_range, gpu_min_w, gpu_max_w].every(Number.isFinite)) return;
     if (interval_ms < MIN_INTERVAL_MS || interval_ms > MAX_INTERVAL_MS) {
       setFreq(String(intervalMs));
       return;
     }
-    if (gpu_power_percent < 10 || gpu_power_percent > 100) return;
     if (desired_cap_percent < 10 || desired_cap_percent > 100) return;
     if (operation_range < 0 || operation_range > 40) {
       setRangePct(String(Math.round(operationRangePct)));
@@ -1775,7 +1768,6 @@ function LoopFields({
     if (gpu_min_w < 50 || gpu_max_w > 2000 || gpu_min_w > gpu_max_w) return;
     if (
       interval_ms === intervalMs &&
-      gpu_power_percent === Math.round(gpuPowerPct) &&
       desired_cap_percent === Math.round(desiredCapPct) &&
       operation_range === Math.round(operationRangePct) &&
       gpu_min_w === Math.round(gpuMinW) &&
@@ -1786,7 +1778,6 @@ function LoopFields({
     try {
       await api.patchClusterPower({
         interval_s: interval_ms / 1000,
-        gpu_power_percent,
         desired_cap_percent,
         operation_range,
         gpu_min_w,
@@ -1866,23 +1857,6 @@ function LoopFields({
             {...bind(setFreq)}
           />
           <span className="lps-unit">ms</span>
-        </span>
-      </PolicyField>
-      <PolicyField
-        label="GPU power"
-        tip="Percent of total available power used as the GPU cap. Total available is threshold × total minus the live rack draw. Caps refit to this on the next cap pass."
-      >
-        <span className="lps-policy-pct">
-          <input
-            type="number"
-            min={10}
-            max={100}
-            step={1}
-            value={gpuPct}
-            aria-label="GPU power percent of total available power"
-            {...bind(setGpuPct)}
-          />
-          %
         </span>
       </PolicyField>
       <PolicyField
