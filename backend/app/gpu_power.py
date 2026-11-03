@@ -46,8 +46,10 @@ RAMP_SCALE = 1.0
 RAMP_SCALE_MIN = 0.25
 RAMP_SCALE_MAX = 4.0
 # Downward sigmoid is halfway at this many seconds, soft at both ends.
-_SIGMOID_TAU_S = 6.0
+_SIGMOID_TAU_S = 30.0
 _SIGMOID_K = 6.0
+# 1× closes more of a wide upward gap than a plain log fraction, and still tapers.
+_RISE_GAIN = 1.6
 DEFAULT_INTERVAL_S = 10.0
 # 1 ms. The page does not stack polls, so a shorter ask waits on the refresh in flight.
 MIN_INTERVAL_S = 0.001
@@ -1091,7 +1093,7 @@ def _log_rise(cap: float, dest: float, scale: float = RAMP_SCALE) -> float:
         return cap
     frac = math.log1p(gap / max(cap, 1.0))
     frac = frac / (1.0 + frac)
-    frac = min(1.0, max(0.0, frac * _ramp_scale(scale)))
+    frac = min(1.0, max(0.0, frac * _RISE_GAIN * _ramp_scale(scale)))
     return cap + gap * frac
 
 
@@ -1180,7 +1182,7 @@ def _shape_gpu_cap(
     fall_to = _fall_target(draw, load, span, lo, hi)
     ramp = LOOP.cap_ramp.get(gid)
     anchor = draw if ramp is None or len(ramp) < 4 else float(ramp[3])
-    dropped = draw < anchor * (1.0 - max(float(span), 0.08))
+    dropped = draw < anchor * (1.0 - max(float(span), 0.22))
     if dropped and cap > fall_to + 2.0:
         if ramp is None or ramp[0] != "down":
             LOOP.cap_ramp[gid] = ("down", now, cap, anchor)

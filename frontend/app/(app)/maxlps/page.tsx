@@ -1544,7 +1544,9 @@ function RunOn({
 
 const RAMP_MIN = 25;
 const RAMP_MAX = 400;
-const RAMP_SPAN_S = 18;
+const RAMP_SPAN_S = 36;
+const RISE_GAIN = 1.6;
+const FALL_TAU_S = 30;
 
 function rampPath(values: number[], w: number, h: number, pad: number, yMin: number, yMax: number): string {
   const span = Math.max(0.2, yMax - yMin);
@@ -1572,7 +1574,7 @@ function riseSeries(scale: number, start: number, dest: number): number[] {
       const gap = dest - cap;
       let frac = Math.log1p(gap / Math.max(cap, 1));
       frac = frac / (1 + frac);
-      frac = Math.min(1, Math.max(0, frac * scale));
+      frac = Math.min(1, Math.max(0, frac * RISE_GAIN * scale));
       cap += gap * frac;
       passes += 1;
     }
@@ -1583,7 +1585,7 @@ function riseSeries(scale: number, start: number, dest: number): number[] {
 
 function fallSeries(scale: number, start: number, dest: number): number[] {
   const n = 48;
-  const tau = 6 / Math.max(0.25, scale);
+  const tau = FALL_TAU_S / Math.max(0.25, scale);
   const k = 6;
   const s0 = 1 / (1 + Math.exp(k));
   const out: number[] = [];
@@ -1627,7 +1629,7 @@ function RampChart({
   const openY = pad + (1 - open) * (h - pad * 2);
   return (
     <div className="ramp-chart">
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 18 seconds">
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Cap ramp curves over 36 seconds">
         <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} />
         <line x1={pad} y1={pad} x2={pad} y2={h - pad} />
         <line x1={pad} y1={openY} x2={w - pad} y2={openY} data-k="aim" />
@@ -1636,7 +1638,7 @@ function RampChart({
         <text x={w - pad} y={Math.max(pad + 8, openY - 3)} textAnchor="end">
           {open >= 0.99 ? "GPU max" : `${Math.round(open * 100)}% of max`}
         </text>
-        <text x={w - pad} y={h - 1} textAnchor="end">18 s</text>
+        <text x={w - pad} y={h - 1} textAnchor="end">36 s</text>
       </svg>
       <label className="ramp-row">
         Ramp up

@@ -78,7 +78,7 @@ def test_a_drop_in_draw_follows_the_sigmoid() -> None:
     assert abs(held - 1000.0) < 1.0
     soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 101.7)
     assert 1000.0 - soft < 2.0
-    mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 107.0)
+    mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 101.0 + gpu_power._SIGMOID_TAU_S)
     dest = 200.0 / 0.35
     assert abs(mid - (1000.0 + (dest - 1000.0) * 0.5)) < 8.0
 
