@@ -1138,6 +1138,79 @@ def _fit_budget(
     return list(caps)
 
 
+def _clamp_posted(val: float, lo: float, hi: float) -> float:
+    return min(_cap_ceiling(lo, hi), max(float(lo), float(val)))
+
+
+def _gpu_budget_plan(
+    cur_sum: float,
+    draw_sum: float,
+    floor_sum: float,
+    share: float,
+) -> tuple[float, float]:
+    """GPU cap left, and the watt sum the checked caps should reach.
+
+    Cap left is the GPU budget the caps have not taken. The caps rise while
+    it is above zero and stop when it hits zero. The sum is not posted above
+    the budget. When the BMC minimums already fill that budget, the free
+    draw watts are opened on top of those minimums, once, and held until the
+    draw uses them.
+    """
+    share = max(0.0, float(share))
+    cur_sum = max(0.0, float(cur_sum))
+    draw_sum = max(0.0, float(draw_sum))
+    floor_sum = max(0.0, float(floor_sum))
+    draw_left = share - draw_sum
+    if floor_sum >= share - 0.5:
+        already = max(0.0, cur_sum - floor_sum)
+        left = draw_left - already
+        if left > 0.5:
+            return left, cur_sum + left
+        if draw_left <= 0.0:
+            return left, floor_sum
+        return left, max(floor_sum, cur_sum)
+    if cur_sum <= share:
+        return share - cur_sum, share
+    already = cur_sum - share
+    left = draw_left - already
+    if draw_left <= 0.0:
+        return min(0.0, draw_left), share
+    if left > 0.5:
+        return left, cur_sum + left
+    return max(0.0, left), cur_sum
+
+
+def _approach_budget(
+    current: list[float],
+    proposed: list[float],
+    bounds: list[tuple[float, float]],
+    target: float,
+) -> list[float]:
+    """Move from the live cap toward the curve until the sum reaches `target`.
+
+    A log step that still fits is kept. A step that would pass the free
+    watts is cut so the sum lands on the target. A fall is applied first.
+    """
+    cur = [_clamp_posted(c, lo, hi) for c, (lo, hi) in zip(current, bounds)]
+    prop = [_clamp_posted(p, lo, hi) for p, (lo, hi) in zip(proposed, bounds)]
+    base = [min(c, p) for c, p in zip(cur, prop)]
+    if sum(base) > target + 0.5:
+        return _fit_budget(base, target, bounds)
+    room = target - sum(base)
+    gaps = [max(0.0, p - b) for b, p in zip(base, prop)]
+    gap_sum = sum(gaps)
+    if room <= 0.5 or gap_sum <= 0.5:
+        return base
+    frac = min(1.0, room / gap_sum)
+    out = [
+        _clamp_posted(b + g * frac, lo, hi)
+        for b, g, (lo, hi) in zip(base, gaps, bounds)
+    ]
+    if sum(out) > target + 1.0:
+        return _fit_budget(out, target, bounds)
+    return out
+
+
 # Same step the ramp chart draws. One log step each 0.7 s, replayed from the origin.
 _PASS_S = 0.7
 
@@ -1227,14 +1300,29 @@ def _range_caps(
     max_allowable_w: float,
     now: float,
 ) -> tuple[list[float], float]:
-    """Per-GPU curve, then an immediate budget fit."""
+    """Per-GPU curve, then spend GPU cap left until the sum hits the budget."""
     if not draws:
         return [], float(load)
     shaped = [
         _shape_gpu_cap(gid, draw, cap, load, span, lo, hi, now)
         for gid, draw, cap, (lo, hi) in zip(gids, draws, caps, bounds)
     ]
-    fitted = _fit_budget(shaped, max_allowable_w, bounds)
+    # A cap already commanded but not yet on the BMC still counts, so the
+    # next pass does not open the same free watts again.
+    budget_now: list[float] = []
+    for gid, cap in zip(gids, caps):
+        commanded = LOOP.last_cap_by_id.get(gid)
+        if commanded is None:
+            budget_now.append(float(cap))
+        else:
+            budget_now.append(max(float(cap), float(commanded)))
+    _left, target = _gpu_budget_plan(
+        sum(budget_now),
+        sum(draws),
+        sum(lo for lo, _hi in bounds),
+        max_allowable_w,
+    )
+    fitted = _approach_budget(caps, shaped, bounds, target)
     for gid, before, after in zip(gids, shaped, fitted):
         if after < before - 0.5:
             LOOP.cap_ramp.pop(gid, None)
@@ -2605,6 +2693,9 @@ def _snapshot_locked(
         _note_usage(rec["id"], watts, now)
 
     loop_keys = loop_node_keys()
+    # Unselected nodes stay in the GPU sum at their BMC max. Checked caps
+    # share what remains, and rise while GPU cap left is above zero.
+    share_left_w = max(0.0, max_allowable_w - _unselected_hold_w(live_rows, loop_keys))
     controlled = [r for r in live_rows if _row_in_loop(r, loop_keys)]
     controlling = (power_snap.get("mode") or "static") == "dynamic"
     if controlling != LOOP.control:
@@ -2677,9 +2768,6 @@ def _snapshot_locked(
             if prev is None or float(prev) <= 0:
                 prev = float(rec["watts"]) / max(desired_p, 0.05)
             current.append(float(prev))
-        # Unselected nodes stay in the GPU sum. Cap left holds each of them
-        # at its BMC max, then the checked nodes share what remains.
-        share_left_w = max(0.0, max_allowable_w - _unselected_hold_w(live_rows, loop_keys))
         new_caps, best_p = _range_caps(
             gids,
             draws,
@@ -2891,18 +2979,19 @@ def _snapshot_locked(
     picked: dict[str, Any] | None = None
     gpu_total_w = 0.0
     cap_total_w = 0.0
-    gpu_committed_w = 0.0
+    checked_cap_w = 0.0
+    checked_draw_w = 0.0
+    checked_floor_w = 0.0
     for i, (watts, gid, rec, sp, lo, hi) in enumerate(gpu_pool, start=1):
-        # Selected and unselected live GPUs both count, in dynamic and static.
-        # An uncapped node is held at its BMC max so cap left moves when the
-        # checkbox changes, before that node's watts catch up.
+        # Checked GPUs count the cap already set. An uncapped node is held
+        # at its BMC max inside share_left, so cap left moves with the checkbox
+        # before that node's watts catch up.
         gpu_total_w += watts
         cap_total_w += sp
         if _row_in_loop(rec, loop_keys):
-            gpu_committed_w += watts
-        else:
-            ceiling = float(rec.get("hw_max") or hi or GPU_TDP_W)
-            gpu_committed_w += max(float(watts), ceiling)
+            checked_cap_w += sp
+            checked_draw_w += watts
+            checked_floor_w += lo
         if i > limit and not (gpu_id and gid == gpu_id):
             continue
         meta = ident.get(gid) or {}
@@ -3034,7 +3123,10 @@ def _snapshot_locked(
             or live_n,
             "cap_kw": round(cap_total_w / 1000.0, 1),
             "allowable_kw": round(max_allowable_w / 1000.0, 1),
-            "gpu_left_kw": round((max_allowable_w - gpu_committed_w) / 1000.0, 1),
+            "gpu_left_kw": round(
+                _gpu_budget_plan(checked_cap_w, checked_draw_w, checked_floor_w, share_left_w)[0] / 1000.0,
+                1,
+            ),
             "best_cap_percent": round(best_p * 100.0, 2),
         },
         "algo": {

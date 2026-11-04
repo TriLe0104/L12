@@ -5,6 +5,7 @@ from app import gpu_power
 
 def _reset() -> None:
     gpu_power.LOOP.cap_ramp.clear()
+    gpu_power.LOOP.last_cap_by_id.clear()
     gpu_power.LOOP.ramp_up = 1.0
     gpu_power.LOOP.ramp_down = 1.0
 
@@ -97,3 +98,85 @@ def test_budget_still_cuts_on_this_pass() -> None:
     )
     assert abs(sum(caps) - 600.0) < 1e-6
     assert "a" not in gpu_power.LOOP.cap_ramp
+
+
+def test_free_gpu_power_lifts_caps_until_cap_left_is_zero() -> None:
+    """BMC minimums already fill the share. Free draw watts still open the caps, once."""
+    _reset()
+    draws = [150.0, 150.0, 150.0, 150.0]
+    current = [200.0, 200.0, 200.0, 200.0]
+    bounds = [(200.0, 1400.0)] * 4
+    share = 700.0
+    left, target = gpu_power._gpu_budget_plan(sum(current), sum(draws), 800.0, share)
+    assert abs(left - (share - sum(draws))) < 1e-6
+    caps, _p = gpu_power._range_caps(
+        ["a", "b", "c", "d"],
+        draws,
+        current,
+        bounds,
+        0.50,
+        0.05,
+        share,
+        1.0,
+    )
+    assert abs(sum(caps) - target) < 1.0
+    assert abs(sum(caps) - sum(current) - left) < 1.0
+    assert min(caps) > 200.0
+    for gid, cap in zip(["a", "b", "c", "d"], caps):
+        gpu_power.LOOP.last_cap_by_id[gid] = cap
+    again, _p = gpu_power._range_caps(
+        ["a", "b", "c", "d"],
+        draws,
+        current,
+        bounds,
+        0.50,
+        0.05,
+        share,
+        2.0,
+    )
+    assert abs(sum(again) - sum(caps)) < 1.0
+    held_left, _held_target = gpu_power._gpu_budget_plan(sum(again), sum(draws), 800.0, share)
+    assert held_left <= 0.5
+
+
+def test_caps_fill_the_budget_and_do_not_pass_it() -> None:
+    _reset()
+    caps, _p = gpu_power._range_caps(
+        ["a", "b"],
+        [200.0, 200.0],
+        [200.0, 200.0],
+        [(50.0, 1400.0), (50.0, 1400.0)],
+        0.50,
+        0.05,
+        2000.0,
+        1.0,
+    )
+    assert abs(sum(caps) - 2000.0) < 1e-6
+    assert max(caps) < 1400.0
+
+
+def test_caps_rise_again_when_the_budget_grows() -> None:
+    _reset()
+    first, _p = gpu_power._range_caps(
+        ["a", "b"],
+        [200.0, 200.0],
+        [400.0, 400.0],
+        [(50.0, 1400.0), (50.0, 1400.0)],
+        0.50,
+        0.05,
+        1000.0,
+        1.0,
+    )
+    assert abs(sum(first) - 1000.0) < 1e-6
+    second, _p = gpu_power._range_caps(
+        ["a", "b"],
+        [200.0, 200.0],
+        first,
+        [(50.0, 1400.0), (50.0, 1400.0)],
+        0.50,
+        0.05,
+        1800.0,
+        2.0,
+    )
+    assert sum(second) > sum(first) + 50.0
+    assert abs(sum(second) - 1800.0) < 1e-6
