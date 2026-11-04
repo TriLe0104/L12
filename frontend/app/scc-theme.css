@@ -37,7 +37,10 @@ html[data-theme="scc"] body {
   background-image: linear-gradient(180deg, #f4f7fb 0%, #e8eef6 100%);
 }
 
-html[data-theme="scc"] .shell,
+html[data-theme="scc"] .shell {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+}
+
 html[data-theme="scc"] .shell:has(.rail:hover),
 html[data-theme="scc"] .shell:has(.rail:focus-within) {
   grid-template-columns: var(--rail-open) minmax(0, 1fr);
@@ -47,13 +50,6 @@ html[data-theme="scc"] .rail {
   color: var(--rail-ink);
   background: linear-gradient(180deg, #0f4aa0 0%, #0b3270 100%);
   border-right: 0;
-}
-
-html[data-theme="scc"] .brand-word,
-html[data-theme="scc"] .brand-sub,
-html[data-theme="scc"] .nav-label,
-html[data-theme="scc"] .rail-user {
-  opacity: 1;
 }
 
 html[data-theme="scc"] .brand-l12 {

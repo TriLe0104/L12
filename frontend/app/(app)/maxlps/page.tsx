@@ -612,7 +612,7 @@ export default function MaxLpsPage() {
         <article data-free={gpuLeftKw < 0 ? "over" : "ok"}>
           <span>GPU cap left</span>
           <b>{formatRackKw(Math.max(0, gpuLeftKw))}</b>
-          <small>GPU budget the caps have not taken. Caps rise until this is 0. An uncapped node is held at its BMC max.</small>
+          <small>Unused GPU budget. Uncapped nodes stay at BMC max.</small>
         </article>
       </section>
 
