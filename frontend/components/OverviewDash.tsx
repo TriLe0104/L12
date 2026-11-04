@@ -1179,41 +1179,48 @@ export function OverviewDash() {
   const [nodeLive, setNodeLive] = useState<ClusterHealthNode | null>(null);
   const [inv, setInv] = useState<MaxLpsInvRack[]>([]);
   const [telem, setTelem] = useState<TelemKind | null>(null);
+  const telemRef = useRef(telem);
+  const pickedRef = useRef(picked);
+  telemRef.current = telem;
+  pickedRef.current = picked;
 
   useEffect(() => {
     let cancelled = false;
-    const loadHealth = () => {
-      api
-        .clusterHealth()
-        .then((d) => {
-          if (!cancelled) setHealth(d);
-        })
-        .catch(() => {
-          /* health is additive */
-        });
-    };
-    const load = () => {
+    let cardsBusy = false;
+    let chartBusy = false;
+    const detailOpen = () => Boolean(telemRef.current || pickedRef.current);
+    const paramsFor = (cards: boolean) => {
       const params =
         range === "custom"
-          ? { from_ts: fromLocalInput(customFrom), to_ts: fromLocalInput(customTo) }
-          : { range };
+          ? { from_ts: fromLocalInput(customFrom), to_ts: fromLocalInput(customTo), cards }
+          : { range, cards };
       if (range === "custom") {
         const a = params.from_ts;
         const b = params.to_ts;
-        if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) || b <= a) {
-          return;
-        }
+        if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
       }
+      return params;
+    };
+    const loadCards = () => {
+      if (cardsBusy) return;
+      const params = paramsFor(true);
+      if (!params) return;
+      cardsBusy = true;
       api
         .clusterMetrics(params)
         .then((d) => {
-          if (!cancelled) {
-            setData(d);
-            if (d.health) setHealth(d.health);
-          }
+          if (cancelled) return;
+          setData((prev) => ({
+            ...d,
+            series: d.series?.length ? d.series : (prev?.series ?? []),
+          }));
+          if (d.health && !detailOpen()) setHealth(d.health);
         })
         .catch((err) => {
           if (!cancelled) setError(err instanceof Error ? err.message : "Metrics failed");
+        })
+        .finally(() => {
+          cardsBusy = false;
         });
       api
         .clusterPower()
@@ -1223,7 +1230,36 @@ export function OverviewDash() {
         .catch(() => {
           /* limiter is additive; metrics still render */
         });
-      loadHealth();
+      if (detailOpen()) {
+        api
+          .clusterHealth(false)
+          .then((d) => {
+            if (!cancelled) setHealth(d);
+          })
+          .catch(() => {
+            /* keep the card snapshot */
+          });
+      }
+    };
+    const loadChart = () => {
+      if (chartBusy) return;
+      const params = paramsFor(false);
+      if (!params) return;
+      chartBusy = true;
+      api
+        .clusterMetrics(params)
+        .then((d) => {
+          if (cancelled) return;
+          setData((prev) => ({ ...d, series: d.series?.length ? d.series : (prev?.series ?? []) }));
+        })
+        .catch(() => {
+          /* the card poll reports the error */
+        })
+        .finally(() => {
+          chartBusy = false;
+        });
+    };
+    const loadInv = () => {
       api
         .maxlpsInventory()
         .then((d) => {
@@ -1233,13 +1269,21 @@ export function OverviewDash() {
           /* list panel uses health nodes if inventory is empty */
         });
     };
-    load();
-    const id = window.setInterval(load, 2000);
-    const onRefresh = () => load();
+    loadCards();
+    loadChart();
+    loadInv();
+    const cardsId = window.setInterval(loadCards, 800);
+    const chartId = window.setInterval(loadChart, 5000);
+    const onRefresh = () => {
+      loadCards();
+      loadChart();
+      loadInv();
+    };
     window.addEventListener("l12-refresh", onRefresh);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      window.clearInterval(cardsId);
+      window.clearInterval(chartId);
       window.removeEventListener("l12-refresh", onRefresh);
     };
   }, [range, customFrom, customTo]);

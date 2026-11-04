@@ -748,7 +748,20 @@ def _watt_ts(dt: datetime) -> float:
 
 def watt_series(db: Session, start_ts: float, end_ts: float, points: int = 48) -> list[dict[str, Any]]:
     """Downsampled PowerShelf / GPU kW history for the cluster overview."""
-    rows = list(db.scalars(select(MaxLpsClusterWatt).order_by(MaxLpsClusterWatt.ts.asc())).all())
+    start_dt = datetime.fromtimestamp(float(start_ts) - 2, timezone.utc).replace(tzinfo=None)
+    end_dt = datetime.fromtimestamp(float(end_ts) + 2, timezone.utc).replace(tzinfo=None)
+    rows = list(
+        db.scalars(
+            select(MaxLpsClusterWatt)
+            .where(MaxLpsClusterWatt.ts >= start_dt, MaxLpsClusterWatt.ts <= end_dt)
+            .order_by(MaxLpsClusterWatt.ts.asc())
+        ).all()
+    )
+    if not rows:
+        rows = list(
+            db.scalars(select(MaxLpsClusterWatt).order_by(MaxLpsClusterWatt.ts.desc()).limit(points)).all()
+        )
+        rows.reverse()
     if not rows:
         return []
     picked: list[MaxLpsClusterWatt] = []

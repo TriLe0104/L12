@@ -22,7 +22,7 @@ from .config import settings
 
 _TLS = ssl._create_unverified_context()
 _EXPAND = "?$expand=.($levels=1)"
-_POLL_S = 5.0
+_POLL_S = 0.4
 _GET_TIMEOUT = 8.0
 
 _RANK = {"ok": 0, "unknown": 1, "warning": 2, "critical": 3}
@@ -858,9 +858,12 @@ def _health_checks(nodes: list[dict[str, Any]], summary: dict[str, Any]) -> list
     return checks[:40]
 
 
-def _public_node(n: dict[str, Any]) -> dict[str, Any]:
+def _public_node(n: dict[str, Any], *, brief: bool = False) -> dict[str, Any]:
     th = n.get("thermal") or {}
     fn = n.get("fans") or {}
+    leak = n.get("leak") or {}
+    if brief and isinstance(leak, dict):
+        leak = {k: v for k, v in leak.items() if k != "detectors"}
     return {
         "bmc_ip": n.get("bmc_ip"),
         "rack_id": n.get("rack_id"),
@@ -879,10 +882,10 @@ def _public_node(n: dict[str, Any]) -> dict[str, Any]:
             "hottest": th.get("hottest"),
             "inlet_c": th.get("inlet_c"),
             "exhaust_c": th.get("exhaust_c"),
-            "temps": (th.get("temps") or [])[:48],
+            "temps": [] if brief else (th.get("temps") or [])[:48],
             "gpu_temps": (th.get("gpu_temps") or [])[:4],
         },
-        "leak": n.get("leak"),
+        "leak": leak,
         "fans": {
             "status": fn.get("status"),
             "pwm_pct": fn.get("pwm_pct"),
@@ -890,7 +893,7 @@ def _public_node(n: dict[str, Any]) -> dict[str, Any]:
             "rpm_min": fn.get("rpm_min"),
             "count": fn.get("count"),
             "running": fn.get("running"),
-            "items": (fn.get("items") or [])[:24],
+            "items": [] if brief else (fn.get("items") or [])[:24],
         },
         "power": n.get("power"),
         "cbc": n.get("cbc"),
@@ -906,7 +909,7 @@ def nodes_reporting(snap: dict[str, Any] | None) -> int:
     return n
 
 
-def snapshot() -> dict[str, Any]:
+def snapshot(*, brief: bool = False) -> dict[str, Any]:
     _ensure_watch()
     with _LOCK:
         snap = dict(_SNAP)
@@ -924,7 +927,7 @@ def snapshot() -> dict[str, Any]:
         "probe_ip": (getattr(settings, "bmc_probe_ip", None) or None),
         "node_count": len(nodes),
         "inventory_nodes": summary.get("inventory_nodes") if isinstance(summary, dict) else None,
-        "nodes": [_public_node(n) for n in nodes],
+        "nodes": [_public_node(n, brief=brief) for n in nodes],
         **summary,
         "checks": _health_checks(nodes, summary),
     }
@@ -968,12 +971,23 @@ def _poll_on_pxe(host: str, targets: list[dict[str, str]]) -> list[dict[str, Any
 
     if not targets or not pxe_hop.ensure_host(host):
         return []
-    by_ip = pxe_hop.fetch_bmc_health(
-        [{"bmc_ip": t["bmc_ip"], "user": t.get("user") or "ADMIN", "password": t.get("password") or ""} for t in targets],
-        _health_paths(),
-        timeout=40.0,
-        host=host,
-    )
+    index = {t["bmc_ip"]: t for t in targets}
+
+    def _sink(ip: str, bodies: dict[str, Any]) -> None:
+        tgt = index.get(ip)
+        if tgt:
+            _merge_node(_assemble(tgt, bodies or {}, "hop"))
+
+    pxe_hop.set_health_sink(_sink)
+    try:
+        by_ip = pxe_hop.fetch_bmc_health(
+            [{"bmc_ip": t["bmc_ip"], "user": t.get("user") or "ADMIN", "password": t.get("password") or ""} for t in targets],
+            _health_paths(),
+            timeout=40.0,
+            host=host,
+        )
+    finally:
+        pxe_hop.set_health_sink(None)
     return [_assemble(t, by_ip.get(t["bmc_ip"]) or {}, "hop") for t in targets]
 
 
@@ -1005,6 +1019,27 @@ def poll_one(ip: str) -> dict[str, Any]:
             _SNAP["error"] = None
             _SNAP["t"] = time.time()
     return _public_node(rec)
+
+
+def _merge_node(rec: dict[str, Any]) -> None:
+    """Publish one BMC as soon as it answers. A miss keeps the last good row."""
+    if not rec.get("bmc_ip"):
+        return
+    with _LOCK:
+        prev = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") == rec.get("bmc_ip")]
+        others = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") != rec.get("bmc_ip")]
+        if rec.get("error") and prev and not prev[0].get("error"):
+            nodes = others + prev
+        else:
+            nodes = others + [rec]
+        live = [n for n in nodes if not n.get("error")]
+        _SNAP["nodes"] = live or nodes[:1]
+        _SNAP["summary"] = _summarize(live)
+        _SNAP["t"] = time.time()
+        if live:
+            _SNAP["source"] = "redfish"
+            _SNAP["via"] = rec.get("via") or _SNAP.get("via")
+            _SNAP["error"] = None
 
 
 def _store(nodes: list[dict[str, Any]], via: str, errors: list[str]) -> None:

@@ -398,7 +398,7 @@ METRIC_SPANS = {
 }
 
 
-def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> dict:
+def _inventory_metrics(db: Session, start: float, end: float, span_key: str, *, cards: bool = False) -> dict:
     """Cluster overview from registered MaxLPS racks + live Redfish / PowerShelf."""
     racks = maxlps_inventory.load_racks(db)
     n_racks = len(racks)
@@ -427,7 +427,7 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> 
     envelope = (budget * thr / 100.0) if budget > 0 else float(snap.get("envelope_kw") or 0.0)
     available_kw = envelope - shelf_kw
     power_pct = min(100.0, (shelf_kw / nameplate) * 100.0) if nameplate else 0.0
-    history = maxlps_inventory.watt_series(db, start, end, points=48)
+    history = [] if cards else maxlps_inventory.watt_series(db, start, end, points=48)
     hist_live = any(float(p.get("power_kw") or 0) > 0.01 or float(p.get("gpu_kw") or 0) > 0.01 for p in (history or []))
     if history and hist_live:
         series = []
@@ -451,6 +451,8 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> 
             series[-1]["power_kw"] = shelf_kw
             series[-1]["gpu_kw"] = gpu_kw
             series[-1]["gpu"] = gpu_pct
+    elif cards:
+        series = []
     else:
         series = [
             {
@@ -468,7 +470,7 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str) -> 
             }
             for i in range(48)
         ]
-    health = bmc_health.snapshot()
+    health = bmc_health.snapshot(brief=cards)
     # Same nodes the list marks OK, warning, or critical. GPU watts until that poll has a row.
     nodes_on = bmc_health.nodes_reporting(health) if health.get("nodes") else alive["nodes_on"]
     return {
@@ -551,6 +553,7 @@ def metrics(
     span: str = Query(default="5m", alias="range"),
     from_ts: float | None = Query(default=None),
     to_ts: float | None = Query(default=None),
+    cards: bool = Query(default=False),
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -564,7 +567,7 @@ def metrics(
         start = now - window
         span_key = span if span in METRIC_SPANS else "5m"
     if maxlps_inventory.inventory_count(db):
-        return _inventory_metrics(db, start, end, span_key)
+        return _inventory_metrics(db, start, end, span_key, cards=cards)
     return _empty_metrics(db, start, end, span_key)
 
 
@@ -629,8 +632,11 @@ def _empty_metrics(db: Session, start: float, end: float, span_key: str) -> dict
 
 
 @router.get("/health")
-def cluster_health(_user: User = Depends(get_current_user)) -> dict:
-    return bmc_health.snapshot()
+def cluster_health(
+    brief: bool = Query(default=False),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    return bmc_health.snapshot(brief=brief)
 
 
 @router.get("/health/node")

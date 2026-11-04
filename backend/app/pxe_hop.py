@@ -35,6 +35,7 @@ class _Hop:
         self.scripts_ready = False
         self.cap_script = ""
         self.power_script = ""
+        self.health_script = ""
         self.power_pipe = None
         self.pipe_lock = threading.Lock()
         self.exec_gate = threading.Semaphore(4)
@@ -163,6 +164,7 @@ def _shutdown_hop(hop: _Hop) -> None:
     hop.scripts_ready = False
     hop.cap_script = ""
     hop.power_script = ""
+    hop.health_script = ""
     _stop_power_pipe(hop)
     try:
         hop.client.close()
@@ -760,12 +762,14 @@ def one(target):
             bodies[key] = body if isinstance(body, dict) else {"_error": "bad-body"}
     return {"bmc_ip": ip, "bodies": bodies}
 
-n = max(1, min(8, len(targets) or 1))
-nodes = []
+n = max(1, min(18, len(targets) or 1))
 with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
-    for row in ex.map(one, targets):
-        nodes.append(row)
-json.dump({"ok": True, "nodes": nodes}, sys.stdout)
+    futs = [ex.submit(one, target) for target in targets]
+    for fut in concurrent.futures.as_completed(futs):
+        sys.stdout.write(json.dumps(fut.result(), separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+sys.stdout.write(json.dumps({"ok": True, "done": True}) + "\n")
+sys.stdout.flush()
 """
 
 
@@ -777,13 +781,21 @@ def _ensure_hop_scripts() -> None:
     hop = _session()
     cap_stamp = _script_stamp(_HOP_GPU_CAP)
     power_stamp = _script_stamp(_HOP_GPU_POWER)
-    if hop.scripts_ready and hop.cap_script == cap_stamp and hop.power_script == power_stamp:
+    health_stamp = _script_stamp(_HOP_HEALTH)
+    if (
+        hop.scripts_ready
+        and hop.cap_script == cap_stamp
+        and hop.power_script == power_stamp
+        and hop.health_script == health_stamp
+    ):
         return
     if not hop.scripts_ready:
         run("cat > /tmp/l12-bmc-pipe.py", timeout=8, stdin_data=_HOP_PIPE)
         run("cat > /tmp/l12-bmc-http.py", timeout=8, stdin_data=_HOP_HTTP)
         run("cat > /tmp/l12-psu-power.py", timeout=8, stdin_data=_HOP_PSU_POWER)
+    if not hop.scripts_ready or hop.health_script != health_stamp:
         run("cat > /tmp/l12-bmc-health.py", timeout=8, stdin_data=_HOP_HEALTH)
+        hop.health_script = health_stamp
     if not hop.scripts_ready or hop.power_script != power_stamp:
         run("cat > /tmp/l12-gpu-power.py", timeout=8, stdin_data=_HOP_GPU_POWER)
         hop.power_script = power_stamp
@@ -1653,13 +1665,54 @@ def _fetch_psu_power(targets: list[dict[str, str]], timeout: float) -> dict[str,
     return by_ip
 
 
+_HEALTH_SINK = None
+_HEALTH_SINK_LOCK = threading.Lock()
+
+
+def set_health_sink(fn) -> None:
+    """Called with (bmc_ip, bodies) as each compute BMC finishes a health pass."""
+    global _HEALTH_SINK
+    with _HEALTH_SINK_LOCK:
+        _HEALTH_SINK = fn
+
+
+def _health_sink_call(ip: str, bodies: dict[str, Any]) -> None:
+    with _HEALTH_SINK_LOCK:
+        fn = _HEALTH_SINK
+    if fn is None or not ip:
+        return
+    try:
+        fn(ip, bodies)
+    except Exception:
+        pass
+
+
+def _take_health_payload(payload: dict[str, Any], by_ip: dict[str, dict[str, Any]]) -> bool:
+    """Ingest one health line. Returns True when the pass is finished."""
+    if payload.get("done"):
+        return True
+    nodes = payload.get("nodes")
+    if isinstance(nodes, list) and not payload.get("bmc_ip"):
+        for node in nodes:
+            if isinstance(node, dict):
+                _take_health_payload(node, by_ip)
+        return True
+    ip = str(payload.get("bmc_ip") or "")
+    if not ip:
+        return False
+    bodies = payload.get("bodies") if isinstance(payload.get("bodies"), dict) else {}
+    by_ip[ip] = bodies
+    _health_sink_call(ip, bodies)
+    return False
+
+
 def fetch_bmc_health(
     targets: list[dict[str, str]],
     paths: dict[str, str],
     timeout: float = 40.0,
     host: str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """One SSH exec per PXE. The PXE fans Redfish out to that rack's BMCs."""
+    """One SSH exec per PXE. Each finished BMC is applied before the rest return."""
     with on_host(host):
         return _fetch_bmc_health(targets, paths, timeout)
 
@@ -1674,18 +1727,50 @@ def _fetch_bmc_health(
     except Exception:
         pass
     spec = json.dumps({"timeout": 3.0, "targets": targets, "paths": paths})
-    code, out, err = run("PYTHONUNBUFFERED=1 python3 -u /tmp/l12-bmc-health.py", timeout=timeout, stdin_data=spec)
-    payload = _stdout_json(out)
-    if not payload:
-        raise RuntimeError(err or f"BMC health empty (exit {code})")
+    hop = _session()
+    if not hop.exec_gate.acquire(timeout=max(1.0, float(timeout))):
+        raise RuntimeError("PXE hop busy")
+    chunks: list[str] = []
     by_ip: dict[str, dict[str, Any]] = {}
-    for node in payload.get("nodes") or []:
-        if not isinstance(node, dict):
-            continue
-        ip = str(node.get("bmc_ip") or "")
-        bodies = node.get("bodies") if isinstance(node.get("bodies"), dict) else {}
-        if ip:
-            by_ip[ip] = bodies
+    err = ""
+    try:
+        client = hop.client
+        stdin, stdout, stderr = client.exec_command(
+            "PYTHONUNBUFFERED=1 python3 -u /tmp/l12-bmc-health.py",
+            timeout=timeout,
+        )
+        try:
+            stdin.write(spec)
+            stdin.channel.shutdown_write()
+        except Exception:
+            pass
+        stdout.channel.settimeout(max(1.0, float(timeout)))
+        deadline = time.time() + max(1.0, float(timeout))
+        while time.time() < deadline:
+            try:
+                line = stdout.readline()
+            except Exception as exc:
+                err = str(exc)
+                break
+            if not line:
+                break
+            chunks.append(line)
+            payload = _stdout_json(line)
+            if payload and _take_health_payload(payload, by_ip):
+                break
+        try:
+            stderr.channel.settimeout(0.2)
+            err = err or stderr.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+    finally:
+        hop.exec_gate.release()
+    if not by_ip:
+        blob = _stdout_json("".join(chunks))
+        if blob:
+            _take_health_payload(blob, by_ip)
+    if not by_ip:
+        raise RuntimeError((err or "BMC health empty")[:180])
     return by_ip
 
 

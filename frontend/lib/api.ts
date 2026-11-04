@@ -250,15 +250,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
-  clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number } = {}) => {
+  clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number; cards?: boolean } = {}) => {
     const qs = new URLSearchParams();
     if (params.range) qs.set("range", params.range);
     if (params.from_ts != null) qs.set("from_ts", String(params.from_ts));
     if (params.to_ts != null) qs.set("to_ts", String(params.to_ts));
+    if (params.cards) qs.set("cards", "1");
     const q = qs.toString();
     return request<import("./cluster").ClusterMetrics>(`/api/cluster/metrics${q ? `?${q}` : ""}`);
   },
-  clusterHealth: () => request<import("./cluster").ClusterHealth>("/api/cluster/health"),
+  clusterHealth: (brief = false) =>
+    request<import("./cluster").ClusterHealth>(`/api/cluster/health${brief ? "?brief=1" : ""}`),
   clusterHealthNode: (bmcIp: string) =>
     request<import("./cluster").ClusterHealthNode>(
       `/api/cluster/health/node?bmc_ip=${encodeURIComponent(bmcIp)}`,
