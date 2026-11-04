@@ -2,7 +2,7 @@
 
 import { useUiTheme } from "@/lib/ui-theme";
 
-/** L12 cat mark + wordmark. SCC mode uses a shield mark and SCC - Guarder. */
+/** L12 cat mark + wordmark. SCC mode uses a shield mark and Libra. */
 const MARK = "/brand/l12-mark.png";
 
 function SccMark({ size, className }: { size: number; className?: string }) {

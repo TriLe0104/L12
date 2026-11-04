@@ -52,7 +52,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    document.title = theme === "scc" ? "SCC - Guarder" : "L12 App";
+    document.title = theme === "scc" ? "Libra" : "L12 App";
   }, [theme]);
 
   const setTheme = useCallback((next: UiTheme) => {
@@ -64,7 +64,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     () => ({
       theme,
       setTheme,
-      productName: theme === "scc" ? "SCC - Guarder" : "L12",
+      productName: theme === "scc" ? "Libra" : "L12",
     }),
     [theme, setTheme],
   );
