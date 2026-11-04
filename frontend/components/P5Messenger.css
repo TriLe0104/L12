@@ -1513,7 +1513,7 @@
   }
 }
 
-/* SCC Mode — same dock, Libra chrome (navy / paper) so it matches the shell. */
+/* Production Mode — same dock, Libra chrome (navy / paper) so it matches the shell. */
 html[data-theme="scc"] .p5-im {
   color: var(--ink);
   background: #f4f7fb;

@@ -1,4 +1,4 @@
-/* SCC Mode — light SMC-style shell. Features and layout stay the same. */
+/* Production Mode — light SMC-style shell. Features and layout stay the same. */
 html[data-theme="scc"] {
   color-scheme: light;
   --ink: #1e293b;
