@@ -27,14 +27,12 @@ def test_a_tight_cap_rises_toward_draw_over_gpu_load() -> None:
 def test_an_oversized_cap_falls_toward_draw_over_gpu_load() -> None:
     _reset()
     # 188 W on a 1230 W cap is about 15%, under a 50% ± 5% band.
-    held = gpu_power._shape_gpu_cap("g1", 188.0, 1230.0, 0.50, 0.05, 200.0, 1400.0, 10.0)
-    assert abs(held - 1230.0) < 1.0
     dest = 188.0 / 0.50
-    mid = gpu_power._shape_gpu_cap(
-        "g1", 188.0, held, 0.50, 0.05, 200.0, 1400.0, 10.0 + gpu_power._SIGMOID_TAU_S
-    )
-    assert abs(mid - (1230.0 + (dest - 1230.0) * 0.5)) < 12.0
-    assert dest < mid < 900.0
+    first = gpu_power._shape_gpu_cap("g1", 188.0, 1230.0, 0.50, 0.05, 200.0, 1400.0, 10.0)
+    assert dest < first < 1230.0
+    gpu_power.LOOP.cap_ramp.clear()
+    second = gpu_power._shape_gpu_cap("g1", 188.0, first, 0.50, 0.05, 200.0, 1400.0, 10.7)
+    assert dest < second < first
 
 
 def test_lower_ramp_up_takes_a_smaller_step_toward_gpu_load() -> None:
@@ -85,13 +83,11 @@ def test_a_drop_in_draw_follows_the_sigmoid() -> None:
     _reset()
     bounds = (50.0, 1400.0)
     gpu_power._shape_gpu_cap("g1", 800.0, 1000.0, 0.50, 0.15, *bounds, 100.0)
-    held = gpu_power._shape_gpu_cap("g1", 200.0, 1000.0, 0.50, 0.15, *bounds, 101.0)
-    assert abs(held - 1000.0) < 1.0
-    soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 101.7)
-    assert 1000.0 - soft < 2.0
-    mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 101.0 + gpu_power._SIGMOID_TAU_S)
     dest = 200.0 / 0.50
-    assert abs(mid - (1000.0 + (dest - 1000.0) * 0.5)) < 8.0
+    first = gpu_power._shape_gpu_cap("g1", 200.0, 1000.0, 0.50, 0.15, *bounds, 101.0)
+    assert dest < first < 1000.0
+    second = gpu_power._shape_gpu_cap("g1", 200.0, first, 0.50, 0.15, *bounds, 101.7)
+    assert dest < second < first
 
 
 def test_budget_still_cuts_on_this_pass() -> None:
@@ -112,7 +108,7 @@ def test_budget_still_cuts_on_this_pass() -> None:
 
 def test_spare_budget_does_not_lift_an_oversized_cap() -> None:
     _reset()
-    gpu_power._range_caps(
+    caps, _p = gpu_power._range_caps(
         ["a"],
         [188.0],
         [1230.0],
@@ -122,17 +118,7 @@ def test_spare_budget_does_not_lift_an_oversized_cap() -> None:
         500_000.0,
         10.0,
     )
-    caps, _p = gpu_power._range_caps(
-        ["a"],
-        [188.0],
-        [1230.0],
-        [(200.0, 1400.0)],
-        0.50,
-        0.05,
-        500_000.0,
-        10.0 + gpu_power._SIGMOID_TAU_S,
-    )
-    assert 188.0 / 0.50 < caps[0] < 900.0
+    assert 188.0 / 0.50 < caps[0] < 1230.0
 
 
 def test_a_tight_cap_rises_toward_gpu_load_not_the_budget() -> None:

@@ -1778,7 +1778,7 @@ DYNAMIC_POWER_ATTRS: list[dict[str, Any]] = [
     {
         "name": "Ramp down",
         "aliases": ["ramp down", "fall"],
-        "says": "Scales the inverse sigmoid fall. At 1× the drop is halfway at 30 seconds. Faster ramp down shortens that. The green curve eases from above the current power line down to it.",
+        "says": "Scales how fast an oversized cap steps down toward draw divided by GPU load. Each pass starts from the cap the BMC is holding. Spare GPU budget does not hold the cap up. The green curve eases toward the current power line.",
     },
     {
         "name": "GPU min",

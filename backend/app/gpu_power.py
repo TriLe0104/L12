@@ -1093,6 +1093,24 @@ def _op_band(load: float, span: float) -> tuple[float, float]:
     return max(0.05, center - half), min(0.95, center + half)
 
 
+_FALL_GAIN = 0.55
+
+
+def _ease_down(cap: float, dest: float, scale: float = RAMP_SCALE) -> float:
+    """One step down from the live cap toward draw / GPU load.
+
+    A wide gap moves on this pass. The next step is smaller. Ramp down
+    scales the step. The clock is not used, so a restarted pass still falls.
+    """
+    gap = cap - dest
+    if gap <= 0:
+        return cap
+    frac = math.log1p(gap / max(cap, 1.0))
+    frac = frac / (1.0 + frac)
+    frac = min(1.0, max(0.0, frac * _FALL_GAIN * _ramp_scale(scale)))
+    return cap - gap * frac
+
+
 def _log_rise(cap: float, dest: float, scale: float = RAMP_SCALE) -> float:
     """Logarithmic step up. A wide gap takes a large step, then the step shrinks.
 
@@ -1263,8 +1281,8 @@ def _shape_gpu_cap(
 
     Inside the operation range the cap stays put. Above the range the cap is
     tight, so one log step climbs from the live cap toward draw / GPU load.
-    Below the range the cap is high versus usage, so an inverse sigmoid eases
-    down to that same point.
+    Below the range the cap is high versus usage, so each pass steps down
+    from the live cap toward that same point. Spare budget does not hold it up.
     """
     ceiling = _cap_ceiling(lo, hi)
     cap = min(ceiling, max(float(lo), float(cap)))
@@ -1276,15 +1294,9 @@ def _shape_gpu_cap(
     settle = _load_cap(draw, load, lo, hi)
     lo_band, hi_band = _op_band(load, span)
     ratio = draw / cap
-    ramp = LOOP.cap_ramp.get(gid)
     if ratio < lo_band and cap > settle + 2.0:
-        if ramp is None or ramp[0] != "down":
-            LOOP.cap_ramp[gid] = ("down", now, cap, draw)
-            origin, started = cap, now
-        else:
-            _direction, started, origin, _anchor = ramp
-        fallen = _inverse_sigmoid_fall(float(origin), settle, now - float(started), LOOP.ramp_down)
-        return min(float(origin), max(settle, fallen))
+        LOOP.cap_ramp[gid] = ("down", now, cap, draw)
+        return _ease_down(cap, settle, LOOP.ramp_down)
     if ratio > hi_band and cap + 2.0 < settle:
         LOOP.cap_ramp[gid] = ("up", now, cap, draw)
         return _log_rise(cap, settle, LOOP.ramp_up)
