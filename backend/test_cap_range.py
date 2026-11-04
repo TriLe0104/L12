@@ -15,26 +15,36 @@ def test_band_is_gpu_load_plus_or_minus_the_operation_range() -> None:
     assert gpu_power._op_band(0.80, 0.15) == (0.65, 0.95)
 
 
-def test_idle_cap_climbs_the_log_curve_toward_gpu_max() -> None:
+def test_a_tight_cap_rises_toward_draw_over_gpu_load() -> None:
     _reset()
-    first = gpu_power._shape_gpu_cap("g1", 230.0, 416.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
-    second = gpu_power._shape_gpu_cap("g1", 230.0, first, 0.50, 0.05, 50.0, 1400.0, 10.7)
-    third = gpu_power._shape_gpu_cap("g1", 230.0, second, 0.50, 0.05, 50.0, 1400.0, 11.4)
-    assert 416.0 < first < second < third < 1400.0
-    assert first - 416.0 > second - first
-    assert first > 700.0
+    # 400 W on a 500 W cap is 80%, above a 50% load. The cap climbs toward 800 W.
+    first = gpu_power._shape_gpu_cap("g1", 400.0, 500.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
+    second = gpu_power._shape_gpu_cap("g1", 400.0, first, 0.50, 0.05, 50.0, 1400.0, 10.7)
+    assert 500.0 < first < second < 800.0
+    assert first - 500.0 > second - first
 
 
-def test_lower_ramp_up_stops_short_of_the_ceiling() -> None:
+def test_an_oversized_cap_falls_toward_draw_over_gpu_load() -> None:
+    _reset()
+    # 188 W on a 1230 W cap is about 15%, under a 50% ± 5% band.
+    held = gpu_power._shape_gpu_cap("g1", 188.0, 1230.0, 0.50, 0.05, 200.0, 1400.0, 10.0)
+    assert abs(held - 1230.0) < 1.0
+    dest = 188.0 / 0.50
+    mid = gpu_power._shape_gpu_cap(
+        "g1", 188.0, held, 0.50, 0.05, 200.0, 1400.0, 10.0 + gpu_power._SIGMOID_TAU_S
+    )
+    assert abs(mid - (1230.0 + (dest - 1230.0) * 0.5)) < 12.0
+    assert dest < mid < 900.0
+
+
+def test_lower_ramp_up_takes_a_smaller_step_toward_gpu_load() -> None:
     _reset()
     gpu_power.LOOP.ramp_up = 0.5
-    cap = 416.0
-    t = 10.0
-    for _ in range(40):
-        cap = gpu_power._shape_gpu_cap("g1", 230.0, cap, 0.50, 0.05, 50.0, 1400.0, t)
-        t += 0.7
-    assert cap < 1100.0
-    assert cap > 800.0
+    slow = gpu_power._shape_gpu_cap("g1", 400.0, 500.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
+    _reset()
+    gpu_power.LOOP.ramp_up = 2.0
+    fast = gpu_power._shape_gpu_cap("g1", 400.0, 500.0, 0.50, 0.05, 50.0, 1400.0, 10.0)
+    assert 500.0 < slow < fast <= 800.0
 
 
 def test_ramp_scale_speeds_the_rise_and_the_fall() -> None:
@@ -80,7 +90,7 @@ def test_a_drop_in_draw_follows_the_sigmoid() -> None:
     soft = gpu_power._shape_gpu_cap("g1", 200.0, held, 0.50, 0.15, *bounds, 101.7)
     assert 1000.0 - soft < 2.0
     mid = gpu_power._shape_gpu_cap("g1", 200.0, soft, 0.50, 0.15, *bounds, 101.0 + gpu_power._SIGMOID_TAU_S)
-    dest = 200.0 / 0.35
+    dest = 200.0 / 0.50
     assert abs(mid - (1000.0 + (dest - 1000.0) * 0.5)) < 8.0
 
 
@@ -100,46 +110,32 @@ def test_budget_still_cuts_on_this_pass() -> None:
     assert "a" not in gpu_power.LOOP.cap_ramp
 
 
-def test_free_gpu_power_lifts_caps_until_cap_left_is_zero() -> None:
-    """BMC minimums already fill the share. Free draw watts still open the caps, once."""
+def test_spare_budget_does_not_lift_an_oversized_cap() -> None:
     _reset()
-    draws = [150.0, 150.0, 150.0, 150.0]
-    current = [200.0, 200.0, 200.0, 200.0]
-    bounds = [(200.0, 1400.0)] * 4
-    share = 700.0
-    left, target = gpu_power._gpu_budget_plan(sum(current), sum(draws), 800.0, share)
-    assert abs(left - (share - sum(draws))) < 1e-6
+    gpu_power._range_caps(
+        ["a"],
+        [188.0],
+        [1230.0],
+        [(200.0, 1400.0)],
+        0.50,
+        0.05,
+        500_000.0,
+        10.0,
+    )
     caps, _p = gpu_power._range_caps(
-        ["a", "b", "c", "d"],
-        draws,
-        current,
-        bounds,
+        ["a"],
+        [188.0],
+        [1230.0],
+        [(200.0, 1400.0)],
         0.50,
         0.05,
-        share,
-        1.0,
+        500_000.0,
+        10.0 + gpu_power._SIGMOID_TAU_S,
     )
-    assert abs(sum(caps) - target) < 1.0
-    assert abs(sum(caps) - sum(current) - left) < 1.0
-    assert min(caps) > 200.0
-    for gid, cap in zip(["a", "b", "c", "d"], caps):
-        gpu_power.LOOP.last_cap_by_id[gid] = cap
-    again, _p = gpu_power._range_caps(
-        ["a", "b", "c", "d"],
-        draws,
-        current,
-        bounds,
-        0.50,
-        0.05,
-        share,
-        2.0,
-    )
-    assert abs(sum(again) - sum(caps)) < 1.0
-    held_left, _held_target = gpu_power._gpu_budget_plan(sum(again), sum(draws), 800.0, share)
-    assert held_left <= 0.5
+    assert 188.0 / 0.50 < caps[0] < 900.0
 
 
-def test_caps_fill_the_budget_and_do_not_pass_it() -> None:
+def test_a_tight_cap_rises_toward_gpu_load_not_the_budget() -> None:
     _reset()
     caps, _p = gpu_power._range_caps(
         ["a", "b"],
@@ -151,32 +147,5 @@ def test_caps_fill_the_budget_and_do_not_pass_it() -> None:
         2000.0,
         1.0,
     )
-    assert abs(sum(caps) - 2000.0) < 1e-6
-    assert max(caps) < 1400.0
-
-
-def test_caps_rise_again_when_the_budget_grows() -> None:
-    _reset()
-    first, _p = gpu_power._range_caps(
-        ["a", "b"],
-        [200.0, 200.0],
-        [400.0, 400.0],
-        [(50.0, 1400.0), (50.0, 1400.0)],
-        0.50,
-        0.05,
-        1000.0,
-        1.0,
-    )
-    assert abs(sum(first) - 1000.0) < 1e-6
-    second, _p = gpu_power._range_caps(
-        ["a", "b"],
-        [200.0, 200.0],
-        first,
-        [(50.0, 1400.0), (50.0, 1400.0)],
-        0.50,
-        0.05,
-        1800.0,
-        2.0,
-    )
-    assert sum(second) > sum(first) + 50.0
-    assert abs(sum(second) - 1800.0) < 1e-6
+    assert 200.0 < min(caps) < 400.0
+    assert sum(caps) < 900.0

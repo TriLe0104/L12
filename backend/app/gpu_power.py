@@ -1215,19 +1215,25 @@ def _approach_budget(
 _PASS_S = 0.7
 
 
-def _rise_target(draw: float, load: float, scale_up: float, lo: float, hi: float) -> float:
-    """Where the log climb ends. 1× reaches the GPU ceiling. Lower stops partway."""
+def _load_cap(draw: float, load: float, lo: float, hi: float) -> float:
+    """Cap that puts this draw at GPU Load %. That is draw ÷ GPU load."""
     ceiling = _cap_ceiling(lo, hi)
-    base = min(ceiling, max(float(lo), float(draw) / max(float(load), 0.05)))
-    frac = min(1.0, _ramp_scale(scale_up))
-    return min(ceiling, max(float(lo), base + (ceiling - base) * frac))
+    return min(ceiling, max(float(lo), float(draw) / max(float(load), 0.05)))
+
+
+def _rise_target(draw: float, load: float, scale_up: float, lo: float, hi: float) -> float:
+    """Where a tight cap climbs. The destination is draw ÷ GPU load.
+
+    Ramp up only changes the size of each log step, via _log_rise.
+    """
+    del scale_up
+    return _load_cap(draw, load, lo, hi)
 
 
 def _fall_target(draw: float, load: float, span: float, lo: float, hi: float) -> float:
-    """Where the sigmoid settles after draw falls: the wide side of GPU load, past 2×."""
-    ceiling = _cap_ceiling(lo, hi)
-    ratio = max(0.05, float(load) - max(0.0, float(span)))
-    return min(ceiling, max(float(lo), float(draw) / ratio))
+    """Where an oversized cap settles: the same draw ÷ GPU load point."""
+    del span
+    return _load_cap(draw, load, lo, hi)
 
 
 def _log_along(origin: float, dest: float, elapsed: float, scale: float) -> float:
@@ -1253,32 +1259,37 @@ def _shape_gpu_cap(
     hi: float,
     now: float,
 ) -> float:
-    """Follow the ramp chart. Log up toward the GPU ceiling. Sigmoid down only after draw falls."""
+    """Move the cap so draw sits at GPU Load %.
+
+    Inside the operation range the cap stays put. Above the range the cap is
+    tight, so one log step climbs from the live cap toward draw / GPU load.
+    Below the range the cap is high versus usage, so an inverse sigmoid eases
+    down to that same point.
+    """
     ceiling = _cap_ceiling(lo, hi)
     cap = min(ceiling, max(float(lo), float(cap)))
     draw = float(draw)
     if cap <= 1.0 or draw <= 0:
-        nxt = min(ceiling, max(float(lo), draw / max(load, 0.05)))
+        nxt = _load_cap(draw, load, lo, hi) if draw > 0 else cap
         LOOP.cap_ramp.pop(gid, None)
         return nxt
-    rise_to = _rise_target(draw, load, LOOP.ramp_up, lo, hi)
-    fall_to = _fall_target(draw, load, span, lo, hi)
+    settle = _load_cap(draw, load, lo, hi)
+    lo_band, hi_band = _op_band(load, span)
+    ratio = draw / cap
     ramp = LOOP.cap_ramp.get(gid)
-    anchor = draw if ramp is None or len(ramp) < 4 else float(ramp[3])
-    dropped = draw < anchor * (1.0 - max(float(span), 0.22))
-    if dropped and cap > fall_to + 2.0:
+    if ratio < lo_band and cap > settle + 2.0:
         if ramp is None or ramp[0] != "down":
-            LOOP.cap_ramp[gid] = ("down", now, cap, anchor)
+            LOOP.cap_ramp[gid] = ("down", now, cap, draw)
             origin, started = cap, now
         else:
             _direction, started, origin, _anchor = ramp
-        fallen = _inverse_sigmoid_fall(float(origin), fall_to, now - float(started), LOOP.ramp_down)
-        return min(float(origin), max(fall_to, fallen))
-    if cap >= rise_to - 2.0:
+        fallen = _inverse_sigmoid_fall(float(origin), settle, now - float(started), LOOP.ramp_down)
+        return min(float(origin), max(settle, fallen))
+    if ratio > hi_band and cap + 2.0 < settle:
         LOOP.cap_ramp[gid] = ("up", now, cap, draw)
-        return min(rise_to, cap)
-    LOOP.cap_ramp[gid] = ("up", now, cap, max(anchor, draw))
-    return _log_rise(cap, rise_to, LOOP.ramp_up)
+        return _log_rise(cap, settle, LOOP.ramp_up)
+    LOOP.cap_ramp.pop(gid, None)
+    return cap
 
 
 def _reported_best_p(usages: list[float], caps: list[float], desired_p: float) -> float:
@@ -1300,32 +1311,25 @@ def _range_caps(
     max_allowable_w: float,
     now: float,
 ) -> tuple[list[float], float]:
-    """Per-GPU curve, then spend GPU cap left until the sum hits the budget."""
+    """Per-GPU curve. The GPU budget only cuts a sum that would pass it.
+
+    Spare budget does not lift a cap. GPU Load % does. A cap above draw ÷ GPU
+    load falls. A cap below it rises. Inside the operation range it holds.
+    """
     if not draws:
         return [], float(load)
     shaped = [
         _shape_gpu_cap(gid, draw, cap, load, span, lo, hi, now)
         for gid, draw, cap, (lo, hi) in zip(gids, draws, caps, bounds)
     ]
-    # A cap already commanded but not yet on the BMC still counts, so the
-    # next pass does not open the same free watts again.
-    budget_now: list[float] = []
-    for gid, cap in zip(gids, caps):
-        commanded = LOOP.last_cap_by_id.get(gid)
-        if commanded is None:
-            budget_now.append(float(cap))
-        else:
-            budget_now.append(max(float(cap), float(commanded)))
-    _left, target = _gpu_budget_plan(
-        sum(budget_now),
-        sum(draws),
-        sum(lo for lo, _hi in bounds),
-        max_allowable_w,
-    )
-    fitted = _approach_budget(caps, shaped, bounds, target)
-    for gid, before, after in zip(gids, shaped, fitted):
-        if after < before - 0.5:
-            LOOP.cap_ramp.pop(gid, None)
+    share = max(0.0, float(max_allowable_w))
+    if sum(shaped) > share + 0.5:
+        fitted = _fit_budget(shaped, share, bounds)
+        for gid, before, after in zip(gids, shaped, fitted):
+            if after < before - 0.5:
+                LOOP.cap_ramp.pop(gid, None)
+    else:
+        fitted = shaped
     return fitted, _reported_best_p(draws, fitted, load)
 
 

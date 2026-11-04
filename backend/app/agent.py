@@ -1713,7 +1713,7 @@ DYNAMIC_POWER_ATTRS: list[dict[str, Any]] = [
     {
         "name": "GPU cap left",
         "aliases": ["gpu cap left", "cap left", "gpu left"],
-        "says": "GPU budget the posted caps have not taken. Checked caps rise until this is 0 and are not set above the budget. An unchecked node is held at its BMC max, and that max is reserved first. If those minimums already fill the budget, the leftover draw watts are opened on top of the minimums once.",
+        "says": "GPU budget the posted caps have not taken. Caps are not set above it, and spare budget does not raise them. GPU Load % does. An unchecked node is held at its BMC max, and that max is reserved first.",
     },
     {
         "name": "Total power",
@@ -1763,17 +1763,17 @@ DYNAMIC_POWER_ATTRS: list[dict[str, Any]] = [
     {
         "name": "GPU Load %",
         "aliases": ["gpu load", "load percent", "target load", "desired cap"],
-        "says": "Where draw should sit as a percent of the cap. The fall target is draw divided by (GPU load minus the operation range). At a 1× ramp the rise still aims at the GPU ceiling, not only at draw divided by load.",
+        "says": "Where draw should sit as a percent of the cap. The cap moves toward draw divided by this percent. 180 W at 50% load belongs near a 360 W cap, not the GPU max.",
     },
     {
         "name": "Operation Range",
         "aliases": ["operation range", "op range", "band"],
-        "says": "Points around GPU Load %. The chart treats that band as where the cap can sit. A fall starts only after draw drops by at least this range or 22 percent, whichever is larger, then eases on an inverse sigmoid. The rise does not wait for the band. Each pass takes one log step from the live BMC cap.",
+        "says": "Points around GPU Load % where the cap stays put. Above the band the cap is tight, so it rises on a log curve toward draw divided by GPU load. Below the band the cap is high versus usage, so it falls on an inverse sigmoid toward that same point.",
     },
     {
         "name": "Ramp up",
         "aliases": ["ramp up", "rise"],
-        "says": "Scales the log rise. 1.00× reaches the GPU max. Lower stops partway between draw divided by GPU load and the ceiling. The step starts from the cap the BMC is holding, not the last command. Slider is 0.25× to 4×. The gold curve on the chart is this rise over 36 s, climbing toward the current power line.",
+        "says": "Scales how fast the log rise closes on draw divided by GPU load. The step starts from the cap the BMC is holding. It does not aim at the GPU max. Slider is 0.25× to 4×. The gold curve approaches the current power line over 36 s.",
     },
     {
         "name": "Ramp down",
