@@ -136,6 +136,7 @@ You can CONTROL the app: set the cluster name, add/remove MaxLPS racks, add a Pr
 You can CALL any L12 API as the signed-in user with list_app_routes then call_app. That covers fabric/network, provision hop/KVM, MaxLPS watts, halls and floor racks, users, board settings, workloads, purchase orders, staff tasks, uploads. Prefer add_node / patch_node over call_app for inventory. call_app uses the same permissions as the operator.
 You can SET the power limiter with set_power_cap. That is PATCH /api/cluster/power. There is no /api/limiter route. budget_kw is the cluster budget. max_rack_kw is the per-rack cap (20 kW minimum). gpu_power_percent is 10-100 and is the percent of total available power (threshold × budget minus live rack draw) used as the GPU cap.
 Power talk (limiter, limitter, MaxLPS, Dynamic Power, budget, envelope, GPU cap, closed loop, watts on the loop) is the Dynamic Power page. Always open_page maxlps or highlight_ui limiter. Never open cluster or overview for that. Cluster overview is health gauges. BMC power on/off/cycle stays on the node tools.
+When they ask what a Dynamic Power attribute means, what it is set to, or to explain the page, call explain_dynamic_power first. Pass topic when they named a field. Leave topic empty for the whole page. Explain from that tool only. Do not invent a formula. One or two sentences for one field, using the live numbers. If they asked for all of them, walk the attributes in the order the tool returns, still in your voice. That is the one time a longer answer is right. Then highlight_ui limiter.
 You can DRIVE the UI the user is looking at: open_page to switch screens, ui_click to press a labeled button or tab, ui_fill to type into a labeled field (submit true to send the form), highlight_ui to point at a rack, health tile, tab, or field so it lights up. The browser runs those after you call them. Prefer database tools when changing inventory. Use UI fill when they asked you to type into a form. When you talk about a rack, health card, or control, call highlight_ui so they see it on the page. add_racks and remove_rack already point the UI.
 NEVER write a tool name or arguments in the chat bubble. No highlight_ui, no target=, no label=, no action=, no XML. Spoken words only. Tools go through the function-call API.
 You dispatch minions with start_test_agent. They are your crew. They keep running after this turn. Talk like a phantom thief sending them out: use the minion name and said line from the tool result, state the mission, tell the operator the AGENTS tab is their radio. Prefer start_test_agent over a blocking run_sanity_check when they want it in the background. list_agents is the roster. stop_agent recalls one. open_agent tunes the radio to that minion. When a minion finishes you review their report and speak it here. Do not wait around in the turn for them.
@@ -330,6 +331,17 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "explain_dynamic_power",
+        "description": "Explain Dynamic Power attributes on /maxlps and return the live settings. Call this before answering what a field, chip, column, ramp, or the page means. topic is optional: gpu load, operation range, gpu cap left, ramp up, frequency, threshold, and so on. Omit topic for every attribute.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Field or phrase to explain. Empty means the whole Dynamic Power page."},
+            },
         },
     },
     {
@@ -1665,6 +1677,207 @@ def tool_set_cluster_name(db: Session, user: User, name: str, **_kw: Any) -> dic
         }
     except HTTPException as exc:
         return {"ok": False, "error": str(exc.detail)}
+
+
+DYNAMIC_POWER_ATTRS: list[dict[str, Any]] = [
+    {
+        "name": "PXE",
+        "aliases": ["pxe", "hop"],
+        "says": "The jump host saved in Provision. GPU cap writes and off-net power shelves go through that PXE. Power polls do not.",
+    },
+    {
+        "name": "Static",
+        "aliases": ["static", "static mode"],
+        "says": "Caps are put back to each GPU BMC max. The loop does not steer them. Redfish watts still update.",
+    },
+    {
+        "name": "Dynamic Power",
+        "aliases": ["dynamic", "dynamic power", "limiter", "closed loop"],
+        "says": "The cap loop is on. Checked GPUs get a new cap each pass. The page is /maxlps.",
+    },
+    {
+        "name": "Total rack",
+        "aliases": ["total rack", "rack power", "shelf"],
+        "says": "Live rack draw from PowerShelf total_power_out. That draw is what Total available power subtracts.",
+    },
+    {
+        "name": "GPU sum",
+        "aliases": ["gpu sum", "gpu draw", "watts"],
+        "says": "Sum of live GPU power. One BMC report per node, sensors HGX_GPU_n_Power_0. Stale samples are skipped.",
+    },
+    {
+        "name": "Total available power",
+        "aliases": ["total available", "available power", "headroom"],
+        "says": "Threshold times total power, minus live rack draw. This is the power still free after the racks.",
+    },
+    {
+        "name": "GPU cap left",
+        "aliases": ["gpu cap left", "cap left", "gpu left"],
+        "says": "GPU budget the posted caps have not taken. Checked caps rise until this is 0 and are not set above the budget. An unchecked node is held at its BMC max, and that max is reserved first. If those minimums already fill the budget, the leftover draw watts are opened on top of the minimums once.",
+    },
+    {
+        "name": "Total power",
+        "aliases": ["total power", "budget", "budget mw"],
+        "says": "Cluster power budget, edited in MW. Floor is 100 kW. Usable power is this times the threshold.",
+    },
+    {
+        "name": "Threshold",
+        "aliases": ["threshold"],
+        "says": "Percent of total power the cluster may use. Usable power = total power × threshold.",
+    },
+    {
+        "name": "Min kW / rack",
+        "aliases": ["min kw", "min rack", "minimum rack"],
+        "says": "Lowest power for a rack that is on. The most racks that fit is usable power divided by this.",
+    },
+    {
+        "name": "Max kW / rack",
+        "aliases": ["max kw", "max rack", "rack cap"],
+        "says": "Most power one rack may draw. Floor is 20 kW. The fewest racks is usable power divided by this.",
+    },
+    {
+        "name": "Racks",
+        "aliases": ["racks", "rack count"],
+        "says": "How many racks to feed. The hint runs from usable power divided by max kW per rack up to usable power divided by min kW per rack.",
+    },
+    {
+        "name": "GPU Power Budget",
+        "aliases": ["gpu power budget", "gpu power percent", "gpu power %", "gpu budget"],
+        "says": "Share of the power left after the racks that GPUs can use. GPU budget = (total power × threshold minus live rack power) × this percent. Range is 10 to 100.",
+    },
+    {
+        "name": "Run on",
+        "aliases": ["run on", "checked", "unchecked"],
+        "says": "Caps post only for checked nodes. Unchecked nodes still count in GPU power used, return to their BMC max, and that max comes off GPU cap left.",
+    },
+    {
+        "name": "Continuous",
+        "aliases": ["continuous"],
+        "says": "On: read GPUs and post caps as soon as the last pass finishes. Off: wait for Frequency. Power shelves always use Frequency.",
+    },
+    {
+        "name": "Frequency",
+        "aliases": ["frequency", "interval"],
+        "says": "Milliseconds between power reads and cap updates when Continuous is off. Shelves always use this clock. The ranking table has its own refresh and does not change the cap.",
+    },
+    {
+        "name": "GPU Load %",
+        "aliases": ["gpu load", "load percent", "target load", "desired cap"],
+        "says": "Where draw should sit as a percent of the cap. The fall target is draw divided by (GPU load minus the operation range). At a 1× ramp the rise still aims at the GPU ceiling, not only at draw divided by load.",
+    },
+    {
+        "name": "Operation Range",
+        "aliases": ["operation range", "op range", "band"],
+        "says": "Points around GPU Load %. The chart treats that band as where the cap can sit. A fall starts only after draw drops by at least this range or 22 percent, whichever is larger, then eases on an inverse sigmoid. The rise does not wait for the band. Each pass takes one log step from the live BMC cap.",
+    },
+    {
+        "name": "Ramp up",
+        "aliases": ["ramp up", "rise"],
+        "says": "Scales the log rise. 1.00× reaches the GPU max. Lower stops partway between draw divided by GPU load and the ceiling. The step starts from the cap the BMC is holding, not the last command. Slider is 0.25× to 4×. The gold curve on the chart is this rise over 36 s, climbing toward the current power line.",
+    },
+    {
+        "name": "Ramp down",
+        "aliases": ["ramp down", "fall"],
+        "says": "Scales the inverse sigmoid fall. At 1× the drop is halfway at 30 seconds. Faster ramp down shortens that. The green curve eases from above the current power line down to it.",
+    },
+    {
+        "name": "GPU min",
+        "aliases": ["gpu min", "minimum watts"],
+        "says": "Lowest cap the loop may post, in watts. The BMC AllowableMin can hold it higher. A posted cap never goes under that floor.",
+    },
+    {
+        "name": "GPU max",
+        "aliases": ["gpu max", "maximum watts"],
+        "says": "Highest cap the loop may post, in watts. The BMC AllowableMax can hold it lower. 1× ramp up aims at this ceiling.",
+    },
+    {
+        "name": "Ranking table",
+        "aliases": ["table", "ranking", "rank", "cap column", "watts column", "curve", "delta"],
+        "says": "Rows are live GPUs. W is draw. Cap is the commanded setpoint. Min-max is the floor and ceiling. Range is draw against that span. Curve is recent watts. Green is a gain, red is a loss. Table ms only refreshes the list. It does not post caps.",
+    },
+    {
+        "name": "Processes",
+        "aliases": ["process", "processes", "nvidia smi", "workload"],
+        "says": "The GPU inspector lists nvidia-smi compute apps for that GPU, sorted by GPU memory. More than four rows scroll. An empty read is idle. A failed read says the OS did not answer.",
+    },
+]
+
+
+def _fold_topic(text: str) -> str:
+    raw = (text or "").lower()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in raw).split())
+
+
+def _topic_hits(folded: str, name: str) -> bool:
+    if not name:
+        return False
+    if name in folded or folded in name:
+        return True
+    tokens = set(folded.split())
+    for word in name.split():
+        if len(word) < 4:
+            continue
+        if word in tokens or f"{word}s" in tokens or word in folded:
+            return True
+    return False
+
+
+def _match_power_attrs(topic: str | None) -> list[dict[str, str]]:
+    folded = _fold_topic(topic or "")
+    if not folded or folded in {"all", "everything", "page", "dynamic power", "attributes", "the page"} or any(
+        flag in folded for flag in ("every attribute", "all of them", "whole page", "the page", "everything")
+    ):
+        return [{"name": row["name"], "says": row["says"]} for row in DYNAMIC_POWER_ATTRS]
+    hits = []
+    for row in DYNAMIC_POWER_ATTRS:
+        names = [_fold_topic(row["name"]), *(_fold_topic(a) for a in row["aliases"])]
+        if any(_topic_hits(folded, name) for name in names):
+            hits.append({"name": row["name"], "says": row["says"]})
+    return hits
+
+
+def _dynamic_power_live() -> dict[str, Any]:
+    from . import gpu_power, power_limit
+
+    loop = gpu_power.LOOP
+    state = power_limit.STATE
+    return {
+        "mode": state.mode,
+        "writing_caps": bool(loop.control),
+        "total_power_kw": state.total_budget_kw,
+        "threshold_pct": power_limit.threshold_pct(),
+        "min_kw_per_rack": state.min_rack_kw,
+        "max_kw_per_rack": state.max_rack_kw,
+        "gpu_power_budget_pct": round(float(loop.gpu_power_percent) * 100.0, 1),
+        "continuous": bool(loop.continuous),
+        "frequency_ms": round(float(loop.interval_s) * 1000.0),
+        "gpu_load_pct": round(float(loop.desired_cap_percent) * 100.0, 1),
+        "operation_range_points": round(float(loop.operation_range) * 100.0, 1),
+        "ramp_up_x": round(float(loop.ramp_up), 2),
+        "ramp_down_x": round(float(loop.ramp_down), 2),
+        "gpu_min_w": loop.gpu_min_w,
+        "gpu_max_w": loop.gpu_max_w,
+    }
+
+
+def tool_explain_dynamic_power(topic: str | None = None, **_kw: Any) -> dict[str, Any]:
+    """Canonical meanings for the Dynamic Power page, plus the live settings."""
+    attrs = _match_power_attrs(topic)
+    whole = not attrs
+    if whole:
+        attrs = [{"name": row["name"], "says": row["says"]} for row in DYNAMIC_POWER_ATTRS]
+    try:
+        live = _dynamic_power_live()
+    except Exception as exc:
+        live = {"error": str(exc)[:180]}
+    return {
+        "ok": True,
+        "topic": (topic or "").strip(),
+        "matched": not whole,
+        "live": live,
+        "attributes": attrs,
+        "ui": _point_ui("look", "limiter", "dynamic power", path="/maxlps"),
+    }
 
 
 def tool_set_power_cap(
@@ -3029,6 +3242,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "list_test_runs": tool_list_test_runs,
     "read_logs": tool_read_logs,
     "set_cluster_name": tool_set_cluster_name,
+    "explain_dynamic_power": tool_explain_dynamic_power,
     "set_power_cap": tool_set_power_cap,
     "add_racks": tool_add_racks,
     "remove_rack": tool_remove_rack,
