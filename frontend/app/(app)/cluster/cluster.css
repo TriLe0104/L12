@@ -79,6 +79,100 @@
   flex-wrap: wrap;
 }
 
+.alert-bell {
+  position: relative;
+}
+
+.alert-bell-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--hair-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--steel);
+  cursor: pointer;
+}
+
+.alert-bell-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.alert-bell-btn[data-on="true"] {
+  color: var(--stop);
+  border-color: var(--stop);
+}
+
+.alert-bell-badge {
+  position: absolute;
+  top: -0.28rem;
+  right: -0.28rem;
+  min-width: 0.95rem;
+  height: 0.95rem;
+  padding: 0 0.22rem;
+  border-radius: 999px;
+  background: var(--stop);
+  color: #fff;
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 0.95rem;
+  text-align: center;
+}
+
+.alert-bell-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 40;
+  width: 16.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--hair-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lift);
+}
+
+.alert-bell-panel p {
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  color: var(--steel);
+  font-size: 0.75rem;
+}
+
+.alert-bell-panel button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.alert-bell-panel button:hover {
+  background: var(--btn-hover);
+}
+
+.alert-bell-panel b {
+  font-size: 0.75rem;
+}
+
+.alert-bell-panel span {
+  color: var(--steel);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
 .cluster-tools .field {
   min-width: 12rem;
   background: var(--panel);

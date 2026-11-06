@@ -3191,6 +3191,44 @@ def _snapshot_locked(
     return out
 
 
+def read_gpu_cap_left_kw(envelope_w: float, rack_draw_w: float) -> float | None:
+    """GPU cap left in kW from the live cache. Does not post caps or start the writer."""
+    allowable = _gpu_allowable_w(envelope_w, rack_draw_w, float(LOOP.gpu_power_percent))
+    with _LIVE_GPU_LOCK:
+        items = [
+            (str(gid), rec)
+            for gid, rec in _LIVE_GPU.items()
+            if isinstance(rec, dict) and rec.get("watts") is not None
+        ]
+    if not items:
+        return None
+    keys = loop_node_keys()
+    checked_cap = 0.0
+    checked_draw = 0.0
+    checked_floor = 0.0
+    unselected = 0.0
+    for gid, rec in items:
+        watts = float(rec["watts"])
+        posted = LOOP.last_posted.get(gid)
+        if posted is None:
+            posted = rec.get("cap_w") if rec.get("cap_w") is not None else rec.get("setpoint_w")
+        if posted is None:
+            posted = watts
+        lo = float(rec["min_w"]) if rec.get("min_w") is not None else float(LOOP.gpu_min_w)
+        hi = float(rec["max_w"]) if rec.get("max_w") is not None else float(LOOP.gpu_max_w or GPU_TDP_W)
+        parsed = _parse_gid(gid)
+        in_loop = keys is None or (parsed is not None and (parsed[0], parsed[1]) in keys)
+        if in_loop:
+            checked_cap += max(watts, float(posted))
+            checked_draw += watts
+            checked_floor += lo
+        else:
+            unselected += max(watts, hi)
+    share = max(0.0, allowable - unselected)
+    left_w, _target = _gpu_budget_plan(checked_cap, checked_draw, checked_floor, share)
+    return round(left_w / 1000.0, 1)
+
+
 def live_rack_draw(rid: str) -> dict[str, Any]:
     """Shelf watts plus whatever the GPU cache already has. Never blocks on Argus.
 

@@ -427,6 +427,7 @@ function ClusterPageInner() {
           </button>
         </div>
         <div className="cluster-tools">
+          <div id="cluster-alert-bell" />
           {tab === "floor" && (
             <>
               <select

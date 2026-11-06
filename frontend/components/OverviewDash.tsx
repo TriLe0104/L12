@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { api } from "@/lib/api";
 import { canEdit, useAuth } from "@/lib/auth";
@@ -1145,6 +1146,100 @@ function TimeChart({
   );
 }
 
+type ClusterAlert = { id: "leak" | "power" | "gpu"; title: string; detail: string };
+
+function overviewAlerts(
+  data: ClusterMetrics | null,
+  health: ClusterHealth | null,
+  power: PowerLimiterData | null,
+): ClusterAlert[] {
+  if (!data || data.source !== "inventory") return [];
+  const alerts: ClusterAlert[] = [];
+  const leakN = Number(health?.leak?.counts?.leak ?? 0);
+  const leakStatus = String(health?.leak?.status ?? "");
+  if (leakN > 0 || leakStatus === "critical" || leakStatus === "leak") {
+    alerts.push({
+      id: "leak",
+      title: "Leak",
+      detail: leakN > 0 ? `${leakN} detector${leakN === 1 ? "" : "s"} reporting a leak` : "A leak is reported",
+    });
+  }
+  const totalKw = power?.total_budget_kw ?? data.now.total_power_kw ?? 0;
+  const availableKw = data.now.available_kw ?? 0;
+  if (totalKw > 0 && availableKw < totalKw * 0.05) {
+    alerts.push({
+      id: "power",
+      title: "Low available power",
+      detail: `${formatRackKw(Math.max(0, availableKw))} left, under 5% of ${formatRackKw(totalKw)}`,
+    });
+  }
+  const gpuLeft = data.now.gpu_left_kw;
+  if (typeof gpuLeft === "number" && gpuLeft <= 0) {
+    alerts.push({
+      id: "gpu",
+      title: "No GPU cap left",
+      detail: "GPU cap left is 0",
+    });
+  }
+  return alerts;
+}
+
+function ClusterAlertBell({ alerts, onLeak }: { alerts: ClusterAlert[]; onLeak: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const n = alerts.length;
+  return (
+    <div className="alert-bell" ref={rootRef}>
+      <button
+        type="button"
+        className="alert-bell-btn"
+        data-on={n > 0 ? "true" : undefined}
+        aria-label={n > 0 ? `${n} cluster alerts` : "No cluster alerts"}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path
+            fill="currentColor"
+            d="M12 3a5 5 0 0 0-5 5v2.1c0 .7-.2 1.3-.6 1.9L5 14.2V16h14v-1.8l-1.4-2.2c-.4-.6-.6-1.2-.6-1.9V8a5 5 0 0 0-5-5zm0 18a2.4 2.4 0 0 0 2.3-1.6h-4.6A2.4 2.4 0 0 0 12 21z"
+          />
+        </svg>
+        {n > 0 ? <i className="alert-bell-badge">{n}</i> : null}
+      </button>
+      {open ? (
+        <div className="alert-bell-panel" role="menu">
+          {n === 0 ? (
+            <p>No alerts</p>
+          ) : (
+            alerts.map((alert) => (
+              <button
+                key={alert.id}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  if (alert.id === "leak") onLeak();
+                  setOpen(false);
+                }}
+              >
+                <b>{alert.title}</b>
+                <span>{alert.detail}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const RANGE_OPTS = [
   { id: "5m", label: "5m" },
   { id: "15m", label: "15m" },
@@ -1179,6 +1274,7 @@ export function OverviewDash() {
   const [nodeLive, setNodeLive] = useState<ClusterHealthNode | null>(null);
   const [inv, setInv] = useState<MaxLpsInvRack[]>([]);
   const [telem, setTelem] = useState<TelemKind | null>(null);
+  const [bellHost, setBellHost] = useState<HTMLElement | null>(null);
   const telemRef = useRef(telem);
   const pickedRef = useRef(picked);
   telemRef.current = telem;
@@ -1289,6 +1385,10 @@ export function OverviewDash() {
   }, [range, customFrom, customTo]);
 
   useEffect(() => {
+    setBellHost(document.getElementById("cluster-alert-bell"));
+  }, []);
+
+  useEffect(() => {
     if (!picked) {
       setNodeLive(null);
       return;
@@ -1334,6 +1434,12 @@ export function OverviewDash() {
     return () => window.removeEventListener("keydown", onKey);
   }, [picked, telem, consoleOpen]);
 
+  const alerts = overviewAlerts(data, health, power);
+  const bell =
+    bellHost != null
+      ? createPortal(<ClusterAlertBell alerts={alerts} onLeak={() => toggleTelem("leak")} />, bellHost)
+      : null;
+
   const toggleTelem = (kind: TelemKind) => {
     setConsoleOpen(false);
     setPicked(null);
@@ -1376,18 +1482,24 @@ export function OverviewDash() {
 
   if (error && !data) {
     return (
-      <section className="overview-dash" data-mona="overview">
-        <HealthSummary health={health} />
-        <p className="cluster-error">{error}</p>
-      </section>
+      <>
+        {bell}
+        <section className="overview-dash" data-mona="overview">
+          <HealthSummary health={health} />
+          <p className="cluster-error">{error}</p>
+        </section>
+      </>
     );
   }
   if (!data) {
     return (
-      <section className="overview-dash" data-mona="overview">
-        <HealthSummary health={null} />
-        <p className="widget-empty">Loading telemetry…</p>
-      </section>
+      <>
+        {bell}
+        <section className="overview-dash" data-mona="overview">
+          <HealthSummary health={null} />
+          <p className="widget-empty">Loading telemetry…</p>
+        </section>
+      </>
     );
   }
 
@@ -1415,6 +1527,8 @@ export function OverviewDash() {
   const showKw = (kw: number, live: boolean) => (live ? formatRackKw(kw) : dash);
 
   return (
+    <>
+    {bell}
     <section
       className="overview-dash"
       data-mona="overview"
@@ -1617,5 +1731,6 @@ export function OverviewDash() {
         </article>
       </div>
     </section>
+    </>
   );
 }

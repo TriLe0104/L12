@@ -597,6 +597,8 @@ export interface ClusterMetrics {
     gpu_tdp_kw?: number;
     envelope_kw?: number;
     available_kw?: number;
+    total_power_kw?: number | null;
+    gpu_left_kw?: number | null;
     tx_gbps: number;
     rx_gbps: number;
     disk_pct: number;
