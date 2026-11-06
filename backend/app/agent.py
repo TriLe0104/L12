@@ -1773,12 +1773,12 @@ DYNAMIC_POWER_ATTRS: list[dict[str, Any]] = [
     {
         "name": "Ramp up",
         "aliases": ["ramp up", "rise"],
-        "says": "Scales how fast the log rise closes on draw divided by GPU load. The step starts from the cap the BMC is holding. It does not aim at the GPU max. Slider is 0.25× to 4×. The gold curve approaches the current power line over 36 s.",
+        "says": "Scales how fast the log rise closes on draw divided by GPU load. The step starts from the cap the BMC is holding. It does not aim at the GPU max. Slider is 0.25× to 4×. The gold curve approaches the current cap line over 36 s.",
     },
     {
         "name": "Ramp down",
         "aliases": ["ramp down", "fall"],
-        "says": "Scales how fast an oversized cap steps down toward draw divided by GPU load. Each pass starts from the cap the BMC is holding. Spare GPU budget does not hold the cap up. The green curve eases toward the current power line.",
+        "says": "Scales how fast an oversized cap steps down toward draw divided by GPU load. Each pass starts from the cap the BMC is holding. Spare GPU budget does not hold the cap up. The green curve eases toward the current cap line.",
     },
     {
         "name": "GPU min",

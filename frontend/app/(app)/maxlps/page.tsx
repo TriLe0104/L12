@@ -1649,7 +1649,7 @@ function RampChart({
         <line x1={pad} y1={midY} x2={w - pad} y2={midY} data-k="aim" />
         <path d={up} data-k="up" />
         <path d={down} data-k="down" />
-        <text x={w - pad} y={Math.max(pad + 8, midY - 3)} textAnchor="end">current power</text>
+        <text x={w - pad} y={Math.max(pad + 8, midY - 3)} textAnchor="end">current cap</text>
         <text x={w - pad} y={h - 1} textAnchor="end">36 s</text>
       </svg>
       <label className="ramp-row">
