@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { Gb300PowerStencil, rackLimiterView } from "@/components/Gb300PowerStencil";
 import { api } from "@/lib/api";
@@ -300,6 +301,7 @@ function placeTip(field: HTMLElement, tip: HTMLElement) {
   const vh = window.innerHeight;
   const maxW = Math.min(280, Math.max(160, vw - pad * 2));
   tip.style.position = "fixed";
+  tip.style.zIndex = "400";
   tip.style.width = `${maxW}px`;
   tip.style.maxWidth = `${maxW}px`;
   tip.style.left = "0px";
@@ -333,21 +335,40 @@ export function PolicyField({
 }) {
   const fieldRef = useRef<HTMLLabelElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
+  const [open, setOpen] = useState(false);
 
-  function showTip() {
-    const field = fieldRef.current;
-    const box = tipRef.current;
-    if (!field || !box) return;
-    placeTip(field, box);
-  }
+  useLayoutEffect(() => {
+    if (!open) return;
+    let frame = 0;
+    const place = () => {
+      const field = fieldRef.current;
+      const box = tipRef.current;
+      if (field && box) placeTip(field, box);
+      frame = window.requestAnimationFrame(place);
+    };
+    frame = window.requestAnimationFrame(place);
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, tip]);
 
   return (
-    <label className="lps-field" ref={fieldRef} onMouseEnter={showTip} onFocus={showTip}>
+    <label
+      className="lps-field"
+      ref={fieldRef}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
       <span className="lps-field-name">{label}</span>
       {children}
-      <span className="lps-tip" ref={tipRef} role="tooltip">
-        {tip}
-      </span>
+      {open
+        ? createPortal(
+            <span className="lps-tip" data-open="true" ref={tipRef} role="tooltip">
+              {tip}
+            </span>,
+            document.body,
+          )
+        : null}
     </label>
   );
 }
