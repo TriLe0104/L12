@@ -720,12 +720,15 @@ else:
 
 
 _HOP_HEALTH = r"""
-import base64, concurrent.futures, json, ssl, sys, urllib.error, urllib.request
+import base64, concurrent.futures, json, ssl, sys, time, urllib.error, urllib.request
 spec = json.loads(sys.stdin.read() or "{}")
 ctx = ssl._create_unverified_context()
-timeout = float(spec.get("timeout") or 3)
+timeout = float(spec.get("timeout") or 6)
 paths = spec.get("paths") or {}
 targets = spec.get("targets") or []
+# A BMC often returns an empty temperature list or PowerWatts object if the
+# previous read has not settled. Wait, then read those paths once more.
+ATTR_WAIT = 2.0
 
 def get(ip, path, user, password):
     url = "https://%s%s" % (ip, path)
@@ -745,6 +748,25 @@ def get(ip, path, user, password):
     except Exception as e:
         return {"_error": str(e)[:180]}
 
+def temps_ready(body):
+    if not isinstance(body, dict) or body.get("_error"):
+        return False
+    rows = body.get("TemperatureReadingsCelsius")
+    return isinstance(rows, list) and len(rows) > 0
+
+def watts_ready(body):
+    if not isinstance(body, dict) or body.get("_error"):
+        return False
+    pw = body.get("PowerWatts")
+    if isinstance(pw, dict):
+        return pw.get("Reading") is not None or pw.get("Value") is not None
+    return isinstance(pw, (int, float))
+
+def prefer(old, new, ready):
+    if ready(new):
+        return new
+    return old if isinstance(old, dict) else (new if isinstance(new, dict) else {})
+
 def one(target):
     ip = target.get("bmc_ip") or ""
     user = target.get("user") or "ADMIN"
@@ -760,6 +782,28 @@ def one(target):
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         for key, body in ex.map(pull, items):
             bodies[key] = body if isinstance(body, dict) else {"_error": "bad-body"}
+    need_temp = not (temps_ready(bodies.get("temps")) or temps_ready(bodies.get("hgx_temps")))
+    need_watts = not watts_ready(bodies.get("env"))
+    if need_temp or need_watts:
+        time.sleep(ATTR_WAIT)
+        keys = []
+        if need_temp:
+            keys.extend(("temps", "hgx_temps"))
+        if need_watts:
+            keys.append("env")
+        def pull_key(key):
+            path = paths.get(key)
+            if not path:
+                return key, None
+            return key, get(ip, path, user, password)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(4, len(keys)))) as ex2:
+            for key, body in ex2.map(pull_key, keys):
+                if not isinstance(body, dict):
+                    continue
+                if key in ("temps", "hgx_temps"):
+                    bodies[key] = prefer(bodies.get(key), body, temps_ready)
+                elif key == "env":
+                    bodies[key] = prefer(bodies.get(key), body, watts_ready)
     return {"bmc_ip": ip, "bodies": bodies}
 
 n = max(1, min(18, len(targets) or 1))
@@ -1726,7 +1770,7 @@ def _fetch_bmc_health(
         _ensure_hop_scripts()
     except Exception:
         pass
-    spec = json.dumps({"timeout": 3.0, "targets": targets, "paths": paths})
+    spec = json.dumps({"timeout": 6.0, "targets": targets, "paths": paths})
     hop = _session()
     if not hop.exec_gate.acquire(timeout=max(1.0, float(timeout))):
         raise RuntimeError("PXE hop busy")

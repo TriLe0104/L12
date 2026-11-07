@@ -250,12 +250,13 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
-  clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number; cards?: boolean } = {}) => {
+  clusterMetrics: (params: { range?: string; from_ts?: number; to_ts?: number; cards?: boolean; telem?: string } = {}) => {
     const qs = new URLSearchParams();
     if (params.range) qs.set("range", params.range);
     if (params.from_ts != null) qs.set("from_ts", String(params.from_ts));
     if (params.to_ts != null) qs.set("to_ts", String(params.to_ts));
     if (params.cards) qs.set("cards", "1");
+    if (params.telem) qs.set("telem", params.telem);
     const q = qs.toString();
     return request<import("./cluster").ClusterMetrics>(`/api/cluster/metrics${q ? `?${q}` : ""}`);
   },

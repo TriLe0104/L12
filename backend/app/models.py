@@ -532,6 +532,17 @@ class MaxLpsShelf(Base):
     rack: Mapped[MaxLpsRack] = relationship(back_populates="shelves")
 
 
+class ClusterHealthSample(Base):
+    """Hottest temperature and summed PSU watts for the 1 day / 3 day / 1 week graphs."""
+
+    __tablename__ = "cluster_health_samples"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ts: Mapped[datetime] = mapped_column(index=True, default=_now)
+    temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    psu_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class MaxLpsClusterWatt(Base):
     """Cluster-level wattage sample (about 1 Hz)."""
 

@@ -16,14 +16,25 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import settings
 
 _TLS = ssl._create_unverified_context()
 _EXPAND = "?$expand=.($levels=1)"
-_POLL_S = 0.4
+# A pass that returns immediately still waits this long so a down PXE does not
+# tight-spin. A pass that already took longer starts the next one at once.
+_POLL_FLOOR_S = 0.25
 _GET_TIMEOUT = 8.0
+# Redfish often answers with an empty TemperatureReadingsCelsius or PowerWatts
+# object when the previous read is still settling. Keep the last real values
+# this long before the panel is allowed to go blank.
+_ATTR_HOLD_S = 120.0
+_SAMPLE_S = 10.0
+_HIST_KEEP_S = 8 * 86400
+TELEM_SPANS = {"1d": 86400, "3d": 3 * 86400, "1w": 7 * 86400}
+TELEM_POINTS = {"1d": 288, "3d": 216, "1w": 168}
 
 _RANK = {"ok": 0, "unknown": 1, "warning": 2, "critical": 3}
 
@@ -42,6 +53,11 @@ _WATCH_LOCK = threading.Lock()
 _FAIL_UNTIL: dict[str, float] = {}
 _FAIL_HOLD_S = 60.0
 _CENSUS: dict[str, float] = {"t": 0.0, "total": 0}
+_HIST: list[tuple[float, float | None, float | None]] = []
+_HIST_LOCK = threading.Lock()
+_HIST_LOADED = False
+_last_sample = 0.0
+_last_prune = 0.0
 
 
 def _worse(a: str | None, b: str | None) -> str:
@@ -1010,42 +1026,89 @@ def poll_one(ip: str) -> dict[str, Any]:
         rec = _poll_node(target)
     if not rec.get("error"):
         with _LOCK:
-            nodes = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") != rec.get("bmc_ip")]
-            nodes.append(rec)
-            _SNAP["nodes"] = nodes
-            _SNAP["summary"] = _summarize([n for n in nodes if not n.get("error")])
+            prev = next((n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") == rec.get("bmc_ip")), None)
+            others = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") != rec.get("bmc_ip")]
+            chosen = _apply_rec(rec, prev)
+            nodes = others + [chosen]
+            live = [n for n in nodes if not n.get("error")]
+            summary = _summarize(live)
+            _SNAP["nodes"] = live or nodes[:1]
+            _SNAP["summary"] = summary
             _SNAP["source"] = "redfish"
-            _SNAP["via"] = rec.get("via") or _SNAP.get("via")
+            _SNAP["via"] = chosen.get("via") or _SNAP.get("via")
             _SNAP["error"] = None
             _SNAP["t"] = time.time()
+        _note_telemetry(summary)
+        rec = chosen
     return _public_node(rec)
 
 
-def _merge_node(rec: dict[str, Any]) -> None:
-    """Publish one BMC as soon as it answers. A miss keeps the last good row."""
-    if not rec.get("bmc_ip"):
-        return
-    with _LOCK:
-        prev = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") == rec.get("bmc_ip")]
-        others = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") != rec.get("bmc_ip")]
-        if rec.get("error") and prev and not prev[0].get("error"):
-            nodes = others + prev
-        else:
-            nodes = others + [rec]
-        live = [n for n in nodes if not n.get("error")]
-        _SNAP["nodes"] = live or nodes[:1]
-        _SNAP["summary"] = _summarize(live)
-        _SNAP["t"] = time.time()
-        if live:
-            _SNAP["source"] = "redfish"
-            _SNAP["via"] = rec.get("via") or _SNAP.get("via")
-            _SNAP["error"] = None
+def _rich_thermal(th: Any) -> bool:
+    if not isinstance(th, dict):
+        return False
+    return bool(th.get("temps") or th.get("gpu_temps") or th.get("hottest_c") is not None)
 
 
-def _store(nodes: list[dict[str, Any]], via: str, errors: list[str]) -> None:
+def _rich_power(pw: Any) -> bool:
+    if not isinstance(pw, dict):
+        return False
+    return pw.get("watts") is not None or bool(pw.get("psus"))
+
+
+def _rich_fans(fn: Any) -> bool:
+    if not isinstance(fn, dict):
+        return False
+    return bool(fn.get("items")) or fn.get("rpm_avg") is not None or fn.get("pwm_pct") is not None
+
+
+def _rich_leak(lk: Any) -> bool:
+    if not isinstance(lk, dict):
+        return False
+    if lk.get("detectors"):
+        return True
+    return str(lk.get("status") or "") in {"ok", "warning", "critical"}
+
+
+_ATTR_SECTIONS = (
+    ("thermal", _rich_thermal),
+    ("power", _rich_power),
+    ("fans", _rich_fans),
+    ("leak", _rich_leak),
+)
+
+
+def _keep_attrs(rec: dict[str, Any], prev: dict[str, Any] | None, now: float | None = None) -> dict[str, Any]:
+    """Hold the last thermal, PSU, fan, and leak attributes when this read is empty."""
+    if rec.get("error"):
+        return rec
+    now = time.time() if now is None else now
+    out = dict(rec)
+    held = dict(out.get("held") or {})
+    prev_held = (prev or {}).get("held") or {}
+    for key, rich in _ATTR_SECTIONS:
+        if rich(out.get(key)):
+            held[key] = now
+            continue
+        prev_t = float(prev_held.get(key) or 0)
+        if prev and rich(prev.get(key)) and prev_t and now - prev_t <= _ATTR_HOLD_S:
+            out[key] = prev[key]
+            held[key] = prev_t
+    if held:
+        out["held"] = held
+    return out
+
+
+def _apply_rec(rec: dict[str, Any], prev: dict[str, Any] | None) -> dict[str, Any]:
+    if rec.get("error") and prev and not prev.get("error"):
+        return prev
+    return _keep_attrs(rec, prev)
+
+
+def _publish(nodes: list[dict[str, Any]], via: str, errors: list[str]) -> None:
     global _SNAP
     live = [n for n in nodes if not n.get("error")]
     keep = live or nodes[:1]
+    summary = _summarize(live)
     with _LOCK:
         _SNAP = {
             "source": "redfish" if live else None,
@@ -1053,8 +1116,200 @@ def _store(nodes: list[dict[str, Any]], via: str, errors: list[str]) -> None:
             "error": None if live else (errors[0] if errors else "no-bmc-targets"),
             "t": time.time(),
             "nodes": keep,
-            "summary": _summarize(live),
+            "summary": summary,
         }
+    _note_telemetry(summary)
+
+
+def _merge_node(rec: dict[str, Any]) -> None:
+    """Publish one BMC as soon as it answers. A miss keeps the last good row."""
+    if not rec.get("bmc_ip"):
+        return
+    with _LOCK:
+        prev = next((n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") == rec.get("bmc_ip")), None)
+        others = [n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip") != rec.get("bmc_ip")]
+        chosen = _apply_rec(rec, prev)
+        nodes = others + [chosen]
+        live = [n for n in nodes if not n.get("error")]
+        summary = _summarize(live)
+        _SNAP["nodes"] = live or nodes[:1]
+        _SNAP["summary"] = summary
+        _SNAP["t"] = time.time()
+        if live:
+            _SNAP["source"] = "redfish"
+            _SNAP["via"] = rec.get("via") or _SNAP.get("via")
+            _SNAP["error"] = None
+    _note_telemetry(summary)
+
+
+def _store(nodes: list[dict[str, Any]], via: str, errors: list[str], *, final: bool = False) -> None:
+    """Upsert this pass into the snapshot. The final pass drops nodes that were not polled."""
+    with _LOCK:
+        prev_by = {n.get("bmc_ip"): n for n in (_SNAP.get("nodes") or []) if n.get("bmc_ip")}
+    merged: dict[str, dict[str, Any]] = {} if final else dict(prev_by)
+    for rec in nodes:
+        ip = rec.get("bmc_ip")
+        if not ip:
+            continue
+        merged[ip] = _apply_rec(rec, prev_by.get(ip))
+    _publish(list(merged.values()), via, errors)
+
+
+def _hist_ts(dt: datetime) -> float:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _ensure_hist() -> None:
+    global _HIST_LOADED
+    if _HIST_LOADED:
+        return
+    with _HIST_LOCK:
+        if _HIST_LOADED:
+            return
+        loaded: list[tuple[float, float | None, float | None]] = []
+        try:
+            from sqlalchemy import select
+
+            from .db import SessionLocal
+            from .models import ClusterHealthSample
+
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=_HIST_KEEP_S)
+            with SessionLocal() as db:
+                rows = db.execute(
+                    select(ClusterHealthSample.ts, ClusterHealthSample.temp_c, ClusterHealthSample.psu_w)
+                    .where(ClusterHealthSample.ts >= cutoff)
+                    .order_by(ClusterHealthSample.ts.asc())
+                ).all()
+            loaded = [(_hist_ts(ts), temp, psu) for ts, temp, psu in rows]
+        except Exception:
+            loaded = []
+        if _HIST:
+            _HIST[:0] = loaded
+        else:
+            _HIST.extend(loaded)
+        _HIST_LOADED = True
+
+
+def _note_telemetry(summary: dict[str, Any] | None) -> None:
+    """Remember a temperature and PSU sample. Empty attributes are not written as zeros."""
+    global _last_sample, _last_prune
+    card_t = (summary or {}).get("temperature") or {}
+    card_p = (summary or {}).get("psu") or {}
+    temp = card_t.get("celsius")
+    psu = card_p.get("watts")
+    temp_v = float(temp) if isinstance(temp, (int, float)) else None
+    psu_v = float(psu) if isinstance(psu, (int, float)) else None
+    if temp_v is None and psu_v is None:
+        return
+    now = time.time()
+    with _HIST_LOCK:
+        if now - _last_sample < _SAMPLE_S:
+            return
+        _last_sample = now
+        _HIST.append((now, temp_v, psu_v))
+        cutoff = now - _HIST_KEEP_S
+        if _HIST and _HIST[0][0] < cutoff:
+            _HIST[:] = [row for row in _HIST if row[0] >= cutoff]
+    _write_sample(now, temp_v, psu_v)
+
+
+def _write_sample(now: float, temp: float | None, psu: float | None) -> None:
+    global _last_prune
+    try:
+        from sqlalchemy import delete
+
+        from .db import SessionLocal
+        from .models import ClusterHealthSample
+
+        with SessionLocal() as db:
+            db.add(
+                ClusterHealthSample(
+                    ts=datetime.fromtimestamp(now, timezone.utc),
+                    temp_c=temp,
+                    psu_w=psu,
+                )
+            )
+            if now - _last_prune > 60:
+                cutoff = datetime.fromtimestamp(now - _HIST_KEEP_S, timezone.utc)
+                db.execute(delete(ClusterHealthSample).where(ClusterHealthSample.ts < cutoff))
+                _last_prune = now
+            db.commit()
+    except Exception:
+        return
+
+
+def bucket_telemetry(
+    rows: list[tuple[float, float | None, float | None]],
+    start: float,
+    end: float,
+    points: int,
+) -> list[dict[str, Any]]:
+    """Hottest temperature and average PSU watts in each bucket. Empty buckets stay out."""
+    points = max(1, int(points))
+    span = max(float(end) - float(start), 1.0)
+    width = span / points
+    bins: list[dict[str, float | None]] = [
+        {"temp": None, "temp_n": 0, "psu": 0.0, "psu_n": 0, "n": 0} for _ in range(points)
+    ]
+    for t, temp, psu in rows:
+        if t < start or t > end:
+            continue
+        i = min(points - 1, int((t - start) / width))
+        b = bins[i]
+        b["n"] = float(b["n"] or 0) + 1
+        if temp is not None:
+            prev = b["temp"]
+            b["temp"] = float(temp) if prev is None else max(float(prev), float(temp))
+            b["temp_n"] = float(b["temp_n"] or 0) + 1
+        if psu is not None:
+            b["psu"] = float(b["psu"] or 0) + float(psu)
+            b["psu_n"] = float(b["psu_n"] or 0) + 1
+    out: list[dict[str, Any]] = []
+    for i, b in enumerate(bins):
+        if not b["n"]:
+            continue
+        out.append(
+            {
+                "t": start + (i + 0.5) * width,
+                "temp_c": round(float(b["temp"]), 2) if b["temp"] is not None else None,
+                "psu_w": round(float(b["psu"] or 0) / float(b["psu_n"]), 1) if b["psu_n"] else None,
+            }
+        )
+    return out
+
+
+def telemetry_window(span: str, now: float | None = None) -> tuple[float, float, str, int]:
+    key = span if span in TELEM_SPANS else "1d"
+    end = time.time() if now is None else float(now)
+    return end - TELEM_SPANS[key], end, key, TELEM_POINTS[key]
+
+
+def _live_reading() -> tuple[float | None, float | None, float]:
+    with _LOCK:
+        summary = _SNAP.get("summary") or {}
+        t = float(_SNAP.get("t") or 0)
+    card_t = summary.get("temperature") or {}
+    card_p = summary.get("psu") or {}
+    temp = card_t.get("celsius")
+    psu = card_p.get("watts")
+    return (
+        float(temp) if isinstance(temp, (int, float)) else None,
+        float(psu) if isinstance(psu, (int, float)) else None,
+        t,
+    )
+
+
+def telemetry_series(start: float, end: float, points: int = 180) -> list[dict[str, Any]]:
+    _ensure_hist()
+    with _HIST_LOCK:
+        rows = [row for row in _HIST if start <= row[0] <= end]
+    temp, psu, snap_t = _live_reading()
+    if snap_t >= start and snap_t <= end + 2 and (temp is not None or psu is not None):
+        if not rows or snap_t > rows[-1][0] + 0.2:
+            rows.append((snap_t, temp, psu))
+    return bucket_telemetry(rows, start, end, points)
 
 
 def _unknown(target: dict[str, str], error: str, via: str) -> dict[str, Any]:
@@ -1076,7 +1331,7 @@ def _poll_once() -> None:
     targets = _targets()
     probe = (getattr(settings, "bmc_probe_ip", None) or "").strip()
     if not targets:
-        _store([], "direct", ["no-bmc-targets"])
+        _store([], "direct", ["no-bmc-targets"], final=True)
         return
     grouped, bare = group_by_pxe(targets, _rack_pxe_map(), lambda row: row.get("rack_id"))
     print(
@@ -1122,18 +1377,21 @@ def _poll_once() -> None:
                 errors.append(f"{tgt.get('bmc_ip')}: {exc}"[:180])
         else:
             nodes.append(_unknown(tgt, "no-pxe", "direct"))
-    _store(nodes, via, errors)
+    _store(nodes, via, errors, final=True)
 
 
 def _watch_forever() -> None:
     while True:
+        started = time.time()
         try:
             _poll_once()
         except Exception as exc:
             with _LOCK:
                 _SNAP["error"] = str(exc)[:180]
                 _SNAP["t"] = time.time()
-        time.sleep(_POLL_S)
+        remain = _POLL_FLOOR_S - (time.time() - started)
+        if remain > 0:
+            time.sleep(remain)
 
 
 def _ensure_watch() -> None:

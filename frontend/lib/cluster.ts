@@ -618,6 +618,11 @@ export interface ClusterMetrics {
     disk_read_gbs: number;
     disk_write_gbs: number;
   }[];
+  telemetry?: {
+    t: number;
+    temp_c?: number | null;
+    psu_w?: number | null;
+  }[];
   size: {
     halls: number;
     racks: number;

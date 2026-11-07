@@ -398,7 +398,15 @@ METRIC_SPANS = {
 }
 
 
-def _inventory_metrics(db: Session, start: float, end: float, span_key: str, *, cards: bool = False) -> dict:
+def _inventory_metrics(
+    db: Session,
+    start: float,
+    end: float,
+    span_key: str,
+    *,
+    cards: bool = False,
+    telem_span: str = "1d",
+) -> dict:
     """Cluster overview from registered MaxLPS racks + live Redfish / PowerShelf."""
     racks = maxlps_inventory.load_racks(db)
     n_racks = len(racks)
@@ -471,6 +479,8 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str, *, 
             for i in range(48)
         ]
     health = bmc_health.snapshot(brief=cards)
+    t_start, t_end, _t_key, t_points = bmc_health.telemetry_window(telem_span)
+    telemetry = bmc_health.telemetry_series(t_start, t_end, points=t_points)
     # Same nodes the list marks OK, warning, or critical. GPU watts until that poll has a row.
     nodes_on = bmc_health.nodes_reporting(health) if health.get("nodes") else alive["nodes_on"]
     return {
@@ -508,6 +518,7 @@ def _inventory_metrics(db: Session, start: float, end: float, span_key: str, *, 
             "disk_write_gbs": 0.0,
         },
         "series": series,
+        "telemetry": telemetry,
         "size": {
             "halls": len(halls) or 1,
             "racks": n_racks,
@@ -556,6 +567,7 @@ def metrics(
     from_ts: float | None = Query(default=None),
     to_ts: float | None = Query(default=None),
     cards: bool = Query(default=False),
+    telem: str = Query(default="1d"),
     _user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -569,7 +581,7 @@ def metrics(
         start = now - window
         span_key = span if span in METRIC_SPANS else "5m"
     if maxlps_inventory.inventory_count(db):
-        return _inventory_metrics(db, start, end, span_key, cards=cards)
+        return _inventory_metrics(db, start, end, span_key, cards=cards, telem_span=telem)
     return _empty_metrics(db, start, end, span_key)
 
 
@@ -599,6 +611,7 @@ def _empty_metrics(db: Session, start: float, end: float, span_key: str) -> dict
         "health": {"source": None, "node_count": 0, "nodes": [], "inventory_nodes": 0},
         "now": zeros,
         "series": series,
+        "telemetry": [],
         "size": {
             "halls": 0,
             "racks": 0,

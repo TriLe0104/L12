@@ -1146,6 +1146,69 @@ function TimeChart({
   );
 }
 
+function ScalarChart({
+  points,
+  windowSec,
+  label,
+  format,
+  empty,
+}: {
+  points: { t: number; v: number | null | undefined }[];
+  windowSec: number;
+  label: string;
+  format: (v: number) => string;
+  empty: string;
+}) {
+  const usable = points.filter((p): p is { t: number; v: number } => p.v != null && Number.isFinite(p.v));
+  if (!usable.length) return <p className="widget-empty">{empty}</p>;
+  const W = 600;
+  const H = 120;
+  const span = Math.max(windowSec, 1);
+  const end = Math.max(...usable.map((p) => p.t));
+  const start = end - span;
+  const x = (t: number) => ((t - start) / span) * W;
+  const peak = Math.max(1e-6, ...usable.map((p) => p.v));
+  const y = (v: number) => H - (v / peak) * (H - 4);
+  const draw =
+    usable.length === 1
+      ? [
+          { t: usable[0].t - span * 0.012, v: usable[0].v },
+          { t: usable[0].t, v: usable[0].v },
+        ]
+      : usable;
+  const usedLine = draw.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const x0 = x(draw[0].t).toFixed(1);
+  const x1 = x(draw[draw.length - 1].t).toFixed(1);
+  const usedArea = `${x0},${H} ${usedLine} ${x1},${H}`;
+  const ticks = [
+    { y: 0, text: format(peak) },
+    { y: 50, text: format(peak / 2) },
+    { y: 100, text: format(0) },
+  ];
+  const xLabels = [start, start + span / 2, end];
+  return (
+    <div className="chart-plot">
+      <div className="chart-y" aria-hidden>
+        {ticks.map((t) => (
+          <span key={t.y} style={{ top: `${t.y}%`, transform: tickTransform(t.y) }}>
+            {t.text}
+          </span>
+        ))}
+      </div>
+      <svg className="net-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
+        <line x1="0" x2={W} y1={H / 2} y2={H / 2} className="net-grid" />
+        <polygon points={usedArea} className="net-fill-tx" />
+        <polyline points={usedLine} className="net-line-tx" />
+      </svg>
+      <div className="chart-x">
+        {xLabels.map((t, i) => (
+          <span key={`${i}-${t}`}>{axisTime(t, span)}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type ClusterAlert = { id: "leak" | "power" | "gpu"; title: string; detail: string };
 
 function overviewAlerts(
@@ -1261,12 +1324,32 @@ const RANGE_LABEL: Record<string, string> = {
   "7d": "Last 7 days",
 };
 
+const TELEM_RANGES = [
+  { id: "1d", label: "1D", seconds: 86400 },
+  { id: "3d", label: "3D", seconds: 3 * 86400 },
+  { id: "1w", label: "1W", seconds: 7 * 86400 },
+] as const;
+
+type TelemRange = (typeof TELEM_RANGES)[number]["id"];
+
+const TELEM_LABEL: Record<TelemRange, string> = {
+  "1d": "Last 1 day",
+  "3d": "Last 3 days",
+  "1w": "Last 1 week",
+};
+
+// The next pull starts as soon as this one finishes. The floor only applies
+// when the call itself returned faster than this, so a quick read does not spin.
+const CARD_POLL_MIN_MS = 200;
+const CHART_POLL_MIN_MS = 1000;
+
 export function OverviewDash() {
   const [data, setData] = useState<ClusterMetrics | null>(null);
   const [health, setHealth] = useState<ClusterHealth | null>(null);
   const [power, setPower] = useState<PowerLimiterData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeId>("5m");
+  const [telemRange, setTelemRange] = useState<TelemRange>("1d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [picked, setPicked] = useState<PickedNode | null>(null);
@@ -1284,69 +1367,77 @@ export function OverviewDash() {
     let cancelled = false;
     let cardsBusy = false;
     let chartBusy = false;
+    let cardsTimer = 0;
+    let chartTimer = 0;
     const detailOpen = () => Boolean(telemRef.current || pickedRef.current);
     const paramsFor = (cards: boolean) => {
-      const params =
-        range === "custom"
-          ? { from_ts: fromLocalInput(customFrom), to_ts: fromLocalInput(customTo), cards }
-          : { range, cards };
       if (range === "custom") {
-        const a = params.from_ts;
-        const b = params.to_ts;
-        if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+        const from_ts = fromLocalInput(customFrom);
+        const to_ts = fromLocalInput(customTo);
+        if (!Number.isFinite(from_ts) || !Number.isFinite(to_ts) || to_ts <= from_ts) return null;
+        return { from_ts, to_ts, cards, telem: telemRange };
       }
-      return params;
+      return { range, cards, telem: telemRange };
     };
     const loadCards = () => {
-      if (cardsBusy) return;
+      if (cancelled || cardsBusy) return Promise.resolve();
       const params = paramsFor(true);
-      if (!params) return;
+      if (!params) return Promise.resolve();
       cardsBusy = true;
-      api
+      const jobs: Promise<unknown>[] = [
+        api
+          .clusterMetrics(params)
+          .then((d) => {
+            if (cancelled) return;
+            setData((prev) => ({
+              ...d,
+              series: d.series?.length ? d.series : (prev?.series ?? []),
+              telemetry: d.telemetry?.length ? d.telemetry : (prev?.telemetry ?? []),
+            }));
+            if (d.health && !detailOpen()) setHealth(d.health);
+          })
+          .catch((err) => {
+            if (!cancelled) setError(err instanceof Error ? err.message : "Metrics failed");
+          }),
+        api
+          .clusterPower()
+          .then((d) => {
+            if (!cancelled) setPower(d);
+          })
+          .catch(() => {
+            /* limiter is additive; metrics still render */
+          }),
+      ];
+      if (detailOpen()) {
+        jobs.push(
+          api
+            .clusterHealth(false)
+            .then((d) => {
+              if (!cancelled) setHealth(d);
+            })
+            .catch(() => {
+              /* keep the card snapshot */
+            }),
+        );
+      }
+      return Promise.all(jobs).finally(() => {
+        cardsBusy = false;
+      });
+    };
+    const loadChart = () => {
+      if (cancelled || chartBusy) return Promise.resolve();
+      const params = paramsFor(false);
+      if (!params) return Promise.resolve();
+      chartBusy = true;
+      return api
         .clusterMetrics(params)
         .then((d) => {
           if (cancelled) return;
           setData((prev) => ({
             ...d,
             series: d.series?.length ? d.series : (prev?.series ?? []),
+            telemetry: d.telemetry ?? [],
           }));
-          if (d.health && !detailOpen()) setHealth(d.health);
-        })
-        .catch((err) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : "Metrics failed");
-        })
-        .finally(() => {
-          cardsBusy = false;
-        });
-      api
-        .clusterPower()
-        .then((d) => {
-          if (!cancelled) setPower(d);
-        })
-        .catch(() => {
-          /* limiter is additive; metrics still render */
-        });
-      if (detailOpen()) {
-        api
-          .clusterHealth(false)
-          .then((d) => {
-            if (!cancelled) setHealth(d);
-          })
-          .catch(() => {
-            /* keep the card snapshot */
-          });
-      }
-    };
-    const loadChart = () => {
-      if (chartBusy) return;
-      const params = paramsFor(false);
-      if (!params) return;
-      chartBusy = true;
-      api
-        .clusterMetrics(params)
-        .then((d) => {
-          if (cancelled) return;
-          setData((prev) => ({ ...d, series: d.series?.length ? d.series : (prev?.series ?? []) }));
         })
         .catch(() => {
           /* the card poll reports the error */
@@ -1365,11 +1456,20 @@ export function OverviewDash() {
           /* list panel uses health nodes if inventory is empty */
         });
     };
-    loadCards();
-    loadChart();
+    const arm = (fn: () => Promise<unknown>, minGap: number, slot: "cards" | "chart") => {
+      if (cancelled) return;
+      const t0 = performance.now();
+      fn().finally(() => {
+        if (cancelled) return;
+        const wait = Math.max(0, minGap - (performance.now() - t0));
+        const id = window.setTimeout(() => arm(fn, minGap, slot), wait);
+        if (slot === "cards") cardsTimer = id;
+        else chartTimer = id;
+      });
+    };
+    arm(loadCards, CARD_POLL_MIN_MS, "cards");
+    arm(loadChart, CHART_POLL_MIN_MS, "chart");
     loadInv();
-    const cardsId = window.setInterval(loadCards, 800);
-    const chartId = window.setInterval(loadChart, 5000);
     const onRefresh = () => {
       loadCards();
       loadChart();
@@ -1378,11 +1478,11 @@ export function OverviewDash() {
     window.addEventListener("l12-refresh", onRefresh);
     return () => {
       cancelled = true;
-      window.clearInterval(cardsId);
-      window.clearInterval(chartId);
+      window.clearTimeout(cardsTimer);
+      window.clearTimeout(chartTimer);
       window.removeEventListener("l12-refresh", onRefresh);
     };
-  }, [range, customFrom, customTo]);
+  }, [range, customFrom, customTo, telemRange]);
 
   useEffect(() => {
     setBellHost(document.getElementById("cluster-alert-bell"));
@@ -1725,6 +1825,61 @@ export function OverviewDash() {
           </header>
           {registered && last ? (
             <TimeChart series={data.series} mode="kw" field="gpu_kw" label="GPU draw" />
+          ) : (
+            <p className="widget-empty">No registered cluster</p>
+          )}
+        </article>
+        <div className="range-bar">
+          <span>History</span>
+          {TELEM_RANGES.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              data-active={telemRange === opt.id}
+              onClick={() => {
+                setTelemRange(opt.id);
+                setData((prev) => (prev ? { ...prev, telemetry: [] } : prev));
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <em>{TELEM_LABEL[telemRange]}</em>
+        </div>
+        <article className="net-panel">
+          <header>
+            <h2>Temperature</h2>
+            <span className="net-legend-inline">
+              <i data-k="tx" /> hottest {registered ? fmtC(health?.temperature?.celsius) : dash}
+            </span>
+          </header>
+          {registered ? (
+            <ScalarChart
+              points={(data.telemetry ?? []).map((p) => ({ t: p.t, v: p.temp_c }))}
+              windowSec={TELEM_RANGES.find((opt) => opt.id === telemRange)?.seconds ?? 86400}
+              label="Temperature"
+              format={(v) => fmtC(v)}
+              empty="Waiting for temperature"
+            />
+          ) : (
+            <p className="widget-empty">No registered cluster</p>
+          )}
+        </article>
+        <article className="net-panel">
+          <header>
+            <h2>PSU power</h2>
+            <span className="net-legend-inline">
+              <i data-k="tx" /> {registered ? fmtW(health?.psu?.watts) : dash}
+            </span>
+          </header>
+          {registered ? (
+            <ScalarChart
+              points={(data.telemetry ?? []).map((p) => ({ t: p.t, v: p.psu_w }))}
+              windowSec={TELEM_RANGES.find((opt) => opt.id === telemRange)?.seconds ?? 86400}
+              label="PSU power"
+              format={(v) => fmtW(v)}
+              empty="Waiting for PSU power"
+            />
           ) : (
             <p className="widget-empty">No registered cluster</p>
           )}
