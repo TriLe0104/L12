@@ -59,8 +59,10 @@ def test_fresh_reading_replaces_the_held_value():
 def test_partial_store_does_not_drop_the_other_node():
     saved = dict(health._SNAP)
     hist = list(health._HIST)
+    hist_nodes = list(health._NODE_HIST)
     loaded = health._HIST_LOADED
     last = health._last_sample
+    last_node = health._last_node_sample
     write = health._write_sample
     health._write_sample = lambda *a, **k: None
     try:
@@ -88,8 +90,10 @@ def test_partial_store_does_not_drop_the_other_node():
         health._SNAP.clear()
         health._SNAP.update(saved)
         health._HIST[:] = hist
+        health._NODE_HIST[:] = hist_nodes
         health._HIST_LOADED = loaded
         health._last_sample = last
+        health._last_node_sample = last_node
 
 
 def test_bucket_uses_the_hottest_temp_and_skips_empty_gaps():
@@ -107,6 +111,32 @@ def test_bucket_uses_the_hottest_temp_and_skips_empty_gaps():
     assert out[0]["psu_w"] == 2000.0
     assert out[1]["temp_c"] == 50.0
     assert all(p["t"] <= end for p in out)
+
+
+def test_node_bucket_keeps_the_hottest_temp_and_average_watts():
+    rows = [
+        (
+            10.0,
+            [
+                ["10.1.1.2", 2, "rack-a", 30.0, 500.0],
+                ["10.1.1.1", 1, "rack-a", 40.0, 1000.0],
+            ],
+        ),
+        (20.0, [["10.1.1.1", 1, "rack-a", 70.0, 3000.0]]),
+        (80.0, [["10.1.1.1", 1, "rack-a", 50.0, 2000.0]]),
+        (250.0, [["10.1.1.1", 1, "rack-a", 99.0, 9.0]]),
+        (40.0, []),
+    ]
+    out = health.bucket_node_telemetry(rows, 0.0, 100.0, points=2)
+    assert [row["bmc_ip"] for row in out] == ["10.1.1.1", "10.1.1.2"]
+    assert out[0]["points"][0]["temp_c"] == 70.0
+    assert out[0]["points"][0]["psu_w"] == 2000.0
+    assert out[0]["points"][1]["temp_c"] == 50.0
+    assert out[0]["points"][1]["psu_w"] == 2000.0
+    assert len(out[1]["points"]) == 1
+    assert out[1]["points"][0]["temp_c"] == 30.0
+    assert out[1]["points"][0]["psu_w"] == 500.0
+    assert all(point["t"] <= 100.0 for row in out for point in row["points"])
 
 
 def test_telemetry_window_is_one_day_three_days_and_one_week():

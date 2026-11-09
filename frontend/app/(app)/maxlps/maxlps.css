@@ -1636,6 +1636,76 @@
   font-size: 7px;
 }
 
+.maxlps-hist {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.maxlps-hist h3 {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--steel);
+  font-weight: 600;
+}
+
+.maxlps-hist .range-bar {
+  grid-column: auto;
+}
+
+.maxlps-hist .range-custom {
+  margin-left: 0;
+  flex-wrap: wrap;
+}
+
+.maxlps-hist .range-custom input[type="datetime-local"] {
+  width: 11.2rem;
+  max-width: 100%;
+}
+
+.maxlps-hist .chart-plot {
+  height: 8.5rem;
+  flex: none;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.maxlps-watt-history line {
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 1;
+}
+
+.maxlps-watt-history polygon {
+  fill: rgba(61, 163, 90, 0.16);
+  stroke: none;
+}
+
+.maxlps-watt-history polyline {
+  stroke: #3da35a;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.maxlps-hist-empty {
+  margin: 0;
+  min-height: 8.5rem;
+  display: grid;
+  place-items: center;
+  color: var(--steel);
+  font-size: 0.68rem;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.maxlps-hist-error {
+  margin: 0;
+  color: var(--stop);
+  font-size: 0.68rem;
+}
+
 .maxlps-loop-algo {
   margin-top: 0.28rem;
   padding-top: 0.28rem;

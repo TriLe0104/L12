@@ -71,6 +71,9 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "cluster_settings": {
         "xai_api_key": "VARCHAR(200)",
     },
+    "cluster_health_samples": {
+        "nodes": "JSON",
+    },
 }
 
 # Absolute object-storage URLs outgrow the original 500-char columns. Postgres

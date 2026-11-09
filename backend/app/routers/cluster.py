@@ -561,6 +561,24 @@ def _inventory_metrics(
     }
 
 
+@router.get("/health/history")
+def health_history(
+    span: str = Query(default="1d"),
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Per-node temperature and PSU watts for the overview detail graphs."""
+    if not maxlps_inventory.inventory_count(db):
+        return {"span": "1d", "from_ts": 0, "to_ts": 0, "nodes": []}
+    start, end, key, points = bmc_health.telemetry_window(span)
+    return {
+        "span": key,
+        "from_ts": start,
+        "to_ts": end,
+        "nodes": bmc_health.node_telemetry(start, end, points),
+    }
+
+
 @router.get("/metrics")
 def metrics(
     span: str = Query(default="5m", alias="range"),
@@ -832,6 +850,20 @@ def maxlps_view(
 class GpuBoundPatch(BaseModel):
     min_w: float | None = Field(default=None, ge=50, le=2000)
     max_w: float | None = Field(default=None, ge=50, le=2000)
+
+
+@router.get("/maxlps/gpus/{gpu_id}/history")
+def maxlps_gpu_history(
+    gpu_id: str,
+    from_ts: float = Query(),
+    to_ts: float = Query(),
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return maxlps_inventory.gpu_watt_history(db, gpu_id, from_ts, to_ts)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
 @router.get("/maxlps/gpus/{gpu_id}/curve")

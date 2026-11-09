@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { PolicyField, PowerPolicyFields, usePowerLimiter } from "@/components/PowerLimiter";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { LoopTargetRack, MaxLpsGpu, MaxLpsShelf, MaxLpsView, ProvisionHop } from "@/lib/cluster";
 import { formatKw, formatRackKw, formatW } from "@/lib/cluster";
 import { captureFlipTops, playEntrySwap } from "@/lib/flip";
@@ -2063,6 +2063,78 @@ function capFailPctLabel(pct: number): string {
   return `${Number.isInteger(clamped) ? clamped : clamped.toFixed(1)}%`;
 }
 
+type GpuHistRange = "1h" | "6h" | "24h" | "3d" | "7d" | "custom";
+
+const GPU_RANGES: { id: Exclude<GpuHistRange, "custom">; seconds: number; label: string; caption: string }[] = [
+  { id: "1h", seconds: 3600, label: "1H", caption: "1 hour" },
+  { id: "6h", seconds: 6 * 3600, label: "6H", caption: "6 hours" },
+  { id: "24h", seconds: 86400, label: "24H", caption: "24 hours" },
+  { id: "3d", seconds: 3 * 86400, label: "3D", caption: "3 days" },
+  { id: "7d", seconds: 7 * 86400, label: "7D", caption: "7 days" },
+];
+
+function toLocalInput(ts: number) {
+  const d = new Date(ts * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function fromLocalInput(value: string) {
+  const t = new Date(value).getTime();
+  return Number.isFinite(t) ? t / 1000 : NaN;
+}
+
+function histAxisTime(ts: number, spanSec: number) {
+  const d = new Date(ts * 1000);
+  if (spanSec >= 20 * 3600) {
+    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function histTickTransform(y: number) {
+  if (y <= 0) return "none";
+  if (y >= 100) return "translateY(-100%)";
+  return "translateY(-50%)";
+}
+
+function gpuHistoryWindow(
+  range: GpuHistRange,
+  customFrom: string,
+  customTo: string,
+): { from: number; to: number } | { error: string } {
+  const now = Date.now() / 1000;
+  if (range !== "custom") {
+    const seconds = GPU_RANGES.find((item) => item.id === range)!.seconds;
+    return { from: now - seconds, to: now };
+  }
+  const from = fromLocalInput(customFrom);
+  const to = fromLocalInput(customTo);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return { error: "Pick a start and end" };
+  const end = Math.min(to, now);
+  if (!(end > from)) return { error: "Pick a start before now" };
+  const span = end - from;
+  if (span < 3600) return { error: "Range must be at least 1 hour" };
+  if (span > 7 * 86400) return { error: "Range must be at most 7 days" };
+  if (from < now - 7 * 86400 - 60) return { error: "History starts 7 days ago" };
+  return { from, to: end };
+}
+
+function gpuRangeCaption(range: GpuHistRange, customFrom: string, customTo: string) {
+  if (range !== "custom") return `Last ${GPU_RANGES.find((item) => item.id === range)?.caption ?? ""}`;
+  const from = fromLocalInput(customFrom);
+  const to = fromLocalInput(customTo);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return "Custom";
+  const span = Math.min(to, Date.now() / 1000) - from;
+  if (span < 2 * 3600) return `${Math.max(1, Math.round(span / 60))} min`;
+  if (span < 2 * 86400) {
+    const hours = span / 3600;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
+  }
+  const days = span / 86400;
+  return `${Number.isInteger(days) ? days : days.toFixed(1)} d`;
+}
+
 function GpuInspector({
   gpu,
   curve,
@@ -2114,6 +2186,13 @@ function GpuInspector({
   const editing = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const pullBusy = useRef(false);
+  const [histRange, setHistRange] = useState<GpuHistRange>("1h");
+  const [histFrom, setHistFrom] = useState("");
+  const [histTo, setHistTo] = useState("");
+  const [histPoints, setHistPoints] = useState<{ t: number; w: number }[]>([]);
+  const [histBounds, setHistBounds] = useState<{ from: number; to: number } | null>(null);
+  const [histError, setHistError] = useState("");
+
 
   useEffect(() => {
     setLive({
@@ -2173,6 +2252,51 @@ function GpuInspector({
       window.clearInterval(id);
     };
   }, [gpu.id]);
+
+  useEffect(() => {
+    const opened = gpuHistoryWindow(histRange, histFrom, histTo);
+    if ("error" in opened) {
+      setHistError(opened.error);
+      setHistPoints([]);
+      setHistBounds(null);
+      return;
+    }
+    setHistError("");
+    setHistPoints([]);
+    setHistBounds(null);
+    let stop = false;
+    let timer = 0;
+    const pullHistory = async () => {
+      const bounds = gpuHistoryWindow(histRange, histFrom, histTo);
+      if ("error" in bounds) {
+        if (!stop) {
+          setHistError(bounds.error);
+          setHistPoints([]);
+          setHistBounds(null);
+        }
+        return;
+      }
+      const started = performance.now();
+      try {
+        const data = await api.maxlpsGpuHistory(gpu.id, bounds.from, bounds.to);
+        if (stop) return;
+        setHistError("");
+        setHistPoints(data.points ?? []);
+        setHistBounds({ from: data.from_ts, to: data.to_ts });
+      } catch (err) {
+        if (stop) return;
+        setHistError(err instanceof ApiError ? err.message : "Power history did not load");
+      } finally {
+        if (stop) return;
+        timer = window.setTimeout(() => void pullHistory(), Math.max(0, 5000 - (performance.now() - started)));
+      }
+    };
+    void pullHistory();
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+  }, [gpu.id, histRange, histFrom, histTo]);
 
   useEffect(() => {
     if (editing.current) return;
@@ -2281,6 +2405,61 @@ function GpuInspector({
         </div>
       </dl>
       <DetailCurve samples={pts} min={live.min} max={live.max} cap={live.cap} watts={live.watts} />
+      <section className="maxlps-hist" aria-label="Power history">
+        <h3>Power history</h3>
+        <div className="range-bar">
+          <span>Range</span>
+          {GPU_RANGES.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              data-active={histRange === opt.id}
+              onClick={() => setHistRange(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            data-active={histRange === "custom"}
+            onClick={() => {
+              if (histRange !== "custom") {
+                const end = Date.now() / 1000;
+                setHistFrom(toLocalInput(end - 3600));
+                setHistTo(toLocalInput(end));
+              }
+              setHistRange("custom");
+            }}
+          >
+            Custom
+          </button>
+          <em>{gpuRangeCaption(histRange, histFrom, histTo)}</em>
+        </div>
+        {histRange === "custom" ? (
+          <div className="range-custom">
+            <input
+              type="datetime-local"
+              aria-label="From"
+              value={histFrom}
+              onChange={(e) => setHistFrom(e.target.value)}
+            />
+            <span>to</span>
+            <input
+              type="datetime-local"
+              aria-label="To"
+              value={histTo}
+              onChange={(e) => setHistTo(e.target.value)}
+            />
+          </div>
+        ) : null}
+        {histError && histPoints.length ? <p className="maxlps-hist-error">{histError}</p> : null}
+        <GpuWattHistory
+          points={histPoints}
+          fromTs={histBounds?.from ?? null}
+          toTs={histBounds?.to ?? null}
+          empty={histError || "Collecting power history"}
+        />
+      </section>
       <form
         ref={formRef}
         className="lps-policy maxlps-loop-algo"
@@ -2333,6 +2512,76 @@ function formatResponseMs(ms: number | null): string {
   const rounded = Math.round(ms);
   if (rounded < 1) return "<1 ms";
   return `${rounded} ms`;
+}
+
+function GpuWattHistory({
+  points,
+  fromTs,
+  toTs,
+  empty,
+}: {
+  points: { t: number; w: number }[];
+  fromTs: number | null;
+  toTs: number | null;
+  empty: string;
+}) {
+  const drawn = points.filter((point) => Number.isFinite(point.t) && Number.isFinite(point.w));
+  if (!drawn.length || fromTs == null || toTs == null || !(toTs > fromTs)) {
+    return <p className="maxlps-hist-empty">{empty}</p>;
+  }
+  const span = Math.max(toTs - fromTs, 1);
+  const seq =
+    drawn.length === 1
+      ? (() => {
+          const width = span * 0.2;
+          const stamp = drawn[0].t;
+          let start = stamp - width;
+          let end = stamp;
+          if (start < fromTs) {
+            start = fromTs;
+            end = Math.min(toTs, fromTs + width);
+          }
+          if (end > toTs) end = toTs;
+          if (!(end > start)) end = Math.min(toTs, start + span * 0.04);
+          return [
+            { t: start, w: drawn[0].w },
+            { t: end, w: drawn[0].w },
+          ];
+        })()
+      : drawn;
+  const W = 640;
+  const H = 120;
+  const x = (t: number) => ((t - fromTs) / span) * W;
+  const peak = Math.max(1, ...drawn.map((point) => point.w));
+  const y = (v: number) => H - (v / peak) * (H - 4);
+  const line = seq.map((point) => `${x(point.t).toFixed(1)},${y(point.w).toFixed(1)}`).join(" ");
+  const area = `${x(seq[0].t).toFixed(1)},${y(0).toFixed(1)} ${line} ${x(seq[seq.length - 1].t).toFixed(1)},${y(0).toFixed(1)}`;
+  const ticks = [
+    { y: 0, text: formatW(peak) },
+    { y: 50, text: formatW(peak / 2) },
+    { y: 100, text: formatW(0) },
+  ];
+  return (
+    <div className="chart-plot">
+      <div className="chart-y" aria-hidden>
+        {ticks.map((tick) => (
+          <span key={tick.y} style={{ top: `${tick.y}%`, transform: histTickTransform(tick.y) }}>
+            {tick.text}
+          </span>
+        ))}
+      </div>
+      <svg className="net-svg maxlps-watt-history" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="GPU power history">
+        <line x1="0" x2={W} y1={H / 2} y2={H / 2} />
+        <polygon points={area} />
+        <polyline points={line} fill="none" strokeWidth="1.7" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="chart-x">
+        {[fromTs, fromTs + span / 2, toTs].map((stamp, index) => (
+          <span key={`${index}-${stamp}`}>{histAxisTime(stamp, span)}</span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function linY(v: number, lo: number, hi: number, h: number, pad: number) {

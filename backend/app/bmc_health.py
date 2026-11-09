@@ -54,8 +54,11 @@ _FAIL_UNTIL: dict[str, float] = {}
 _FAIL_HOLD_S = 60.0
 _CENSUS: dict[str, float] = {"t": 0.0, "total": 0}
 _HIST: list[tuple[float, float | None, float | None]] = []
+_NODE_HIST: list[tuple[float, list]] = []
 _HIST_LOCK = threading.Lock()
 _HIST_LOADED = False
+_last_node_sample = 0.0
+_NODE_SAMPLE_S = 30.0
 _last_sample = 0.0
 _last_prune = 0.0
 
@@ -1169,6 +1172,7 @@ def _ensure_hist() -> None:
         if _HIST_LOADED:
             return
         loaded: list[tuple[float, float | None, float | None]] = []
+        loaded_nodes: list[tuple[float, list]] = []
         try:
             from sqlalchemy import select
 
@@ -1178,23 +1182,70 @@ def _ensure_hist() -> None:
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=_HIST_KEEP_S)
             with SessionLocal() as db:
                 rows = db.execute(
-                    select(ClusterHealthSample.ts, ClusterHealthSample.temp_c, ClusterHealthSample.psu_w)
+                    select(
+                        ClusterHealthSample.ts,
+                        ClusterHealthSample.temp_c,
+                        ClusterHealthSample.psu_w,
+                        ClusterHealthSample.nodes,
+                    )
                     .where(ClusterHealthSample.ts >= cutoff)
                     .order_by(ClusterHealthSample.ts.asc())
                 ).all()
-            loaded = [(_hist_ts(ts), temp, psu) for ts, temp, psu in rows]
+            for ts, temp, psu, nodes in rows:
+                stamp = _hist_ts(ts)
+                loaded.append((stamp, temp, psu))
+                if isinstance(nodes, list) and nodes:
+                    loaded_nodes.append((stamp, nodes))
         except Exception:
             loaded = []
+            loaded_nodes = []
         if _HIST:
             _HIST[:0] = loaded
         else:
             _HIST.extend(loaded)
+        if _NODE_HIST:
+            _NODE_HIST[:0] = loaded_nodes
+        else:
+            _NODE_HIST.extend(loaded_nodes)
         _HIST_LOADED = True
+
+
+def _node_readings() -> list[list]:
+    """Per-node hottest °C and chassis watts. Nodes with neither are left out."""
+    with _LOCK:
+        nodes = list(_SNAP.get("nodes") or [])
+    out: list[list] = []
+    for node in nodes:
+        if node.get("error"):
+            continue
+        ip = str(node.get("bmc_ip") or "")
+        if not ip:
+            continue
+        thermal = node.get("thermal") or {}
+        power = node.get("power") or {}
+        temp = thermal.get("hottest_c")
+        watts = power.get("watts")
+        temp_v = float(temp) if isinstance(temp, (int, float)) else None
+        psu_v = float(watts) if isinstance(watts, (int, float)) else None
+        if temp_v is None and psu_v is None:
+            continue
+        index = node.get("node_index")
+        rack = node.get("rack_id")
+        out.append(
+            [
+                ip,
+                int(index) if isinstance(index, int) else None,
+                str(rack) if rack else None,
+                temp_v,
+                psu_v,
+            ]
+        )
+    return out
 
 
 def _note_telemetry(summary: dict[str, Any] | None) -> None:
     """Remember a temperature and PSU sample. Empty attributes are not written as zeros."""
-    global _last_sample, _last_prune
+    global _last_sample, _last_prune, _last_node_sample
     card_t = (summary or {}).get("temperature") or {}
     card_p = (summary or {}).get("psu") or {}
     temp = card_t.get("celsius")
@@ -1204,18 +1255,29 @@ def _note_telemetry(summary: dict[str, Any] | None) -> None:
     if temp_v is None and psu_v is None:
         return
     now = time.time()
+    if now - _last_sample < _SAMPLE_S:
+        return
+    # Read nodes before the history lock. The health lock and the history lock
+    # must not be taken in opposite orders.
+    node_rows = _node_readings() if now - _last_node_sample >= _NODE_SAMPLE_S else None
     with _HIST_LOCK:
         if now - _last_sample < _SAMPLE_S:
             return
         _last_sample = now
         _HIST.append((now, temp_v, psu_v))
+        if node_rows is not None:
+            _last_node_sample = now
+            if node_rows:
+                _NODE_HIST.append((now, node_rows))
         cutoff = now - _HIST_KEEP_S
         if _HIST and _HIST[0][0] < cutoff:
             _HIST[:] = [row for row in _HIST if row[0] >= cutoff]
-    _write_sample(now, temp_v, psu_v)
+        if _NODE_HIST and _NODE_HIST[0][0] < cutoff:
+            _NODE_HIST[:] = [row for row in _NODE_HIST if row[0] >= cutoff]
+    _write_sample(now, temp_v, psu_v, node_rows)
 
 
-def _write_sample(now: float, temp: float | None, psu: float | None) -> None:
+def _write_sample(now: float, temp: float | None, psu: float | None, nodes: list | None = None) -> None:
     global _last_prune
     try:
         from sqlalchemy import delete
@@ -1229,6 +1291,7 @@ def _write_sample(now: float, temp: float | None, psu: float | None) -> None:
                     ts=datetime.fromtimestamp(now, timezone.utc),
                     temp_c=temp,
                     psu_w=psu,
+                    nodes=nodes or None,
                 )
             )
             if now - _last_prune > 60:
@@ -1310,6 +1373,95 @@ def telemetry_series(start: float, end: float, points: int = 180) -> list[dict[s
         if not rows or snap_t > rows[-1][0] + 0.2:
             rows.append((snap_t, temp, psu))
     return bucket_telemetry(rows, start, end, points)
+
+
+def _node_fields(item: Any) -> tuple[str, int | None, str | None, float | None, float | None] | None:
+    if not isinstance(item, (list, tuple)) or len(item) < 5:
+        return None
+    ip = str(item[0] or "")
+    if not ip:
+        return None
+    index = item[1] if isinstance(item[1], int) else None
+    rack = str(item[2]) if item[2] else None
+    temp = float(item[3]) if isinstance(item[3], (int, float)) else None
+    watts = float(item[4]) if isinstance(item[4], (int, float)) else None
+    return ip, index, rack, temp, watts
+
+
+def bucket_node_telemetry(
+    rows: list[tuple[float, list]],
+    start: float,
+    end: float,
+    points: int,
+) -> list[dict[str, Any]]:
+    """Per-node hottest temperature and average PSU watts. Empty buckets stay out."""
+    points = max(1, int(points))
+    span = max(float(end) - float(start), 1.0)
+    width = span / points
+    bins: dict[str, list[dict[str, float | None]]] = {}
+    meta: dict[str, tuple[int | None, str | None]] = {}
+    for stamp, nodes in rows:
+        if stamp < start or stamp > end or not isinstance(nodes, list):
+            continue
+        index = min(points - 1, int((stamp - start) / width))
+        for item in nodes:
+            parsed = _node_fields(item)
+            if not parsed:
+                continue
+            ip, node_index, rack, temp, watts = parsed
+            meta[ip] = (node_index, rack)
+            series = bins.get(ip)
+            if series is None:
+                series = [{"temp": None, "temp_n": 0, "psu": 0.0, "psu_n": 0, "n": 0} for _ in range(points)]
+                bins[ip] = series
+            bucket = series[index]
+            bucket["n"] = float(bucket["n"] or 0) + 1
+            if temp is not None:
+                prev = bucket["temp"]
+                bucket["temp"] = float(temp) if prev is None else max(float(prev), float(temp))
+                bucket["temp_n"] = float(bucket["temp_n"] or 0) + 1
+            if watts is not None:
+                bucket["psu"] = float(bucket["psu"] or 0) + float(watts)
+                bucket["psu_n"] = float(bucket["psu_n"] or 0) + 1
+    out: list[dict[str, Any]] = []
+    for ip, series in bins.items():
+        node_index, rack = meta.get(ip, (None, None))
+        plotted: list[dict[str, Any]] = []
+        for i, bucket in enumerate(series):
+            if not bucket["n"]:
+                continue
+            plotted.append(
+                {
+                    "t": start + (i + 0.5) * width,
+                    "temp_c": round(float(bucket["temp"]), 2) if bucket["temp"] is not None else None,
+                    "psu_w": round(float(bucket["psu"] or 0) / float(bucket["psu_n"]), 1) if bucket["psu_n"] else None,
+                }
+            )
+        if not plotted:
+            continue
+        out.append(
+            {
+                "bmc_ip": ip,
+                "node_index": node_index,
+                "rack_id": rack,
+                "points": plotted,
+            }
+        )
+    out.sort(key=lambda row: (str(row.get("rack_id") or ""), int(row.get("node_index") or 0), str(row.get("bmc_ip"))))
+    return out
+
+
+def node_telemetry(start: float, end: float, points: int = 180) -> list[dict[str, Any]]:
+    """Per-node temperature and PSU history for the overview detail graphs."""
+    _ensure_hist()
+    with _HIST_LOCK:
+        rows = [row for row in _NODE_HIST if start <= row[0] <= end]
+    live = _node_readings()
+    _temp, _psu, snap_t = _live_reading()
+    if live and snap_t >= start and snap_t <= end + 2:
+        if not rows or snap_t > rows[-1][0] + 0.2:
+            rows.append((snap_t, live))
+    return bucket_node_telemetry(rows, start, end, points)
 
 
 def _unknown(target: dict[str, str], error: str, via: str) -> dict[str, Any]:

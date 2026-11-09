@@ -260,6 +260,18 @@ export const api = {
     const q = qs.toString();
     return request<import("./cluster").ClusterMetrics>(`/api/cluster/metrics${q ? `?${q}` : ""}`);
   },
+  clusterHealthHistory: (span = "1d") =>
+    request<{
+      span: string;
+      from_ts: number;
+      to_ts: number;
+      nodes: {
+        bmc_ip: string;
+        node_index?: number | null;
+        rack_id?: string | null;
+        points: { t: number; temp_c?: number | null; psu_w?: number | null }[];
+      }[];
+    }>(`/api/cluster/health/history?span=${encodeURIComponent(span)}`),
   clusterHealth: (brief = false) =>
     request<import("./cluster").ClusterHealth>(`/api/cluster/health${brief ? "?brief=1" : ""}`),
   clusterHealthNode: (bmcIp: string) =>
@@ -587,6 +599,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  maxlpsGpuHistory: (gpuId: string, from_ts: number, to_ts: number) => {
+    const qs = new URLSearchParams({ from_ts: String(from_ts), to_ts: String(to_ts) });
+    return request<{ id: string; from_ts: number; to_ts: number; points: { t: number; w: number }[] }>(
+      `/api/cluster/maxlps/gpus/${encodeURIComponent(gpuId)}/history?${qs.toString()}`,
+    );
+  },
   maxlpsGpuCurve: (gpuId: string) =>
     request<{
       id: string;

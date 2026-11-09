@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { api } from "@/lib/api";
@@ -577,11 +577,489 @@ function leakLabel(live?: ClusterHealthNode) {
   return live ? st || "—" : "—";
 }
 
+const NODE_COLORS = [
+  "#e10600",
+  "#3dd68c",
+  "#e8b339",
+  "#5b9dff",
+  "#c084fc",
+  "#f472b6",
+  "#22d3ee",
+  "#fb923c",
+  "#a3e635",
+  "#facc15",
+  "#fb7185",
+  "#818cf8",
+  "#2dd4bf",
+  "#fdba74",
+  "#e879f9",
+  "#86efac",
+  "#f9a8d4",
+  "#93c5fd",
+];
+
+type NodeHist = {
+  bmc_ip: string;
+  node_index?: number | null;
+  rack_id?: string | null;
+  points: { t: number; temp_c?: number | null; psu_w?: number | null }[];
+};
+
+function histNodeLabel(node: NodeHist, inv: MaxLpsInvRack[]) {
+  const rack = inv.find((item) => item.id === node.rack_id);
+  const slot =
+    node.node_index != null && node.node_index > 0
+      ? `n${String(node.node_index).padStart(2, "0")}`
+      : node.bmc_ip;
+  return rack?.label ? `${rack.label} ${slot}` : slot;
+}
+
+function NodeHistoryChart({
+  kind,
+  nodes,
+  windowSec,
+  inv,
+}: {
+  kind: "temperature" | "psu";
+  nodes: NodeHist[];
+  windowSec: number;
+  inv: MaxLpsInvRack[];
+}) {
+  const [off, setOff] = useState<Record<string, boolean>>({});
+  const field = kind === "temperature" ? "temp_c" : "psu_w";
+  const format = kind === "temperature" ? fmtC : fmtW;
+  const empty = kind === "temperature" ? "Collecting temperature history" : "Collecting PSU history";
+  const drawn = nodes
+    .map((node, index) => {
+      const points = node.points
+        .map((point) => ({ t: point.t, v: point[field] }))
+        .filter((point): point is { t: number; v: number } => point.v != null && Number.isFinite(point.v));
+      return {
+        id: node.bmc_ip || String(index),
+        label: histNodeLabel(node, inv),
+        color: NODE_COLORS[index % NODE_COLORS.length],
+        points,
+      };
+    })
+    .filter((series) => series.points.length > 0);
+  const visible = drawn.filter((series) => !off[series.id]);
+  if (!drawn.length) return <p className="telem-list-empty">{empty}</p>;
+  const times = visible.flatMap((series) => series.points.map((point) => point.t));
+  const span = telemDrawSpan(windowSec, times.length ? times : drawn.flatMap((series) => series.points.map((point) => point.t)));
+  const end = Math.max(...(times.length ? times : drawn.flatMap((series) => series.points.map((point) => point.t))));
+  const start = end - span;
+  const W = 640;
+  const H = 140;
+  const x = (t: number) => ((t - start) / span) * W;
+  const peak = Math.max(1e-6, ...visible.flatMap((series) => series.points.map((point) => point.v)));
+  const y = (v: number) => H - (v / peak) * (H - 4);
+  const lineFor = (points: { t: number; v: number }[]) => {
+    const seq =
+      points.length === 1
+        ? [
+            { t: points[0].t - span * 0.2, v: points[0].v },
+            points[0],
+          ]
+        : points;
+    return seq.map((point) => `${x(point.t).toFixed(1)},${y(point.v).toFixed(1)}`).join(" ");
+  };
+  const ticks = [
+    { y: 0, text: format(peak) },
+    { y: 50, text: format(peak / 2) },
+    { y: 100, text: format(0) },
+  ];
+  return (
+    <div className="telem-history" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="chart-plot">
+        <div className="chart-y" aria-hidden>
+          {ticks.map((tick) => (
+            <span key={tick.y} style={{ top: `${tick.y}%`, transform: tickTransform(tick.y) }}>
+              {tick.text}
+            </span>
+          ))}
+        </div>
+        <svg className="net-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={kind === "temperature" ? "Temperature by node" : "PSU power by node"}>
+          <line x1="0" x2={W} y1={H / 2} y2={H / 2} className="net-grid" />
+          {visible.map((series) => (
+            <polyline key={series.id} points={lineFor(series.points)} fill="none" stroke={series.color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+        <div className="chart-x">
+          {[start, start + span / 2, end].map((stamp, index) => (
+            <span key={`${index}-${stamp}`}>{axisTime(stamp, span)}</span>
+          ))}
+        </div>
+      </div>
+      <div className="telem-legend">
+        {drawn.map((series) => (
+          <button
+            key={series.id}
+            type="button"
+            data-off={off[series.id] ? "true" : undefined}
+            onClick={() => setOff((cur) => ({ ...cur, [series.id]: !cur[series.id] }))}
+          >
+            <i style={{ background: series.color }} />
+            {series.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const GPU_COLORS = ["#5b9dff", "#e10600", "#e8b339", "#3dd68c"];
+
+function mixHex(a: string, b: string, t: number) {
+  const pa = Number.parseInt(a.slice(1), 16);
+  const pb = Number.parseInt(b.slice(1), 16);
+  const ch = (shift: number) => {
+    const from = (pa >> shift) & 255;
+    const to = (pb >> shift) & 255;
+    return Math.round(from + (to - from) * t);
+  };
+  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+}
+
+function heatColor(t: number) {
+  const x = Math.max(0, Math.min(1, t));
+  if (x < 0.5) return mixHex("#3dd68c", "#e8b339", x / 0.5);
+  return mixHex("#e8b339", "#e10600", (x - 0.5) / 0.5);
+}
+
+type TempSlot = {
+  key: string;
+  slot: string;
+  host: string;
+  gpus: (number | null)[];
+  inlet: number | null;
+  exhaust: number | null;
+};
+
+function tempSlots(
+  nodes: { key: string; index: number; hostname: string | null; bmcIp: string; rack: { label: string } }[],
+  health: ClusterHealth | null,
+): TempSlot[] {
+  return nodes.map((row) => {
+    const live = liveForIp(health, row.bmcIp);
+    const num = (v?: number | null) => (v != null && Number.isFinite(v) ? v : null);
+    return {
+      key: row.key,
+      slot: `n${String(row.index).padStart(2, "0")}`,
+      host: row.hostname || row.rack.label,
+      gpus: gpuTemps(live).map((g) => num(g.celsius)),
+      inlet: num(live?.thermal?.inlet_c),
+      exhaust: num(live?.thermal?.exhaust_c),
+    };
+  });
+}
+
+function TempAnalytics({
+  nodes,
+  health,
+}: {
+  nodes: { key: string; index: number; hostname: string | null; bmcIp: string; rack: { label: string } }[];
+  health: ClusterHealth | null;
+}) {
+  const [off, setOff] = useState<Record<number, boolean>>({});
+  const slots = tempSlots(nodes, health);
+  const points = slots.flatMap((row) =>
+    row.gpus.flatMap((celsius, gpu) => (celsius == null ? [] : [{ slot: row.slot, host: row.host, gpu, celsius }])),
+  );
+  if (!points.length) return <p className="telem-list-empty">No GPU temperatures yet.</p>;
+  const hottest = points.reduce((best, row) => (row.celsius > best.celsius ? row : best));
+  const coolest = points.reduce((best, row) => (row.celsius < best.celsius ? row : best));
+  const average = points.reduce((sum, row) => sum + row.celsius, 0) / points.length;
+  const byGpu = [0, 1, 2, 3].map((gpu) => {
+    const vals = points.filter((row) => row.gpu === gpu).map((row) => row.celsius);
+    return vals.length ? vals.reduce((sum, value) => sum + value, 0) / vals.length : null;
+  });
+  const inlets = slots.map((row) => row.inlet).filter((value): value is number => value != null);
+  const exhausts = slots.map((row) => row.exhaust).filter((value): value is number => value != null);
+  const mean = (vals: number[]) => (vals.length ? vals.reduce((sum, value) => sum + value, 0) / vals.length : null);
+  const reporting = slots.filter((row) => row.gpus.some((value) => value != null)).length;
+  const warm = points.filter((row) => row.celsius >= 75).length;
+  const hot = points.filter((row) => row.celsius >= 85).length;
+  const pad = Math.max(1.5, (hottest.celsius - coolest.celsius) * 0.45);
+  const lo = coolest.celsius - pad;
+  const hi = hottest.celsius + pad;
+  const span = Math.max(hi - lo, 1);
+  const W = 640;
+  const H = 120;
+  const groupW = W / Math.max(slots.length, 1);
+  const barW = (groupW * 0.78) / 4;
+  const y = (value: number) => ((hi - value) / span) * H;
+  const ticks = [
+    { y: 0, text: fmtC(hi) },
+    { y: 50, text: fmtC((hi + lo) / 2) },
+    { y: 100, text: fmtC(lo) },
+  ];
+  const visibleGpu = (gpu: number) => !off[gpu];
+  return (
+    <div className="temp-analytics" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="temp-stats">
+        <div>
+          <span>Hottest</span>
+          <b data-status={tempTone(hottest.celsius)}>{fmtC(hottest.celsius)}</b>
+          <small>
+            {hottest.slot} · GPU {hottest.gpu}
+          </small>
+        </div>
+        <div>
+          <span>Average</span>
+          <b>{average.toFixed(1)}°C</b>
+          <small>{points.length} GPUs</small>
+        </div>
+        <div>
+          <span>Coolest</span>
+          <b>{fmtC(coolest.celsius)}</b>
+          <small>
+            {coolest.slot} · GPU {coolest.gpu}
+          </small>
+        </div>
+        <div>
+          <span>Spread</span>
+          <b>{(hottest.celsius - coolest.celsius).toFixed(1)}°C</b>
+          <small>hottest − coolest</small>
+        </div>
+        <div>
+          <span>Reporting</span>
+          <b>
+            {reporting}/{slots.length}
+          </b>
+          <small>nodes</small>
+        </div>
+        <div>
+          <span>75°C or hotter</span>
+          <b data-status={hot ? "critical" : warm ? "warning" : "ok"}>{warm}</b>
+          <small>{hot ? `${hot} at 85°C+` : "GPUs"}</small>
+        </div>
+      </div>
+      <p className="temp-note">
+        {hot
+          ? `${hot} GPUs are at 85°C or hotter.`
+          : warm
+            ? `${warm} GPUs are at 75°C or hotter.`
+            : "Every reporting GPU is under 75°C."}
+        {mean(inlets) != null ? ` Inlet ${fmtC(mean(inlets))}.` : ""}
+        {mean(exhausts) != null ? ` Exhaust ${fmtC(mean(exhausts))}.` : ""}
+      </p>
+      <div className="temp-chart-head">
+        <span>By node</span>
+        <em>
+          {coolest.celsius.toFixed(0)}–{hottest.celsius.toFixed(0)}°C
+        </em>
+      </div>
+      <div className="chart-plot">
+        <div className="chart-y" aria-hidden>
+          {ticks.map((tick) => (
+            <span key={tick.y} style={{ top: `${tick.y}%`, transform: tickTransform(tick.y) }}>
+              {tick.text}
+            </span>
+          ))}
+        </div>
+        <svg className="net-svg temp-bars" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="GPU temperature by node">
+          <line x1="0" x2={W} y1={H / 2} y2={H / 2} />
+          {slots.map((row, index) => {
+            const origin = index * groupW + (groupW - barW * 4) / 2;
+            return row.gpus.map((celsius, gpu) => {
+              if (celsius == null || !visibleGpu(gpu)) return null;
+              const top = y(celsius);
+              return (
+                <rect
+                  key={`${row.key}-${gpu}`}
+                  x={origin + gpu * barW}
+                  y={top}
+                  width={Math.max(barW - 0.8, 0.8)}
+                  height={Math.max(H - top, 0.8)}
+                  fill={GPU_COLORS[gpu]}
+                >
+                  <title>{`${row.slot} ${row.host} GPU ${gpu} ${fmtC(celsius)}`}</title>
+                </rect>
+              );
+            });
+          })}
+        </svg>
+        <div className="temp-slots" style={{ gridTemplateColumns: `repeat(${Math.max(slots.length, 1)}, 1fr)` }}>
+          {slots.map((row) => (
+            <span key={row.key}>{row.slot.slice(1)}</span>
+          ))}
+        </div>
+      </div>
+      <div className="telem-legend">
+        {[0, 1, 2, 3].map((gpu) => (
+          <button
+            key={gpu}
+            type="button"
+            data-off={off[gpu] ? "true" : undefined}
+            onClick={() => setOff((cur) => ({ ...cur, [gpu]: !cur[gpu] }))}
+          >
+            <i style={{ background: GPU_COLORS[gpu] }} />
+            GPU {gpu}
+            {byGpu[gpu] != null ? ` ${byGpu[gpu]!.toFixed(0)}°` : ""}
+          </button>
+        ))}
+      </div>
+      <div className="temp-chart-head">
+        <span>Average by GPU</span>
+      </div>
+      <div className="temp-avg">
+        {byGpu.map((value, gpu) => (
+          <div key={gpu}>
+            <span>GPU {gpu}</span>
+            <b>
+              <i
+                style={{
+                  width: value == null ? "0%" : `${Math.max(4, ((value - lo) / span) * 100)}%`,
+                  background: GPU_COLORS[gpu],
+                }}
+              />
+            </b>
+            <em>{value == null ? "—" : `${value.toFixed(1)}°C`}</em>
+          </div>
+        ))}
+      </div>
+      <div className="temp-chart-head">
+        <span>All GPUs</span>
+        <em>cool to hot</em>
+      </div>
+      <div className="temp-heat" style={{ gridTemplateColumns: `2.4rem repeat(${Math.max(slots.length, 1)}, 1fr)` }}>
+        <span className="temp-heat-y" />
+        {slots.map((row) => (
+          <span key={`${row.key}-h`}>{row.slot.slice(1)}</span>
+        ))}
+        {[0, 1, 2, 3].map((gpu) => (
+          <Fragment key={gpu}>
+            <span className="temp-heat-y">G{gpu}</span>
+            {slots.map((row) => {
+              const celsius = row.gpus[gpu];
+              const tone = celsius == null ? 0 : (celsius - coolest.celsius) / Math.max(hottest.celsius - coolest.celsius, 0.1);
+              return (
+                <i
+                  key={`${row.key}-${gpu}`}
+                  data-empty={celsius == null ? "true" : undefined}
+                  data-off={off[gpu] ? "true" : undefined}
+                  style={celsius == null ? undefined : { background: heatColor(tone) }}
+                  title={celsius == null ? `${row.slot} GPU ${gpu} —` : `${row.slot} GPU ${gpu} ${fmtC(celsius)}`}
+                />
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PsuAnalytics({
+  nodes,
+  health,
+}: {
+  nodes: { key: string; index: number; hostname: string | null; bmcIp: string; rack: { label: string } }[];
+  health: ClusterHealth | null;
+}) {
+  const rows = nodes.map((row) => {
+    const watts = liveForIp(health, row.bmcIp)?.power?.watts;
+    return {
+      key: row.key,
+      slot: `n${String(row.index).padStart(2, "0")}`,
+      host: row.hostname || row.rack.label,
+      watts: watts != null && Number.isFinite(watts) ? watts : null,
+    };
+  });
+  const live = rows.filter((row): row is { key: string; slot: string; host: string; watts: number } => row.watts != null);
+  if (!live.length) return <p className="telem-list-empty">No PSU readings yet.</p>;
+  const total = live.reduce((sum, row) => sum + row.watts, 0);
+  const peak = live.reduce((best, row) => (row.watts > best.watts ? row : best));
+  const low = live.reduce((best, row) => (row.watts < best.watts ? row : best));
+  const average = total / live.length;
+  const hi = Math.max(peak.watts * 1.08, 1);
+  const W = 640;
+  const H = 100;
+  const groupW = W / Math.max(rows.length, 1);
+  return (
+    <div className="temp-analytics" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="temp-stats">
+        <div>
+          <span>Total</span>
+          <b>{fmtW(total)}</b>
+          <small>{live.length} nodes</small>
+        </div>
+        <div>
+          <span>Average</span>
+          <b>{fmtW(average)}</b>
+          <small>per reporting node</small>
+        </div>
+        <div>
+          <span>Highest</span>
+          <b>{fmtW(peak.watts)}</b>
+          <small>
+            {peak.slot} · {peak.host}
+          </small>
+        </div>
+        <div>
+          <span>Lowest</span>
+          <b>{fmtW(low.watts)}</b>
+          <small>{low.slot}</small>
+        </div>
+        <div>
+          <span>Reporting</span>
+          <b>
+            {live.length}/{rows.length}
+          </b>
+          <small>nodes</small>
+        </div>
+        <div>
+          <span>Spread</span>
+          <b>{fmtW(peak.watts - low.watts)}</b>
+          <small>highest − lowest</small>
+        </div>
+      </div>
+      <div className="temp-chart-head">
+        <span>PSU power by node</span>
+        <em>{fmtW(peak.watts)} peak</em>
+      </div>
+      <div className="chart-plot">
+        <div className="chart-y" aria-hidden>
+          {[
+            { y: 0, text: fmtW(hi) },
+            { y: 50, text: fmtW(hi / 2) },
+            { y: 100, text: fmtW(0) },
+          ].map((tick) => (
+            <span key={tick.y} style={{ top: `${tick.y}%`, transform: tickTransform(tick.y) }}>
+              {tick.text}
+            </span>
+          ))}
+        </div>
+        <svg className="net-svg temp-bars" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="PSU power by node">
+          <line x1="0" x2={W} y1={H / 2} y2={H / 2} />
+          {rows.map((row, index) => {
+            if (row.watts == null) return null;
+            const height = (row.watts / hi) * H;
+            const width = groupW * 0.62;
+            return (
+              <rect key={row.key} x={index * groupW + (groupW - width) / 2} y={H - height} width={width} height={Math.max(height, 0.8)} fill="#e10600">
+                <title>{`${row.slot} ${row.host} ${fmtW(row.watts)}`}</title>
+              </rect>
+            );
+          })}
+        </svg>
+        <div className="temp-slots" style={{ gridTemplateColumns: `repeat(${Math.max(rows.length, 1)}, 1fr)` }}>
+          {rows.map((row) => (
+            <span key={row.key}>{row.slot.slice(1)}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TelemList({
   kind,
   health,
   inv,
   power,
+  history,
+  historyWindow,
   onClose,
   onPick,
 }: {
@@ -589,6 +1067,8 @@ function TelemList({
   health: ClusterHealth | null;
   inv: MaxLpsInvRack[];
   power: PowerLimiterData | null;
+  history?: NodeHist[];
+  historyWindow?: number;
   onClose: () => void;
   onPick: (node: PickedNode) => void;
 }) {
@@ -640,6 +1120,11 @@ function TelemList({
           ×
         </button>
       </header>
+      {kind === "temperature" ? <TempAnalytics nodes={nodes} health={health} /> : null}
+      {kind === "psu" ? <PsuAnalytics nodes={nodes} health={health} /> : null}
+      {(kind === "temperature" || kind === "psu") && (history ?? []).some((node) => node.points.length > 0) ? (
+        <NodeHistoryChart kind={kind} nodes={history ?? []} windowSec={historyWindow ?? 86400} inv={inv} />
+      ) : null}
       {kind === "racks" ? (
         inv.length === 0 ? (
           <p className="telem-list-empty">No registered rack.</p>
@@ -1163,7 +1648,7 @@ function ScalarChart({
   if (!usable.length) return <p className="widget-empty">{empty}</p>;
   const W = 600;
   const H = 120;
-  const span = Math.max(windowSec, 1);
+  const span = telemDrawSpan(windowSec, usable.map((p) => p.t));
   const end = Math.max(...usable.map((p) => p.t));
   const start = end - span;
   const x = (t: number) => ((t - start) / span) * W;
@@ -1172,7 +1657,7 @@ function ScalarChart({
   const draw =
     usable.length === 1
       ? [
-          { t: usable[0].t - span * 0.012, v: usable[0].v },
+          { t: usable[0].t - span * 0.2, v: usable[0].v },
           { t: usable[0].t, v: usable[0].v },
         ]
       : usable;
@@ -1198,7 +1683,7 @@ function ScalarChart({
       <svg className="net-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
         <line x1="0" x2={W} y1={H / 2} y2={H / 2} className="net-grid" />
         <polygon points={usedArea} className="net-fill-tx" />
-        <polyline points={usedLine} className="net-line-tx" />
+        <polyline points={usedLine} className="net-line-tx" vectorEffect="non-scaling-stroke" />
       </svg>
       <div className="chart-x">
         {xLabels.map((t, i) => (
@@ -1338,6 +1823,32 @@ const TELEM_LABEL: Record<TelemRange, string> = {
   "1w": "Last 1 week",
 };
 
+const MIN_TELEM_SPAN = 15 * 60;
+
+function telemDrawSpan(windowSec: number, times: number[]): number {
+  const selected = Math.max(windowSec, 1);
+  if (!times.length) return selected;
+  const dataSpan = Math.max(...times) - Math.min(...times);
+  // A full 1D axis hides a few minutes of samples in the last pixels.
+  if (dataSpan >= selected * 0.98) return selected;
+  return Math.min(selected, Math.max(dataSpan * 1.15, MIN_TELEM_SPAN));
+}
+
+function telemCaption(range: TelemRange, times: number[]): string {
+  const selected = TELEM_RANGES.find((opt) => opt.id === range)?.seconds ?? 86400;
+  const span = telemDrawSpan(selected, times);
+  if (span >= selected * 0.98) return TELEM_LABEL[range];
+  if (span < 90 * 60) return `Last ${Math.max(1, Math.round(span / 60))} min`;
+  if (span < 36 * 3600) {
+    const hours = span / 3600;
+    const text = hours < 10 ? hours.toFixed(1).replace(/\.0$/, "") : String(Math.round(hours));
+    return `Last ${text} h`;
+  }
+  const days = span / 86400;
+  const text = days < 10 ? days.toFixed(1).replace(/\.0$/, "") : String(Math.round(days));
+  return `Last ${text} d`;
+}
+
 // The next pull starts as soon as this one finishes. The floor only applies
 // when the call itself returned faster than this, so a quick read does not spin.
 const CARD_POLL_MIN_MS = 200;
@@ -1357,6 +1868,7 @@ export function OverviewDash() {
   const [nodeLive, setNodeLive] = useState<ClusterHealthNode | null>(null);
   const [inv, setInv] = useState<MaxLpsInvRack[]>([]);
   const [telem, setTelem] = useState<TelemKind | null>(null);
+  const [nodeHist, setNodeHist] = useState<NodeHist[]>([]);
   const [bellHost, setBellHost] = useState<HTMLElement | null>(null);
   const telemRef = useRef(telem);
   const pickedRef = useRef(picked);
@@ -1483,6 +1995,36 @@ export function OverviewDash() {
       window.removeEventListener("l12-refresh", onRefresh);
     };
   }, [range, customFrom, customTo, telemRange]);
+
+  useEffect(() => {
+    if (telem !== "temperature" && telem !== "psu") return;
+    let cancelled = false;
+    let busy = false;
+    let timer = 0;
+    const pull = () => {
+      if (cancelled || busy) return;
+      busy = true;
+      const t0 = performance.now();
+      api
+        .clusterHealthHistory(telemRange)
+        .then((row) => {
+          if (!cancelled) setNodeHist(row.nodes ?? []);
+        })
+        .catch(() => {
+          /* keep the last node history */
+        })
+        .finally(() => {
+          busy = false;
+          if (cancelled) return;
+          timer = window.setTimeout(pull, Math.max(0, 2000 - (performance.now() - t0)));
+        });
+    };
+    pull();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [telem, telemRange]);
 
   useEffect(() => {
     setBellHost(document.getElementById("cluster-alert-bell"));
@@ -1636,7 +2178,7 @@ export function OverviewDash() {
         if (!telem && !picked) return;
         const el = e.target as HTMLElement;
         if (el.closest(".telem-list, .node-telem-panel, .node-console, .gb300-node-hit, .pod-node, .pod-node-pick")) return;
-        if (el.closest(".summary-strip button")) return;
+        if (el.closest(".summary-strip button, .net-panel[data-detail]")) return;
         closeOverlays();
         e.stopPropagation();
       }}
@@ -1744,6 +2286,8 @@ export function OverviewDash() {
           health={registered ? health : null}
           inv={inv}
           power={power}
+          history={nodeHist}
+          historyWindow={TELEM_RANGES.find((opt) => opt.id === telemRange)?.seconds ?? 86400}
           onClose={() => setTelem(null)}
           onPick={pickNode}
         />
@@ -1844,9 +2388,14 @@ export function OverviewDash() {
               {opt.label}
             </button>
           ))}
-          <em>{TELEM_LABEL[telemRange]}</em>
+          <em>{telemCaption(telemRange, (data.telemetry ?? []).map((p) => p.t))}</em>
         </div>
-        <article className="net-panel">
+        <article
+          className="net-panel"
+          data-detail="temperature"
+          data-open={telem === "temperature" ? "true" : undefined}
+          onClick={() => toggleTelem("temperature")}
+        >
           <header>
             <h2>Temperature</h2>
             <span className="net-legend-inline">
@@ -1865,7 +2414,12 @@ export function OverviewDash() {
             <p className="widget-empty">No registered cluster</p>
           )}
         </article>
-        <article className="net-panel">
+        <article
+          className="net-panel"
+          data-detail="psu"
+          data-open={telem === "psu" ? "true" : undefined}
+          onClick={() => toggleTelem("psu")}
+        >
           <header>
             <h2>PSU power</h2>
             <span className="net-legend-inline">

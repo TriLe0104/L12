@@ -2200,6 +2200,12 @@ def _finish_gpu_round(
     A later round that reaches real BMCs must replace a stale no-bmc-targets.
     Readings already in hand stay until a newer sample replaces them.
     """
+    try:
+        from . import maxlps_inventory
+
+        maxlps_inventory.remember_gpu_samples()
+    except Exception:
+        pass
     global _LIVE_GPU_ERR, _LIVE_GPU_T
     with _LIVE_GPU_LOCK:
         if hopped:
@@ -2382,6 +2388,29 @@ _CAP_FOLLOW_THREAD: threading.Thread | None = None
 _CAP_FOLLOW_LOCK = threading.Lock()
 _SNAP_LOCK = threading.Lock()
 _LAST_POWER_SNAP: dict[str, Any] | None = None
+
+
+def live_watt_snapshot() -> list[tuple[str, float]]:
+    """Current GPU watts. Empty when this process has not read a BMC yet."""
+    with _LIVE_GPU_LOCK:
+        items = list(_LIVE_GPU.items())
+    out: list[tuple[str, float]] = []
+    for gid, rec in items:
+        watts = rec.get("watts") if isinstance(rec, dict) else None
+        if isinstance(watts, (int, float)):
+            out.append((str(gid), float(watts)))
+    return out
+
+
+def live_gpu_watts(gpu_id: str) -> tuple[float | None, float]:
+    """Latest watts and the time that reading landed. (None, 0) when this GPU is absent."""
+    with _LIVE_GPU_LOCK:
+        rec = _LIVE_GPU.get(gpu_id) or {}
+        stamped = float(_LIVE_GPU_T or 0)
+    watts = rec.get("watts") if isinstance(rec, dict) else None
+    if isinstance(watts, (int, float)):
+        return float(watts), stamped
+    return None, 0.0
 
 
 def live_read_ms(gpu_id: str) -> float | None:

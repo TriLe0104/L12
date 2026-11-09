@@ -541,6 +541,20 @@ class ClusterHealthSample(Base):
     ts: Mapped[datetime] = mapped_column(index=True, default=_now)
     temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     psu_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Per-node [bmc_ip, node_index, rack_id, hottest_c, psu_watts]. Null on the fast cluster rows.
+    nodes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class GpuWattSample(Base):
+    """One GPU's watts, about every 30 seconds, kept for 8 days."""
+
+    __tablename__ = "gpu_watt_samples"
+    __table_args__ = (Index("ix_gpu_watt_samples_gpu_ts", "gpu_id", "ts"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ts: Mapped[datetime] = mapped_column(default=_now)
+    gpu_id: Mapped[str] = mapped_column(String(80), index=True)
+    watts: Mapped[float] = mapped_column(Float)
 
 
 class MaxLpsClusterWatt(Base):

@@ -369,6 +369,28 @@ html[data-theme="scc"] .summary-strip[data-k="health"] > div[data-status="warnin
 html[data-theme="scc"] .summary-strip[data-k="health"] > button[data-status="warning"] b { color: #b45309; }
 html[data-theme="scc"] .summary-strip[data-k="health"] > div[data-status="critical"] b,
 html[data-theme="scc"] .summary-strip[data-k="health"] > button[data-status="critical"] b { color: #dc2626; }
+html[data-theme="scc"] .temp-stats div,
+html[data-theme="scc"] .temp-analytics .chart-plot {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+html[data-theme="scc"] .temp-stats b,
+html[data-theme="scc"] .temp-chart-head em {
+  color: var(--ink);
+}
+
+html[data-theme="scc"] .temp-stats b[data-status="ok"] { color: #15803d; }
+html[data-theme="scc"] .temp-stats b[data-status="warning"] { color: #b45309; }
+html[data-theme="scc"] .temp-stats b[data-status="critical"] { color: #dc2626; }
+
+html[data-theme="scc"] .temp-bars line,
+html[data-theme="scc"] .temp-avg b,
+html[data-theme="scc"] .temp-heat i[data-empty="true"] {
+  stroke: #cbd5e1;
+  background: #e2e8f0;
+}
+
 html[data-theme="scc"] .telem-list-table td[data-status="ok"] { color: #15803d; }
 html[data-theme="scc"] .telem-list-table td[data-status="warning"] { color: #b45309; }
 html[data-theme="scc"] .telem-list-table td[data-status="critical"] { color: #dc2626; }
@@ -700,6 +722,30 @@ html[data-theme="scc"] .maxlps-detail-curve circle[data-k="now"] {
 
 html[data-theme="scc"] .maxlps-detail-curve text {
   fill: #334155;
+}
+
+html[data-theme="scc"] .maxlps-hist .chart-plot,
+html[data-theme="scc"] .maxlps-hist-empty {
+  background: #f8fafc !important;
+  border-color: #cbd5e1;
+}
+
+html[data-theme="scc"] .maxlps-hist h3,
+html[data-theme="scc"] .maxlps-hist-empty {
+  color: var(--ink) !important;
+}
+
+html[data-theme="scc"] .maxlps-watt-history polyline {
+  stroke: #15803d;
+  stroke-width: 2.2;
+}
+
+html[data-theme="scc"] .maxlps-watt-history polygon {
+  fill: rgba(22, 163, 74, 0.2);
+}
+
+html[data-theme="scc"] .maxlps-watt-history line {
+  stroke: #cbd5e1;
 }
 
 html[data-theme="scc"] .ramp-chart svg {

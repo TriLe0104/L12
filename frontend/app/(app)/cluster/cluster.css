@@ -217,7 +217,7 @@
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto auto auto minmax(10rem, 1.2fr) minmax(13rem, 1fr);
+  grid-template-rows: auto auto auto minmax(8rem, 0.85fr) minmax(16rem, 1.4fr);
   gap: 0.4rem;
   padding: 0.4rem 0.6rem 0.5rem;
 }
@@ -715,6 +715,224 @@
   margin: 0.8rem 0.9rem;
   color: var(--steel);
   font-size: 0.68rem;
+}
+
+.temp-analytics {
+  flex: 0 0 auto;
+  margin: 0.55rem 0.7rem 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.temp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.32rem;
+}
+
+.temp-stats div {
+  min-width: 0;
+  padding: 0.32rem 0.4rem 0.28rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.temp-stats span,
+.temp-chart-head,
+.temp-note {
+  color: var(--steel);
+  font-size: 0.48rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.temp-stats b {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.temp-stats b[data-status="ok"] { color: #3dd68c; }
+.temp-stats b[data-status="warning"] { color: #e8b339; }
+.temp-stats b[data-status="critical"] { color: var(--stop); }
+
+.temp-stats small,
+.temp-avg em {
+  display: block;
+  margin-top: 0.08rem;
+  color: var(--steel);
+  font-size: 0.52rem;
+  font-style: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.temp-note {
+  margin: 0;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.temp-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.temp-chart-head em {
+  font-style: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.temp-analytics .chart-plot {
+  height: 8.2rem;
+  flex: none;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.temp-bars line {
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1;
+}
+
+.temp-slots {
+  grid-row: 2;
+  grid-column: 2;
+  display: grid;
+  min-width: 0;
+}
+
+.temp-slots span {
+  text-align: center;
+  font-size: 0.42rem;
+  color: var(--steel);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.temp-avg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.temp-avg div {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) 3.4rem;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.temp-avg span,
+.temp-avg em {
+  font-size: 0.58rem;
+  color: var(--steel);
+  font-variant-numeric: tabular-nums;
+}
+
+.temp-avg em {
+  text-align: right;
+  margin: 0;
+}
+
+.temp-avg b {
+  display: block;
+  height: 0.42rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.temp-avg i {
+  display: block;
+  height: 100%;
+}
+
+.temp-heat {
+  display: grid;
+  gap: 0.12rem;
+  align-items: center;
+}
+
+.temp-heat span {
+  font-size: 0.42rem;
+  color: var(--steel);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.temp-heat .temp-heat-y {
+  text-align: left;
+}
+
+.temp-heat i {
+  display: block;
+  height: 0.72rem;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.temp-heat i[data-empty="true"],
+.temp-heat i[data-off="true"] {
+  background: rgba(255, 255, 255, 0.04);
+  opacity: 0.45;
+}
+
+.telem-history {
+  margin: 0.45rem 0.7rem 0.2rem;
+}
+
+.telem-history .chart-plot {
+  height: 9rem;
+}
+
+.telem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.22rem 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.telem-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  border: 0;
+  background: transparent;
+  color: var(--steel);
+  font: inherit;
+  font-size: 0.55rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.telem-legend i {
+  width: 0.55rem;
+  height: 0.55rem;
+  background: var(--signal);
+}
+
+.telem-legend button[data-off="true"] {
+  opacity: 0.35;
+}
+
+.net-panel[data-detail] {
+  cursor: pointer;
+}
+
+.net-panel[data-open="true"] {
+  border-color: var(--signal);
 }
 
 .overview-dash > .node-telem-panel {

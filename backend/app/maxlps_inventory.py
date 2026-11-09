@@ -19,6 +19,7 @@ from .models import (
     DataHall,
     HiddenRack,
     InventoryNode,
+    GpuWattSample,
     MaxLpsClusterWatt,
     MaxLpsGpu,
     MaxLpsNode,
@@ -34,9 +35,15 @@ NODES = gpu_power.NODES_PER_RACK
 GPUS = gpu_power.GPUS_PER_NODE
 SHELVES = gpu_power.SHELVES_PER_RACK
 WATT_KEEP = timedelta(hours=24)
+GPU_HIST_MIN_S = 3600
+GPU_HIST_MAX_S = 7 * 86400
+GPU_HIST_KEEP = timedelta(days=8)
+_GPU_SAMPLE_S = 30.0
 _last_prune = 0.0
 _last_write = 0.0
 _last_sync = 0.0
+_last_gpu_sample = 0.0
+_last_gpu_prune = 0.0
 
 
 _BUCKETS = {"unassigned", "rack", "inventory", "all"}
@@ -800,6 +807,112 @@ def last_watt_by_rack(db: Session) -> dict[str, dict[str, float]]:
             "gpu_kw": float(row.gpu_kw or 0.0),
         }
     return out
+
+
+def gpu_history_bounds(start: float, end: float, now: float | None = None) -> tuple[float, float]:
+    """Accept any window from 1 hour through 7 days, ending no later than now."""
+    now = time.time() if now is None else float(now)
+    start = float(start)
+    end = float(end)
+    if not end > start:
+        raise ValueError("Pick a start before the end")
+    span = end - start
+    if span < GPU_HIST_MIN_S - 1:
+        raise ValueError("Range must be at least 1 hour")
+    if span > GPU_HIST_MAX_S + 1:
+        raise ValueError("Range must be at most 7 days")
+    if start < now - GPU_HIST_MAX_S - 120:
+        raise ValueError("History starts 7 days ago")
+    if end > now + 30:
+        end = now
+    return start, end
+
+
+def bucket_watt_samples(
+    samples: list[tuple[float, float]],
+    start: float,
+    end: float,
+    points: int,
+) -> list[dict[str, float]]:
+    """Average watts in each bucket. Empty buckets stay out."""
+    points = max(1, int(points))
+    span = max(float(end) - float(start), 1.0)
+    width = span / points
+    bins = [0.0] * points
+    counts = [0] * points
+    for stamp, watts in samples:
+        if stamp < start or stamp > end:
+            continue
+        index = min(points - 1, int((stamp - start) / width))
+        bins[index] += float(watts)
+        counts[index] += 1
+    out: list[dict[str, float]] = []
+    for index, count in enumerate(counts):
+        if not count:
+            continue
+        out.append({"t": start + (index + 0.5) * width, "w": round(bins[index] / count, 1)})
+    return out
+
+
+def remember_gpu_samples() -> None:
+    """Store every GPU's watts about every 30 seconds. A quiet round does not move the clock."""
+    global _last_gpu_sample, _last_gpu_prune
+    now = time.time()
+    if now - _last_gpu_sample < _GPU_SAMPLE_S:
+        return
+    rows = gpu_power.live_watt_snapshot()
+    if not rows:
+        return
+    _last_gpu_sample = now
+    ts = datetime.now(timezone.utc)
+    try:
+        from .db import SessionLocal
+
+        with SessionLocal() as db:
+            for gid, watts in rows:
+                db.add(GpuWattSample(ts=ts, gpu_id=gid, watts=watts))
+            if now - _last_gpu_prune > 60:
+                cutoff = ts - GPU_HIST_KEEP
+                db.execute(delete(GpuWattSample).where(GpuWattSample.ts < cutoff))
+                _last_gpu_prune = now
+            db.commit()
+    except Exception:
+        return
+
+
+def gpu_watt_history(
+    db: Session,
+    gpu_id: str,
+    start: float,
+    end: float,
+    points: int = 240,
+) -> dict[str, Any]:
+    start, end = gpu_history_bounds(start, end)
+    start_dt = datetime.fromtimestamp(start - 1, timezone.utc)
+    end_dt = datetime.fromtimestamp(end + 1, timezone.utc)
+    rows = db.execute(
+        select(GpuWattSample.ts, GpuWattSample.watts)
+        .where(
+            GpuWattSample.gpu_id == gpu_id,
+            GpuWattSample.ts >= start_dt,
+            GpuWattSample.ts <= end_dt,
+        )
+        .order_by(GpuWattSample.ts.asc())
+    ).all()
+    samples: list[tuple[float, float]] = []
+    for ts, watts in rows:
+        if not isinstance(watts, (int, float)):
+            continue
+        samples.append((_watt_ts(ts), float(watts)))
+    live_w, live_t = gpu_power.live_gpu_watts(gpu_id)
+    if live_w is not None and start <= live_t <= end + 2 and (not samples or live_t > samples[-1][0] + 0.2):
+        samples.append((live_t, live_w))
+    return {
+        "id": gpu_id,
+        "from_ts": start,
+        "to_ts": end,
+        "points": bucket_watt_samples(samples, start, end, points),
+    }
 
 
 def record_from_view(db: Session, view: dict[str, Any]) -> None:
