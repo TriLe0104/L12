@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
 from ..fabric import build_fabric, live_traffic
-from ..models import DataHall, User
+from ..models import DataHall, InventoryNode, User
 from ..security import get_current_user
 
 router = APIRouter(prefix="/api/fabric", tags=["fabric"])
@@ -16,7 +16,14 @@ def _load_fabric(db: Session) -> dict:
     halls = list(
         db.scalars(select(DataHall).options(selectinload(DataHall.racks)).order_by(DataHall.name)).all()
     )
-    return build_fabric(halls)
+    inventory: list[InventoryNode] = []
+    if not any(hall.racks for hall in halls):
+        inventory = list(
+            db.scalars(
+                select(InventoryNode).where(InventoryNode.kind.in_(("compute", "leaf", "switch")))
+            ).all()
+        )
+    return build_fabric(halls, inventory)
 
 
 @router.get("")

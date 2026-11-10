@@ -228,7 +228,7 @@
   right: 0;
   bottom: 0;
   z-index: 40;
-  width: min(36rem, 96vw);
+  width: min(42rem, 96vw);
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -278,6 +278,30 @@
   margin: 0.55rem 0 0.3rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.pod-summary .temp-analytics,
+.pod-summary .telem-history {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.pod-summary .temp-stats b,
+.pod-summary .temp-chart-head em,
+.pod-summary .temp-avg em {
+  color: #f2f2f2;
+}
+
+.pod-summary .temp-note,
+.pod-summary .temp-chart-head,
+.pod-summary .temp-stats span,
+.pod-summary .temp-stats small,
+.pod-summary .temp-slots span,
+.pod-summary .temp-heat span,
+.pod-summary .telem-legend button,
+.pod-summary .chart-y span,
+.pod-summary .chart-x span {
+  color: #9a9a9a;
 }
 
 .pod-summary ul {
@@ -612,6 +636,87 @@
   color: var(--steel);
 }
 
+.overview-dash .pod-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.overview-dash .pod-card {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.overview-dash .pod-racks,
+.overview-dash .pod-racks:has(> .pod-rack[data-stencil="true"]:first-child:nth-last-child(-n+2)) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.overview-dash .pod-rack[data-stencil="true"] {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* The photo's intrinsic height was the flex base, so the stencil
+   painted past the column and hid the serial and kW. */
+.overview-dash .pod-rack-open {
+  flex: 1 1 0%;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.overview-dash .pod-rack[data-stencil="true"] .gb300-stencil,
+.overview-dash .pod-racks:has(.pod-rack[data-stencil="true"]:only-child) .gb300-stencil,
+.overview-dash .pod-racks:has(> .pod-rack[data-stencil="true"]:first-child:nth-last-child(-n+2)) .gb300-stencil {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.overview-dash .pod-rack[data-stencil="true"] .gb300-stencil[data-mode="compact"] .gb300-stencil-body {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.overview-dash .pod-rack[data-stencil="true"] .gb300-frame,
+.overview-dash .pod-rack[data-stencil="true"] .gb300-photo {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.overview-dash .pod-rack[data-stencil="true"] .gb300-photo img,
+.overview-dash .pod-rack[data-stencil="true"] .gb300-frame img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.overview-dash .pod-rack-id,
+.overview-dash .pod-rack > b {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 1200px) {
   .pod-grid {
     grid-template-columns: 1fr;
@@ -628,5 +733,9 @@
   }
   .pod-racks {
     min-height: 8.5rem;
+  }
+  .pod-tabs button,
+  .pod-view-toggle button {
+    height: 2rem;
   }
 }

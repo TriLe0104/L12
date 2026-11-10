@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { api } from "@/lib/api";
@@ -419,11 +419,16 @@ export function PodPowerBoard({
   health = null,
   selectedKey = null,
   onSelectNode,
+  rackCharts,
 }: {
   power?: PowerLimiter | null;
   health?: ClusterHealth | null;
   selectedKey?: string | null;
   onSelectNode?: (node: PickedNode) => void;
+  rackCharts?: (
+    rack: MaxLpsInvRack,
+    history: { bmc_ip: string; node_index?: number | null; rack_id?: string | null; points: { t: number; temp_c?: number | null; psu_w?: number | null }[] }[],
+  ) => ReactNode;
 }) {
   const local = usePowerLimiter(!power, 2000);
   const limiter = power ?? local.data;
@@ -433,6 +438,9 @@ export function PodPowerBoard({
   const [view, setView] = useState<InfraView>("racks");
   const [summaryId, setSummaryId] = useState<string | null>(null);
   const [provNodes, setProvNodes] = useState<InventoryNode[]>([]);
+  const [rackHist, setRackHist] = useState<
+    { bmc_ip: string; node_index?: number | null; rack_id?: string | null; points: { t: number; temp_c?: number | null; psu_w?: number | null }[] }[]
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -487,6 +495,34 @@ export function PodPowerBoard({
 
   useEffect(() => {
     if (!summaryId) return;
+    let cancelled = false;
+    let busy = false;
+    let timer = 0;
+    const pull = () => {
+      if (cancelled || busy) return;
+      busy = true;
+      const t0 = performance.now();
+      api
+        .clusterHealthHistory("1d")
+        .then((row) => {
+          if (!cancelled) setRackHist(row.nodes ?? []);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false;
+          if (cancelled) return;
+          timer = window.setTimeout(pull, Math.max(0, 5000 - (performance.now() - t0)));
+        });
+    };
+    pull();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [summaryId]);
+
+  useEffect(() => {
+    if (!summaryId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSummaryId(null);
     };
@@ -498,9 +534,10 @@ export function PodPowerBoard({
   const summaryNodes = (summary?.nodes || []).filter(presentNode);
   const summaryShelves = (summary?.shelves || []).filter(presentShelf);
   const summaryLabel = (summary?.label || "").trim().toLowerCase();
-  const summarySwitches = provNodes.filter(
-    (node) => node.kind === "switch" && (node.hall_name || "").trim().toLowerCase() === summaryLabel && summaryLabel,
-  );
+  const summarySwitches = provNodes.filter((node) => {
+    const kind = (node.kind || "").toLowerCase();
+    return (kind === "switch" || kind === "leaf") && (node.hall_name || "").trim().toLowerCase() === summaryLabel && summaryLabel;
+  });
   const shown = filter === "all" ? pods : pods.filter((p) => p.id === filter);
   const liveOn = inv.length > 0 && (live.some((r) => r.shelf_kw > 0.05) || (limiter?.active.consumed_kw ?? 0) > 0.05);
 
@@ -623,8 +660,14 @@ export function PodPowerBoard({
                   <p>
                     {summaryNodes.length} node{summaryNodes.length === 1 ? "" : "s"} available
                     {summarySwitches.length ? ` · ${summarySwitches.length} switch${summarySwitches.length === 1 ? "" : "es"}` : ""}
-                    {summaryShelves.length ? ` · ${summaryShelves.length} power shelf${summaryShelves.length === 1 ? "" : "ves"}` : ""}
+                    {summaryShelves.length ? ` · ${summaryShelves.length} power ${summaryShelves.length === 1 ? "shelf" : "shelves"}` : ""}
                   </p>
+                  {rackCharts ? (
+                    <div className="pod-summary-charts">
+                      <h3>Temperature</h3>
+                      {rackCharts(summary, rackHist)}
+                    </div>
+                  ) : null}
                   <div>
                     <h3>Nodes</h3>
                     {summaryNodes.length === 0 ? (

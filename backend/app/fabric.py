@@ -1,14 +1,15 @@
 """Spine-leaf InfiniBand fabric for the Firmus GB300 campus.
 
-One Quantum-2 leaf per rack row, eight spines in the core. Generated from
-the live hall/rack inventory so the 3D map, port table, and traffic feed
-always match.
+Eight Quantum-2 spines in the core. When the floor has cabinets, one leaf
+sits on each rack row and downlinks to those cabinets. When the floor is
+empty, TOR switches and compute nodes come from provision inventory.
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+import re
 import time
 
 from .models import DataHall, Rack
@@ -22,26 +23,184 @@ def _hid(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()[:10]
 
 
-def build_fabric(halls: list[DataHall]) -> dict:
-    nodes: list[dict] = []
-    links: list[dict] = []
-    ports: list[dict] = []
+def _order_key(name: str) -> tuple:
+    match = re.search(r"(\d+)$", name or "")
+    return (int(match.group(1)) if match else 10**9, name or "")
 
-    spines = []
-    for i in range(SPINE_COUNT):
-        node = {
-            "id": f"SP-{i + 1:02d}",
-            "name": f"SP-{i + 1:02d}",
-            "label": f"Quantum-2 Spine {i + 1:02d}",
-            "role": "spine",
-            "hall_id": None,
-            "hall_name": None,
-            "row": None,
-            "ports": 64,
-        }
-        spines.append(node)
-        nodes.append(node)
 
+def _short_name(name: str) -> str:
+    text = (name or "node").strip()
+    match = re.search(r"(slot\d+|sw\d+|[A-Za-z]*\d+)$", text, re.I)
+    if match and len(text) > 14:
+        return match.group(1)
+    return text[:24]
+
+
+def _attach_inventory(inventory: list, nodes: list[dict], links: list[dict], ports: list[dict], spines: list[dict]) -> None:
+    """TOR leaves and compute hosts when the floor has no cabinets.
+
+    Hosts stay in name order and split evenly across the TOR switches in
+    the same hall, so slot 0 and slot 1 sit on sw0. Each TOR uplinks to
+    every spine. The map draws those uplinks only for the selected switch.
+    """
+    leaves = [row for row in inventory if (getattr(row, "kind", "") or "") in ("leaf", "switch")]
+    hosts = [row for row in inventory if (getattr(row, "kind", "") or "") == "compute"]
+    groups: dict[str, dict[str, list]] = {}
+    for row in leaves + hosts:
+        hall = (getattr(row, "hall_name", None) or "Hall").strip() or "Hall"
+        bucket = groups.setdefault(hall, {"leaves": [], "hosts": []})
+        bucket["leaves" if row in leaves else "hosts"].append(row)
+    seen: set[str] = set()
+
+    def unique(raw: str) -> str:
+        base = raw or "node"
+        name = base
+        n = 2
+        while name in seen:
+            name = f"{base}-{n}"
+            n += 1
+        seen.add(name)
+        return name
+
+    leaf_i = 0
+    for hall_name in sorted(groups):
+        group = groups[hall_name]
+        group_leaves = sorted(group["leaves"], key=lambda row: _order_key(getattr(row, "name", "") or ""))
+        group_hosts = sorted(group["hosts"], key=lambda row: _order_key(getattr(row, "name", "") or ""))
+        if not group_leaves:
+            continue
+        leaf_ids: list[str] = []
+        for row in group_leaves:
+            leaf_id = unique((getattr(row, "name", None) or getattr(row, "id", None) or "leaf").strip())
+            leaf_ids.append(leaf_id)
+            nodes.append(
+                {
+                    "id": leaf_id,
+                    "name": leaf_id,
+                    "label": f"TOR {_short_name(leaf_id)}",
+                    "role": "leaf",
+                    "hall_id": None,
+                    "hall_name": hall_name,
+                    "row": 1,
+                    "ports": 64,
+                }
+            )
+        n_leaves = len(leaf_ids)
+        per_leaf: list[list] = [[] for _ in leaf_ids]
+        for index, row in enumerate(group_hosts):
+            per_leaf[min(n_leaves - 1, index * n_leaves // len(group_hosts))].append(row)
+        for li, leaf_id in enumerate(leaf_ids):
+            for col, row in enumerate(per_leaf[li]):
+                full = (getattr(row, "name", None) or getattr(row, "id", None) or "node").strip()
+                host_id = unique(f"host:{getattr(row, 'id', None) or full}")
+                short = _short_name(full)
+                active = bool(getattr(row, "os_ip", None) or getattr(row, "bmc_ip", None))
+                state = "Active" if active else "Down"
+                nodes.append(
+                    {
+                        "id": host_id,
+                        "name": short,
+                        "label": full,
+                        "role": "rack",
+                        "hall_id": None,
+                        "hall_name": hall_name,
+                        "row": 1,
+                        "ports": 1,
+                        "power_state": "on" if active else "off",
+                    }
+                )
+                down_port = col + 1
+                links.append(
+                    {
+                        "id": f"{leaf_id}->{host_id}",
+                        "from_id": leaf_id,
+                        "to_id": host_id,
+                        "from_name": leaf_id,
+                        "to_name": full,
+                        "from_port": str(down_port),
+                        "to_port": "1",
+                        "role": "downlink",
+                        "speed": LINK_SPEED,
+                        "state": state,
+                        "hall_id": None,
+                    }
+                )
+                ports.append(
+                    {
+                        "local_system": leaf_id,
+                        "local_port": str(down_port),
+                        "peer_system": full,
+                        "peer_port": "1",
+                        "state": state,
+                        "speed": LINK_SPEED if active else "N/A",
+                        "cable_pn": "MCP7Y00-N003",
+                        "role": "downlink",
+                        "hall_name": hall_name,
+                    }
+                )
+                ports.append(
+                    {
+                        "local_system": full,
+                        "local_port": "1",
+                        "peer_system": leaf_id,
+                        "peer_port": str(down_port),
+                        "state": state,
+                        "speed": LINK_SPEED if active else "N/A",
+                        "cable_pn": "MCP7Y00-N003",
+                        "role": "host",
+                        "hall_name": hall_name,
+                    }
+                )
+            for si, spine in enumerate(spines):
+                if leaf_i >= 64:
+                    break
+                up_port = 33 + si
+                spine_port = leaf_i + 1
+                links.append(
+                    {
+                        "id": f"{leaf_id}->{spine['id']}",
+                        "from_id": leaf_id,
+                        "to_id": spine["id"],
+                        "from_name": leaf_id,
+                        "to_name": spine["id"],
+                        "from_port": str(up_port),
+                        "to_port": str(spine_port),
+                        "role": "uplink",
+                        "speed": LINK_SPEED,
+                        "state": "Active",
+                        "hall_id": None,
+                    }
+                )
+                ports.append(
+                    {
+                        "local_system": leaf_id,
+                        "local_port": str(up_port),
+                        "peer_system": spine["id"],
+                        "peer_port": str(spine_port),
+                        "state": "Active",
+                        "speed": LINK_SPEED,
+                        "cable_pn": "MMA4Z00-NS",
+                        "role": "uplink",
+                        "hall_name": hall_name,
+                    }
+                )
+                ports.append(
+                    {
+                        "local_system": spine["id"],
+                        "local_port": str(spine_port),
+                        "peer_system": leaf_id,
+                        "peer_port": str(up_port),
+                        "state": "Active",
+                        "speed": LINK_SPEED,
+                        "cable_pn": "MMA4Z00-NS",
+                        "role": "spine",
+                        "hall_name": hall_name,
+                    }
+                )
+            leaf_i += 1
+
+
+def _add_floor_halls(halls: list[DataHall], nodes: list[dict], links: list[dict], ports: list[dict], spines: list[dict]) -> None:
     for hall in halls:
         rows: dict[int, list[Rack]] = {}
         for rack in hall.racks:
@@ -166,6 +325,32 @@ def build_fabric(halls: list[DataHall]) -> dict:
                         "hall_name": hall.name,
                     }
                 )
+
+
+def build_fabric(halls: list[DataHall], inventory: list | None = None) -> dict:
+    nodes: list[dict] = []
+    links: list[dict] = []
+    ports: list[dict] = []
+
+    spines = []
+    for i in range(SPINE_COUNT):
+        node = {
+            "id": f"SP-{i + 1:02d}",
+            "name": f"SP-{i + 1:02d}",
+            "label": f"Quantum-2 Spine {i + 1:02d}",
+            "role": "spine",
+            "hall_id": None,
+            "hall_name": None,
+            "row": None,
+            "ports": 64,
+        }
+        spines.append(node)
+        nodes.append(node)
+
+    if any(getattr(hall, "racks", None) for hall in halls):
+        _add_floor_halls(halls, nodes, links, ports, spines)
+    else:
+        _attach_inventory(inventory or [], nodes, links, ports, spines)
 
     for p in ports:
         if p["role"] == "host":

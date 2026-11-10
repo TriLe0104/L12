@@ -214,19 +214,6 @@ function isGpuTemp(t: TempItem) {
   return /ProcessorModule_|GPU\s*\d/i.test(`${t.name || ""} ${t.label || ""}`);
 }
 
-function tempKindLabel(t: TempItem) {
-  if (isNicTemp(t)) return "NIC";
-  const s = `${t.name || ""} ${t.label || ""} ${t.context || ""}`;
-  if (isGpuTemp(t)) return /exhaust/i.test(s) ? "GPU exh" : "GPU";
-  if (/inlet/i.test(s)) return "Inlet";
-  if (/exhaust/i.test(s)) return "Exhaust";
-  if (/cpu|dimm|memory/i.test(s)) return "CPU";
-  if (/ssd|nvme|drive/i.test(s)) return "Drive";
-  if (/\bbmc\b/i.test(s)) return "BMC";
-  if (/front.?io|io.?board/i.test(s)) return "I/O";
-  return t.context || "Sensor";
-}
-
 function gpuIndexFromName(name?: string | null) {
   const m = String(name || "").match(/ProcessorModule_(\d+)_(?:Inlet|Exhaust)_Temp_(\d+)/i);
   if (!m) return null;
@@ -730,6 +717,7 @@ type TempSlot = {
   key: string;
   slot: string;
   host: string;
+  rack: string;
   gpus: (number | null)[];
   inlet: number | null;
   exhaust: number | null;
@@ -746,6 +734,7 @@ function tempSlots(
       key: row.key,
       slot: `n${String(row.index).padStart(2, "0")}`,
       host: row.hostname || row.rack.label,
+      rack: row.rack.label,
       gpus: gpuTemps(live).map((g) => num(g.celsius)),
       inlet: num(live?.thermal?.inlet_c),
       exhaust: num(live?.thermal?.exhaust_c),
@@ -1053,6 +1042,264 @@ function PsuAnalytics({
   );
 }
 
+function ClusterTemp({
+  nodes,
+  health,
+  history,
+  historyWindow,
+}: {
+  nodes: { key: string; index: number; hostname: string | null; bmcIp: string; rack: { label: string } }[];
+  health: ClusterHealth | null;
+  history: NodeHist[];
+  historyWindow: number;
+}) {
+  const slots = tempSlots(nodes, health);
+  const points = slots.flatMap((row) =>
+    row.gpus.flatMap((celsius, gpu) => (celsius == null ? [] : [{ slot: row.slot, rack: row.rack, gpu, celsius }])),
+  );
+  if (!points.length) return <p className="telem-list-empty">No GPU temperatures yet.</p>;
+  const hottest = points.reduce((best, row) => (row.celsius > best.celsius ? row : best));
+  const coolest = points.reduce((best, row) => (row.celsius < best.celsius ? row : best));
+  const average = points.reduce((sum, row) => sum + row.celsius, 0) / points.length;
+  const spread = Math.max(hottest.celsius - coolest.celsius, 0.5);
+  const bins = 6;
+  const width = spread / bins;
+  const counts = Array.from({ length: bins }, () => 0);
+  for (const row of points) {
+    let index = Math.floor((row.celsius - coolest.celsius) / width);
+    if (index < 0) index = 0;
+    if (index >= bins) index = bins - 1;
+    counts[index] += 1;
+  }
+  const peakCount = Math.max(...counts, 1);
+  const byGpu = [0, 1, 2, 3].map((gpu) => {
+    const vals = points.filter((row) => row.gpu === gpu).map((row) => row.celsius);
+    if (!vals.length) return null;
+    return {
+      gpu,
+      avg: vals.reduce((sum, value) => sum + value, 0) / vals.length,
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+    };
+  });
+  const racks = [...new Set(slots.map((row) => row.rack))];
+  const byRack = racks.map((rack) => {
+    const vals = points.filter((row) => row.rack === rack).map((row) => row.celsius);
+    if (!vals.length) return null;
+    return {
+      rack,
+      avg: vals.reduce((sum, value) => sum + value, 0) / vals.length,
+      max: Math.max(...vals),
+    };
+  }).filter((row): row is { rack: string; avg: number; max: number } => row != null);
+  const inlets = slots.map((row) => row.inlet).filter((value): value is number => value != null);
+  const exhausts = slots.map((row) => row.exhaust).filter((value): value is number => value != null);
+  const mean = (vals: number[]) => (vals.length ? vals.reduce((sum, value) => sum + value, 0) / vals.length : null);
+  const reporting = slots.filter((row) => row.gpus.some((value) => value != null)).length;
+  const warm = points.filter((row) => row.celsius >= 75).length;
+  const hot = points.filter((row) => row.celsius >= 85).length;
+  const lo = coolest.celsius;
+  const hi = Math.max(hottest.celsius, lo + 0.5);
+  const span = hi - lo;
+  const byTime = new Map<number, number[]>();
+  for (const node of history) {
+    for (const point of node.points) {
+      if (point.temp_c == null || !Number.isFinite(point.temp_c)) continue;
+      const list = byTime.get(point.t) ?? [];
+      list.push(point.temp_c);
+      byTime.set(point.t, list);
+    }
+  }
+  const times = [...byTime.keys()].sort((a, b) => a - b);
+  const clusterHot = times.map((t) => ({ t, v: Math.max(...(byTime.get(t) ?? [0])) }));
+  const clusterAvg = times.map((t) => {
+    const vals = byTime.get(t) ?? [];
+    return { t, v: vals.reduce((sum, value) => sum + value, 0) / vals.length };
+  });
+  const drawn = [
+    { id: "hot", label: "Cluster hottest", color: "#e10600", points: clusterHot },
+    { id: "avg", label: "Cluster average", color: "#5b9dff", points: clusterAvg },
+  ].filter((series) => series.points.length > 0);
+  const histVals = drawn.flatMap((series) => series.points.map((point) => point.v));
+  const histLo = histVals.length ? Math.min(...histVals) : 0;
+  const histHi = histVals.length ? Math.max(...histVals) : 1;
+  const histPad = Math.max(0.4, (histHi - histLo) * 0.25);
+  const yLo = histLo - histPad;
+  const yHi = histHi + histPad;
+  const histSpan = telemDrawSpan(historyWindow, times);
+  const histEnd = times.length ? times[times.length - 1] : 0;
+  const histStart = histEnd - histSpan;
+  const W = 640;
+  const H = 120;
+  const xOf = (t: number) => ((t - histStart) / histSpan) * W;
+  const yOf = (v: number) => ((yHi - v) / Math.max(yHi - yLo, 0.5)) * H;
+  const lineFor = (series: { t: number; v: number }[]) => {
+    const seq = series.length === 1 ? [{ t: series[0].t - histSpan * 0.2, v: series[0].v }, series[0]] : series;
+    return seq.map((point) => `${xOf(point.t).toFixed(1)},${yOf(point.v).toFixed(1)}`).join(" ");
+  };
+  return (
+    <div className="temp-analytics" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="temp-stats">
+        <div>
+          <span>Hottest</span>
+          <b data-status={tempTone(hottest.celsius)}>{fmtC(hottest.celsius)}</b>
+          <small>
+            {hottest.rack} · {hottest.slot} · GPU {hottest.gpu}
+          </small>
+        </div>
+        <div>
+          <span>Average</span>
+          <b>{average.toFixed(1)}°C</b>
+          <small>{points.length} GPUs</small>
+        </div>
+        <div>
+          <span>Coolest</span>
+          <b>{fmtC(coolest.celsius)}</b>
+          <small>
+            {coolest.slot} · GPU {coolest.gpu}
+          </small>
+        </div>
+        <div>
+          <span>Spread</span>
+          <b>{(hottest.celsius - coolest.celsius).toFixed(1)}°C</b>
+          <small>across the cluster</small>
+        </div>
+        <div>
+          <span>Reporting</span>
+          <b>
+            {reporting}/{slots.length}
+          </b>
+          <small>
+            {racks.length} rack{racks.length === 1 ? "" : "s"}
+          </small>
+        </div>
+        <div>
+          <span>75°C or hotter</span>
+          <b data-status={hot ? "critical" : warm ? "warning" : "ok"}>{warm}</b>
+          <small>{hot ? `${hot} at 85°C+` : "GPUs"}</small>
+        </div>
+      </div>
+      <p className="temp-note">
+        {hot
+          ? `${hot} GPUs are at 85°C or hotter.`
+          : warm
+            ? `${warm} GPUs are at 75°C or hotter.`
+            : "Every reporting GPU is under 75°C."}
+        {mean(inlets) != null ? ` Inlet ${fmtC(mean(inlets))}.` : ""}
+        {mean(exhausts) != null ? ` Exhaust ${fmtC(mean(exhausts))}.` : ""}
+        {" Node charts open from a rack in Live Infrastructure."}
+      </p>
+      <div className="temp-chart-head">
+        <span>Cluster GPU temperature</span>
+        <em>
+          {coolest.celsius.toFixed(0)}–{hottest.celsius.toFixed(0)}°C
+        </em>
+      </div>
+      <div className="temp-avg">
+        {byGpu.map((row, index) => (
+          <div key={index}>
+            <span>GPU {index}</span>
+            <b title={row ? `${row.min.toFixed(1)}–${row.max.toFixed(1)}°C` : undefined}>
+              <i
+                style={{
+                  marginLeft: row ? `${((row.min - lo) / span) * 100}%` : 0,
+                  width: row ? `${Math.max(4, ((row.max - row.min) / span) * 100)}%` : "0%",
+                  background: GPU_COLORS[index],
+                }}
+              />
+            </b>
+            <em>{row ? `${row.avg.toFixed(1)}°C` : "—"}</em>
+          </div>
+        ))}
+      </div>
+      <div className="temp-chart-head">
+        <span>GPUs in each band</span>
+      </div>
+      <div className="temp-avg">
+        {counts.map((count, index) => {
+          const from = coolest.celsius + index * width;
+          const to = from + width;
+          return (
+            <div key={from}>
+              <span>
+                {from.toFixed(0)}–{to.toFixed(0)}
+              </span>
+              <b>
+                <i style={{ width: `${Math.max(count ? 4 : 0, (count / peakCount) * 100)}%`, background: heatColor(index / Math.max(bins - 1, 1)) }} />
+              </b>
+              <em>{count}</em>
+            </div>
+          );
+        })}
+      </div>
+      {byRack.length > 1 ? (
+        <>
+          <div className="temp-chart-head">
+            <span>By rack</span>
+          </div>
+          <div className="temp-avg">
+            {byRack.map((row) => (
+              <div key={row.rack}>
+                <span>{row.rack}</span>
+                <b>
+                  <i style={{ width: `${Math.max(4, ((row.avg - lo) / span) * 100)}%`, background: "#e10600" }} />
+                </b>
+                <em>
+                  {row.avg.toFixed(1)}°C · {row.max.toFixed(0)} hot
+                </em>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {drawn.length ? (
+        <>
+          <div className="temp-chart-head">
+            <span>Cluster history</span>
+            <em>{telemCaption(historyWindow >= 7 * 86400 ? "1w" : historyWindow >= 3 * 86400 ? "3d" : "1d", times)}</em>
+          </div>
+          <div className="telem-history">
+            <div className="chart-plot">
+              <div className="chart-y" aria-hidden>
+                {[
+                  { y: 0, text: fmtC(yHi) },
+                  { y: 50, text: fmtC((yHi + yLo) / 2) },
+                  { y: 100, text: fmtC(yLo) },
+                ].map((tick) => (
+                  <span key={tick.y} style={{ top: `${tick.y}%`, transform: tickTransform(tick.y) }}>
+                    {tick.text}
+                  </span>
+                ))}
+              </div>
+              <svg className="net-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Cluster temperature">
+                <line x1="0" x2={W} y1={H / 2} y2={H / 2} className="net-grid" />
+                {drawn.map((series) => (
+                  <polyline key={series.id} points={lineFor(series.points)} fill="none" stroke={series.color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+                ))}
+              </svg>
+              <div className="chart-x">
+                {[histStart, histStart + histSpan / 2, histEnd].map((stamp, index) => (
+                  <span key={`${index}-${stamp}`}>{axisTime(stamp, histSpan)}</span>
+                ))}
+              </div>
+            </div>
+            <div className="telem-legend">
+              {drawn.map((series) => (
+                <button key={series.id} type="button">
+                  <i style={{ background: series.color }} />
+                  {series.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="temp-note">Cluster history is still collecting.</p>
+      )}
+    </div>
+  );
+}
+
 function TelemList({
   kind,
   health,
@@ -1120,9 +1367,11 @@ function TelemList({
           ×
         </button>
       </header>
-      {kind === "temperature" ? <TempAnalytics nodes={nodes} health={health} /> : null}
+      {kind === "temperature" ? (
+        <ClusterTemp nodes={nodes} health={health} history={history ?? []} historyWindow={historyWindow ?? 86400} />
+      ) : null}
       {kind === "psu" ? <PsuAnalytics nodes={nodes} health={health} /> : null}
-      {(kind === "temperature" || kind === "psu") && (history ?? []).some((node) => node.points.length > 0) ? (
+      {kind === "psu" && (history ?? []).some((node) => node.points.length > 0) ? (
         <NodeHistoryChart kind={kind} nodes={history ?? []} windowSec={historyWindow ?? 86400} inv={inv} />
       ) : null}
       {kind === "racks" ? (
@@ -1176,7 +1425,7 @@ function TelemList({
             </tbody>
           </table>
         )
-      ) : nodes.length === 0 ? (
+      ) : kind === "temperature" ? null : nodes.length === 0 ? (
         <p className="telem-list-empty">No compute node with a BMC address.</p>
       ) : (
         <table className="telem-list-table">
@@ -1241,68 +1490,6 @@ function TelemList({
                     )),
                   ];
                 })
-              : kind === "temperature"
-                ? nodes.flatMap((row) => {
-                    const live = liveForIp(health, row.bmcIp);
-                    const temps = sortedTemps(live?.thermal?.temps);
-                    const gpus = gpuTemps(live);
-                    const slot = `n${String(row.index).padStart(2, "0")}`;
-                    const host = row.hostname || row.rack.label;
-                    const open = Boolean(openKeys[row.key]);
-                    const head = (
-                      <tr key={row.key} onClick={() => pick(row)}>
-                        <td>
-                          <button
-                            type="button"
-                            className="telem-exp"
-                            aria-expanded={open}
-                            aria-label={open ? "Collapse temperatures" : "Expand temperatures"}
-                            onClick={(e) => toggleOpen(row.key, e)}
-                          >
-                            {open ? "▾" : "▸"}
-                          </button>
-                          {slot}
-                          <small>{host}</small>
-                        </td>
-                        {gpus.map((g) => (
-                          <td key={g.index} data-status={tempTone(g.celsius)}>
-                            {fmtC(g.celsius)}
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                    if (!open) return [head];
-                    if (!temps.length) {
-                      return [
-                        head,
-                        <tr key={`${row.key}:empty`} className="telem-sub">
-                          <td colSpan={5}>No temperature sensors.</td>
-                        </tr>,
-                      ];
-                    }
-                    return [
-                      head,
-                      <tr key={`${row.key}:subh`} className="telem-sub telem-sub-head">
-                        <td>Sensor</td>
-                        <td colSpan={2}>Kind</td>
-                        <td colSpan={2}>Temp</td>
-                      </tr>,
-                      ...temps.map((t, i) => {
-                        const nic = isNicTemp(t);
-                        return (
-                          <tr key={`${row.key}:${t.name || t.label || i}`} className="telem-sub" onClick={() => pick(row)}>
-                            <td>{t.label || t.name || "sensor"}</td>
-                            <td colSpan={2} data-kind={nic ? "nic" : undefined}>
-                              {tempKindLabel(t)}
-                            </td>
-                            <td colSpan={2} data-status={live?.thermal?.status || live?.status}>
-                              {fmtC(t.celsius)}
-                            </td>
-                          </tr>
-                        );
-                      }),
-                    ];
-                  })
               : kind === "power_shelf"
                 ? nodes.flatMap((row) => {
                     const live = liveForIp(health, row.bmcIp);
@@ -2177,7 +2364,7 @@ export function OverviewDash() {
       onPointerDownCapture={(e) => {
         if (!telem && !picked) return;
         const el = e.target as HTMLElement;
-        if (el.closest(".telem-list, .node-telem-panel, .node-console, .gb300-node-hit, .pod-node, .pod-node-pick")) return;
+        if (el.closest(".telem-list, .node-telem-panel, .node-console, .gb300-node-hit, .pod-node, .pod-node-pick, .pod-rack, .pod-summary")) return;
         if (el.closest(".summary-strip button, .net-panel[data-detail]")) return;
         closeOverlays();
         e.stopPropagation();
@@ -2279,6 +2466,22 @@ export function OverviewDash() {
         health={health}
         selectedKey={picked?.key ?? null}
         onSelectNode={pickNode}
+        rackCharts={(rack, history) => {
+          const rows = populatedNodes([rack], health);
+          const ips = new Set(rows.map((row) => row.bmcIp));
+          const mine = history.filter((node) => (node.bmc_ip && ips.has(node.bmc_ip)) || node.rack_id === rack.id);
+          const hasHist = mine.some((node) => node.points.some((point) => point.temp_c != null));
+          return (
+            <>
+              <TempAnalytics nodes={rows} health={health} />
+              {hasHist ? (
+                <NodeHistoryChart kind="temperature" nodes={mine} windowSec={86400} inv={[rack]} />
+              ) : (
+                <p className="telem-list-empty">Node temperature history is still collecting.</p>
+              )}
+            </>
+          );
+        }}
       />
       {telem ? (
         <TelemList
@@ -2308,6 +2511,7 @@ export function OverviewDash() {
         />
       ) : null}
       <div className="chart-row">
+        <div className="chart-controls">
         <div className="range-bar">
           <span>Range</span>
           {RANGE_OPTS.map((opt) => (
@@ -2346,6 +2550,24 @@ export function OverviewDash() {
           )}
           <em>{windowLabel}</em>
         </div>
+        <div className="range-bar">
+          <span>History</span>
+          {TELEM_RANGES.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              data-active={telemRange === opt.id}
+              onClick={() => {
+                setTelemRange(opt.id);
+                setData((prev) => (prev ? { ...prev, telemetry: [] } : prev));
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <em>{telemCaption(telemRange, (data.telemetry ?? []).map((p) => p.t))}</em>
+        </div>
+        </div>
         <article className="net-panel">
           <header>
             <h2>Rack power</h2>
@@ -2373,23 +2595,6 @@ export function OverviewDash() {
             <p className="widget-empty">No registered cluster</p>
           )}
         </article>
-        <div className="range-bar">
-          <span>History</span>
-          {TELEM_RANGES.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              data-active={telemRange === opt.id}
-              onClick={() => {
-                setTelemRange(opt.id);
-                setData((prev) => (prev ? { ...prev, telemetry: [] } : prev));
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-          <em>{telemCaption(telemRange, (data.telemetry ?? []).map((p) => p.t))}</em>
-        </div>
         <article
           className="net-panel"
           data-detail="temperature"

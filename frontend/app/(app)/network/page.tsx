@@ -114,9 +114,8 @@ function FabricMap({
   const hot = useMemo(() => new Set((live?.links ?? []).slice(0, 12).map((l) => l.id)), [live]);
   const layout = useMemo(() => {
     const spines = topo.nodes.filter((n) => n.role === "spine");
-    const leaves = topo.nodes.filter(
-      (n) => n.role === "leaf" && (!hallFilter || n.hall_name === hallFilter),
-    );
+    const leaves = topo.nodes.filter((n) => n.role === "leaf" && (!hallFilter || n.hall_name === hallFilter));
+    const hosts = topo.nodes.filter((n) => n.role === "rack" && (!hallFilter || n.hall_name === hallFilter));
     const halls = [...new Set(leaves.map((n) => n.hall_name).filter(Boolean))] as string[];
     const W = 1280;
     const boxes: Box[] = [];
@@ -126,7 +125,7 @@ function FabricMap({
       boxes.push({
         id: n.id,
         x: 60 + i * gap,
-        y: 48,
+        y: 36,
         w: spineW,
         h: 42,
         label: n.name,
@@ -134,73 +133,85 @@ function FabricMap({
         role: "spine",
       });
     });
-    const colW = W / Math.max(halls.length, 1);
-    const cols = hallFilter ? 4 : 2;
-    leaves.forEach((n) => {
-      const hi = Math.max(0, halls.indexOf(n.hall_name ?? ""));
-      const rowLeaves = leaves.filter((l) => l.hall_name === n.hall_name);
-      const ri = rowLeaves.findIndex((l) => l.id === n.id);
-      const col = ri % cols;
-      const row = Math.floor(ri / cols);
-      const cellW = hallFilter ? 140 : 128;
-      boxes.push({
-        id: n.id,
-        x: hi * colW + 28 + col * cellW,
-        y: 168 + row * 54,
-        w: hallFilter ? 124 : 112,
-        h: 40,
-        label: n.name.replace(`${n.hall_name}-`, ""),
-        sub: n.hall_name ?? "leaf",
-        role: "leaf",
+    const short = (name: string, hall?: string | null) => {
+      let text = name || "";
+      if (hall && text.startsWith(`${hall}-`)) text = text.slice(hall.length + 1);
+      if (text.length <= 14) return text;
+      const tail = text.match(/(?:slot|sw|lf|n)\d+$/i) || text.match(/[A-Za-z]*\d+$/);
+      return tail ? tail[0] : text.slice(-12);
+    };
+    const gutter = 72;
+    const placeRow = (items: FabricNode[], y: number, role: string, maxW: number, h: number, sub: string) => {
+      if (!items.length) return y;
+      const gapX = 8;
+      const inner = W - gutter - 20;
+      const w = Math.max(46, Math.min(maxW, (inner - gapX * (items.length - 1)) / items.length));
+      items.forEach((n, i) => {
+        boxes.push({
+          id: n.id,
+          x: gutter + i * (w + gapX),
+          y,
+          w,
+          h,
+          label: short(n.name, n.hall_name),
+          sub,
+          role,
+        });
       });
-    });
-    const selected = topo.nodes.find((n) => n.id === selectedId);
-    const rackNodes = topo.nodes.filter((n) => {
-      if (n.role !== "rack") return false;
-      if (selected?.role === "leaf") return n.hall_name === selected.hall_name && n.row === selected.row;
-      if (hallFilter) return n.hall_name === hallFilter && selected?.role === "rack" && n.row === selected.row;
-      return false;
-    });
-    rackNodes.forEach((n, i) => {
-      const count = Math.max(rackNodes.length, 1);
-      const w = 92;
-      const total = count * (w + 10) - 10;
-      const x0 = (W - total) / 2;
-      boxes.push({
-        id: n.id,
-        x: x0 + i * (w + 10),
-        y: 430,
-        w,
-        h: 36,
-        label: n.name,
-        sub: "HCA",
-        role: "rack",
-      });
+      return y + h;
+    };
+    let y = 118;
+    let torY = 0;
+    const hallBands: { name: string; y: number }[] = [];
+    const hallRows = halls.length ? halls : leaves.length ? [leaves[0].hall_name || ""] : [];
+    for (const hall of hallRows) {
+      const rowLeaves = leaves.filter((n) => (hall ? n.hall_name === hall : true));
+      if (!rowLeaves.length) continue;
+      if (!torY) torY = y;
+      hallBands.push({ name: hall, y });
+      y = placeRow(rowLeaves, y, "leaf", 112, 40, "TOR") + (hallRows.length > 1 ? 28 : 0);
+    }
+    const per = hosts.length > 18 ? Math.ceil(hosts.length / 2) : hosts.length;
+    const hostRows = [hosts.slice(0, per), hosts.slice(per)].filter((row) => row.length);
+    let hostY = 0;
+    if (hostRows.length) y += 56;
+    hostRows.forEach((row, index) => {
+      if (!hostY) hostY = y;
+      y = placeRow(row, y, "rack", 70, 36, "node");
+      if (index < hostRows.length - 1) y += 16;
     });
     const byId = new Map(boxes.map((b) => [b.id, b]));
-    const links = topo.links.filter((l) => byId.has(l.from_id) && byId.has(l.to_id));
-    return { boxes, byId, links, halls, W, hasRacks: rackNodes.length > 0 };
+    const links = topo.links.filter((l) => {
+      if (!byId.has(l.from_id) || !byId.has(l.to_id)) return false;
+      if (l.role === "uplink") return selectedId === l.from_id || selectedId === l.to_id;
+      return true;
+    });
+    return { boxes, byId, links, hallBands, W, height: Math.max(y + 48, 300), torY, hostY };
   }, [topo, hallFilter, selectedId]);
 
   return (
     <div className="network-map-canvas">
-      <svg viewBox={`0 0 ${layout.W} ${layout.hasRacks ? 500 : 420}`} role="img" aria-label="Spine-leaf fabric map">
-        <text className="nmap-label" x={layout.W / 2} y={24}>
+      <svg viewBox={`0 0 ${layout.W} ${layout.height}`} role="img" aria-label="Spine, TOR, and node map">
+        <text className="nmap-label" x={layout.W / 2} y={22}>
           SPINE LAYER · {topo.summary.spines}× QUANTUM-2
         </text>
-        {layout.halls.map((h, i) => {
-          const colW = layout.W / layout.halls.length;
-          return (
-            <text key={h} className="nmap-hall" x={i * colW + 28} y={148}>
-              {h}
-            </text>
-          );
-        })}
-        {layout.hasRacks && (
-          <text className="nmap-label" x={layout.W / 2} y={414}>
-            HOSTS
+        {layout.torY ? (
+          <text className="nmap-label nmap-side" x={12} y={layout.torY + 24}>
+            TOR
           </text>
-        )}
+        ) : null}
+        {layout.hallBands.length > 1
+          ? layout.hallBands.map((hall) => (
+              <text key={hall.name} className="nmap-hall" x={78} y={hall.y - 8}>
+                {hall.name}
+              </text>
+            ))
+          : null}
+        {layout.hostY ? (
+          <text className="nmap-label nmap-side" x={12} y={layout.hostY + 22}>
+            NODES
+          </text>
+        ) : null}
         {layout.links.map((l) => {
           const a = layout.byId.get(l.from_id)!;
           const b = layout.byId.get(l.to_id)!;
@@ -419,12 +430,15 @@ export default function NetworkPage() {
                 <b data-k="spine" /> Spine
               </span>
               <span>
-                <b /> Leaf
+                <b /> TOR
               </span>
               <span>
-                <b data-k="up" /> Uplink 800G
+                <b data-k="node" /> Node
               </span>
-              <span>Click a leaf to expand hosts</span>
+              <span>
+                <b data-k="up" /> Spine uplink
+              </span>
+              <span>TOR to node stays on. Spine uplinks follow the switch you select.</span>
             </div>
           </div>
           <aside className="network-side">
@@ -434,7 +448,7 @@ export default function NetworkPage() {
                 <>
                   <strong>{selected.label}</strong>
                   <span>
-                    {selected.id} · {selected.role.toUpperCase()}
+                    {selected.id} · {selected.role === "leaf" ? "TOR" : selected.role === "rack" ? "NODE" : selected.role.toUpperCase()}
                   </span>
                 </>
               ) : (
@@ -454,7 +468,7 @@ export default function NetworkPage() {
                     <dl className="side-meta">
                       <div>
                         <dt>Role</dt>
-                        <dd>{selected.role}</dd>
+                        <dd>{selected.role === "leaf" ? "TOR" : selected.role === "rack" ? "node" : selected.role}</dd>
                       </div>
                       <div>
                         <dt>Hall</dt>

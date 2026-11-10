@@ -142,6 +142,12 @@
   text-anchor: middle;
 }
 
+.nmap-label.nmap-side {
+  text-anchor: start;
+  letter-spacing: 0.12em;
+  font-size: 9px;
+}
+
 .nmap-hall {
   fill: #7a7a7a;
   font-size: 11px;
@@ -175,6 +181,14 @@
 
 .network-legend b[data-k="spine"] {
   border-color: var(--signal);
+}
+
+.network-legend b[data-k="node"] {
+  background: var(--paper);
+}
+
+.nmap-node[data-role="rack"] text {
+  font-size: 9px;
 }
 
 .network-legend b[data-k="up"] {
